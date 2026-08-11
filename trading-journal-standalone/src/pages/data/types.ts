@@ -1,0 +1,130 @@
+export type Trade = {
+  id: number;
+  trade_number: number | null;
+  start_capital: number | null;
+  end_capital: number | null;
+  gain_loss: number | null;
+  gain_loss_pct: number | null;
+  overall_gain: number;
+  overall_pct: number;
+  structure_15m: string | null;
+  wr_1m: string | null;
+  before_chart_1m: string | null;
+  direction: string;
+  liquidity_swept: string | null;
+  distance_from_asia: number | null;
+  liquidity_swept_no: number | null;
+  cisd_break: number | null;
+  total_inverse_candles: number | null;
+  inverse_candle_size: number | null;
+  sl_pips: number | null;
+  position_size: number | null;
+  profit_loss: string | null;
+  rr: number | null;
+  coin_token: string | null;
+  trade_placed_at: string | null;
+  trade_executed_at: string | null;
+  session_in: string | null;
+  date_closed: string | null;
+  time_closed: string | null;
+  closed_session: string | null;
+  trade_duration: string | null;
+  partial_1: number | null;
+  partial_2: number | null;
+  reached_1r2: boolean;
+  reached_1r3: boolean;
+  reached_1r4: boolean;
+  reached_1r5: boolean;
+  max_rr: number | null;
+  comments: string | null;
+  extra_data: Record<string, unknown>;
+  created_at: string;
+};
+
+export type Condition = { field: string; op: string; value: number };
+
+export type Strategy = {
+  id: number;
+  name: string;
+  conditions: Condition[];
+  days: number[] | null; // 0=Sun..6=Sat; empty/null = all days allowed
+  tp1_rr: number;
+  tp2_rr: number | null;
+  split_percent: number | null;
+  active: boolean;
+  sort_order: number;
+};
+
+export type CustomColumn = {
+  id: number;
+  name: string;
+  col_key: string;
+  data_type: string;
+  visible: boolean;
+  sort_order: number;
+};
+
+export type StrategyResult = {
+  id: number;
+  name: string;
+  tp1_rr: number;
+  tp2_rr: number | null;
+  split_percent: number | null;
+  conditions: Condition[];
+  days: number[] | null;
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_r: number;
+  avg_r: number;
+  profit_factor: number | null;
+  trades: Array<{ id: number; date: string; pair: string; r: number }>;
+};
+
+export const FIELD_LABELS: Record<string, string> = {
+  cisd_break: 'CISD Break',
+  inverse_candles: 'Inv. Candle Size',
+  gap_from_asia_h: 'Distance from Asia H/L',
+};
+
+export const CONDITION_FIELDS = [
+  { key: 'cisd_break',      label: 'CISD Break (candles)' },
+  { key: 'inverse_candles', label: 'Inverse Candle Size' },
+  { key: 'gap_from_asia_h', label: 'Distance from Asia H/L' },
+];
+
+export const OPS = ['<', '<=', '>', '>=', '=', '!='];
+
+export const WEEKDAYS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+];
+
+export const SESSIONS = ['London', 'New York', 'Asia', 'London/NY Overlap', 'Pre-London'];
+
+export function fmtNum(v: number | null | undefined, decimals = 2): string {
+  if (v == null) return '—';
+  return Number(v).toFixed(decimals);
+}
+
+export function fmtMoney(v: number | null | undefined): string {
+  if (v == null) return '—';
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number(v));
+}
+
+export function fmtPct(v: number | null | undefined): string {
+  if (v == null) return '—';
+  const n = Number(v);
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+}
+
+export function plColor(v: number | null | undefined): string {
+  if (v == null) return 'text-muted-foreground';
+  return Number(v) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
+}
