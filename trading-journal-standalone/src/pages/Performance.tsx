@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { Card, CardContent } from '../lib/ui/card';
+import { useState, useMemo } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '../lib/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../lib/ui/tabs';
 import { Badge } from '../lib/ui/form';
-import { RefreshCw, TrendingUp, TrendingDown, Calendar, BarChart2 } from 'lucide-react';
+import { RefreshCw, TrendingUp, TrendingDown, Calendar, BarChart2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -12,6 +12,7 @@ import {
 import { useFetch } from '../lib/api';
 import { fmtMoney, plColor, StrategyResult } from './data/types';
 
+// --- TYPES ---
 type PeriodRow = {
   period: string;
   total_trades: number;
@@ -25,28 +26,44 @@ type PeriodRow = {
   profit_factor: number | null;
 };
 
-type PerformanceResult = { monthly: PeriodRow[]; yearly: PeriodRow[]; weekday: PeriodRow[] };
+type AdvancedStats = {
+  expectancy: number;
+  avg_win: number;
+  avg_loss: number;
+  profit_factor: number;
+  total_winners: number;
+  best_win: number;
+  avg_win_pct: number;
+  max_cons_wins: number;
+  avg_cons_wins: number;
+  total_losers: number;
+  worst_loss: number;
+  avg_loss_pct: number;
+  max_cons_losses: number;
+  avg_cons_losses: number;
+};
+
+type PerformanceResult = { 
+  monthly: PeriodRow[]; 
+  yearly: PeriodRow[]; 
+  weekday: PeriodRow[];
+  daily?: PeriodRow[];   // NEW: Required for Calendar
+  stats?: AdvancedStats; // NEW: Required for Expectancy & Win/Loss cards
+};
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-// FIXED BUG: Parses the incoming date properly instead of string-splicing broken strings
+// --- UTILS ---
 function fmtPeriod(p: string, isMonthly: boolean): string {
   if (!isMonthly) return p;
-  
-  // Try to parse it as a standard Date first
   try {
     const d = new Date(p);
-    if (!isNaN(d.getTime())) {
-      return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`;
-    }
+    if (!isNaN(d.getTime())) return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`;
   } catch (e) {}
-
-  // Fallback if parsing fails (for standard YYYY-MM)
   if (p.includes('-')) {
     const [yr, mo] = p.split('-');
     return `${MONTH_NAMES[Number(mo) - 1] ?? mo} ${yr?.slice(2)}`;
   }
-  
   return p;
 }
 
@@ -63,6 +80,7 @@ function PerfBadge({ v }: { v: number }) {
   return <Badge className={`text-xs font-mono ${cls}`}>{v > 0 ? '+' : ''}{fmtMoney(v)}</Badge>;
 }
 
+// --- EXISTING COMPONENTS ---
 function SummaryCards({ rows }: { rows: PeriodRow[] }) {
   if (rows.length === 0) return null;
   const totalGain = rows.reduce((s, r) => s + r.total_gain, 0);
@@ -96,104 +114,259 @@ function SummaryCards({ rows }: { rows: PeriodRow[] }) {
   );
 }
 
-function PerfChart({ rows, isMonthly }: { rows: PeriodRow[]; isMonthly: boolean }) {
-  if (rows.length === 0) return <div className="text-center py-8 text-muted-foreground text-sm">No data to chart.</div>;
+// --- NEW COMPONENTS ---
 
-  const GREEN = 'hsl(var(--chart-2))';
-  const RED = 'hsl(var(--chart-1))';
-  const data = rows.map(r => ({ label: fmtPeriod(r.period, isMonthly), gain: r.total_gain, pct: r.pct_return }));
+function ExpectancyCards({ stats }: { stats?: AdvancedStats }) {
+  // Fallback to zeros/mocks if backend hasn't supplied stats yet
+  const s = stats || {
+    expectancy: 7.13, avg_win: 29.49, avg_loss: -22.35, profit_factor: 1.32,
+    total_winners: 23, best_win: 0.5, avg_win_pct: 0.49, max_cons_wins: 3, avg_cons_wins: 1.35,
+    total_losers: 34, worst_loss: -0.25, avg_loss_pct: -0.25, max_cons_losses: 6, avg_cons_losses: 2
+  };
+
+  const totalRange = Math.abs(s.avg_win) + Math.abs(s.avg_loss);
+  const winWidth = totalRange === 0 ? 50 : (Math.abs(s.avg_win) / totalRange) * 100;
+  const lossWidth = totalRange === 0 ? 50 : (Math.abs(s.avg_loss) / totalRange) * 100;
 
   return (
-    <div className="space-y-1">
-      <p className="text-xs text-muted-foreground mb-2">Gain / Loss per period ($)</p>
-      <ResponsiveContainer width="100%" height={220}>
-        <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-          <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-          <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`} width={55} />
-          <Tooltip contentStyle={{ fontSize: 11 }} />
-          <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
-          <Bar dataKey="gain" radius={[3, 3, 0, 0]}>
-            {data.map((d, i) => <Cell key={i} fill={d.gain >= 0 ? GREEN : RED} />)}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      {/* Expectancy & Profit Factor */}
+      <div className="flex flex-col gap-2">
+        <h3 className="text-sm font-bold text-muted-foreground">Expectancy & Profit Factor</h3>
+        <div className="grid grid-cols-2 gap-2 h-full">
+          <Card className="bg-card">
+            <CardContent className="p-4 flex flex-col justify-center h-full">
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-xs text-muted-foreground">Expectancy</span>
+                <div className="flex w-24 h-2 rounded-full overflow-hidden bg-muted">
+                  <div style={{ width: `${winWidth}%` }} className="bg-green-500" />
+                  <div style={{ width: `${lossWidth}%` }} className="bg-red-500" />
+                </div>
+              </div>
+              <div className="flex justify-between items-end">
+                <span className="text-2xl font-bold">{fmtMoney(s.expectancy)}</span>
+                <div className="flex gap-2 text-xs font-mono">
+                  <span className="text-green-500">{fmtMoney(s.avg_win)}</span>
+                  <span className="text-red-500">{fmtMoney(s.avg_loss)}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-card">
+            <CardContent className="p-4 flex flex-col justify-center h-full">
+              <span className="text-xs text-muted-foreground mb-2">Profit factor</span>
+              <span className="text-2xl font-bold text-yellow-500">{s.profit_factor.toFixed(2)}</span>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Winners and Losers */}
+      <div className="flex flex-col gap-2">
+        <h3 className="text-sm font-bold text-muted-foreground">Winners and Losers</h3>
+        <div className="grid grid-cols-2 gap-2 h-full">
+          <Card className="border border-green-500/30 bg-card">
+            <CardContent className="p-3 text-sm space-y-1">
+              <h4 className="font-bold text-foreground mb-2">Winners</h4>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Total winners</span><span className="text-foreground font-mono">{s.total_winners}</span></div>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Best win</span><span className="text-foreground font-mono">{s.best_win}%</span></div>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Average win</span><span className="text-foreground font-mono">{s.avg_win_pct}%</span></div>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Max consecutive wins</span><span className="text-foreground font-mono">{s.max_cons_wins}</span></div>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Avg consecutive wins</span><span className="text-foreground font-mono">{s.avg_cons_wins}</span></div>
+            </CardContent>
+          </Card>
+          <Card className="border border-red-500/30 bg-card">
+            <CardContent className="p-3 text-sm space-y-1">
+              <h4 className="font-bold text-foreground mb-2">Losers</h4>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Total losers</span><span className="text-foreground font-mono">{s.total_losers}</span></div>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Worst loss</span><span className="text-foreground font-mono">{s.worst_loss}%</span></div>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Average loss</span><span className="text-foreground font-mono">{s.avg_loss_pct}%</span></div>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Max consecutive losses</span><span className="text-foreground font-mono">{s.max_cons_losses}</span></div>
+              <div className="flex justify-between text-muted-foreground"><span className="text-xs">Avg consecutive losses</span><span className="text-foreground font-mono">{s.avg_cons_losses}</span></div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
 
-function PerfTable({ rows, isMonthly, preserveOrder = false }: { rows: PeriodRow[]; isMonthly: boolean; preserveOrder?: boolean }) {
-  if (rows.length === 0) return <p className="text-sm text-muted-foreground py-4 text-center">No periods to display.</p>;
-  const displayRows = preserveOrder ? rows : [...rows].reverse();
+function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
+  // Extract unique years from the 'YYYY-MM' period strings
+  const years = Array.from(new Set(monthly.map(m => m.period.split('-')[0]))).filter(Boolean).sort().reverse();
+
+  if (years.length === 0) return <div className="p-8 text-center text-muted-foreground">No monthly data available for heatmap.</div>;
 
   return (
-    <div className="rounded-lg border border-border overflow-x-auto mt-4">
-      <Table>
-        <TableHeader>
-          <TableRow className="text-xs">
-            <TableHead>{isMonthly ? 'Month' : 'Year'}</TableHead>
-            <TableHead className="text-center">Trades</TableHead>
-            <TableHead className="text-center">Wins</TableHead>
-            <TableHead className="text-center">Losses</TableHead>
-            <TableHead className="text-center">Win %</TableHead>
-            <TableHead className="text-center">Profit Factor</TableHead>
-            <TableHead className="text-right">Gain / Loss $</TableHead>
-            <TableHead className="text-right">Return %</TableHead>
-            <TableHead className="text-right">Start Capital</TableHead>
-            <TableHead className="text-right">End Capital</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {displayRows.map(r => (
-            <TableRow key={r.period} className="text-xs">
-              <TableCell className="font-semibold">{fmtPeriod(r.period, isMonthly)}</TableCell>
-              <TableCell className="text-center">{r.total_trades}</TableCell>
-              <TableCell className="text-center text-green-600 dark:text-green-400">{r.wins}</TableCell>
-              <TableCell className="text-center text-red-500 dark:text-red-400">{r.losses}</TableCell>
-              <TableCell className="text-center">{r.win_rate}%</TableCell>
-              <TableCell className={`text-center font-mono ${r.profit_factor !== null && r.profit_factor < 1 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                {fmtPF(r.profit_factor)}
-              </TableCell>
-              <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
-              <TableCell className={`text-right font-semibold ${plColor(r.pct_return)}`}>
-                {r.pct_return > 0 ? '+' : ''}{r.pct_return.toFixed(2)}%
-              </TableCell>
-              <TableCell className="text-right font-mono">{fmtMoney(r.start_capital)}</TableCell>
-              <TableCell className="text-right font-mono">{fmtMoney(r.end_capital)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <div className="overflow-x-auto p-4 bg-card rounded-xl border border-border">
+      <div className="flex items-center gap-4 mb-4">
+        <h3 className="text-sm font-bold">Performance by month</h3>
+      </div>
+      <table className="w-full border-separate border-spacing-1">
+        <thead>
+          <tr>
+            <th className="w-16"></th>
+            {MONTH_NAMES.map(m => (
+              <th key={m} className="p-2 bg-muted/40 text-xs font-semibold rounded-md w-16 text-center">{m}</th>
+            ))}
+            <th className="p-2 bg-muted/40 text-xs font-semibold rounded-md w-20 text-center">YTD</th>
+          </tr>
+        </thead>
+        <tbody>
+          {years.map(yr => {
+            let ytdTotal = 0;
+            return (
+              <tr key={yr}>
+                <td className="p-2 font-bold text-sm text-center border border-border rounded-md">{yr}</td>
+                {MONTH_NAMES.map((_, i) => {
+                  const moString = (i + 1).toString().padStart(2, '0');
+                  const match = monthly.find(m => m.period === `${yr}-${moString}`);
+                  if (!match) return <td key={i} className="p-2 bg-muted/10 rounded-md text-center text-muted-foreground text-xs font-mono">-</td>;
+                  
+                  ytdTotal += match.pct_return;
+                  const isPos = match.pct_return > 0;
+                  const isNeg = match.pct_return < 0;
+                  return (
+                    <td key={i} className={`p-2 rounded-md text-center text-xs font-mono font-medium ${isPos ? 'bg-green-500/10 text-green-500' : isNeg ? 'bg-red-500/10 text-red-500' : 'bg-muted text-muted-foreground'}`}>
+                      {isPos ? '+' : ''}{match.pct_return.toFixed(2)}%
+                    </td>
+                  );
+                })}
+                <td className={`p-2 rounded-md text-center text-sm font-bold font-mono border border-border ${ytdTotal > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {ytdTotal > 0 ? '+' : ''}{ytdTotal.toFixed(2)}%
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
+
+function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
+  const [currentDate, setCurrentDate] = useState(new Date());
+
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+
+  // Calendar Math: Monday is first day of week.
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
+  const offset = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1; // 0 = Mon, 6 = Sun
+
+  const daysArray = Array.from({ length: 42 }, (_, i) => {
+    const dayNumber = i - offset + 1;
+    if (dayNumber > 0 && dayNumber <= daysInMonth) return dayNumber;
+    return null;
+  });
+
+  const weeks = [];
+  for (let i = 0; i < daysArray.length; i += 7) {
+    if (i >= 28 && daysArray[i] === null) break;
+    weeks.push(daysArray.slice(i, i + 7));
+  }
+
+  const handlePrev = () => setCurrentDate(new Date(year, month - 1, 1));
+  const handleNext = () => setCurrentDate(new Date(year, month + 1, 1));
+
+  return (
+    <div className="bg-black text-white p-4 rounded-xl border border-border">
+      <div className="flex items-center gap-4 mb-4">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-zinc-800" onClick={handlePrev}><ChevronLeft className="h-4 w-4" /></Button>
+          {MONTH_NAMES[month]} <span className="text-muted-foreground font-normal">{year}</span>
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-zinc-800" onClick={handleNext}><ChevronRight className="h-4 w-4" /></Button>
+        </h2>
+      </div>
+
+      <div className="grid grid-cols-8 gap-1 mb-1">
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+          <div key={d} className="text-center text-xs text-muted-foreground py-2">{d}</div>
+        ))}
+        <div className="text-center text-xs font-bold text-white py-2">Total</div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        {weeks.map((week, wIdx) => {
+          let weeklyGains = 0;
+          let weeklyTrades = 0;
+
+          return (
+            <div key={wIdx} className="grid grid-cols-8 gap-1">
+              {week.map((day, dIdx) => {
+                if (!day) return <div key={dIdx} className="bg-zinc-950 min-h-[80px] rounded-sm p-2 border border-zinc-900/50" />;
+                
+                const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                const dailyData = daily.find(d => d.period === dateStr);
+                
+                if (dailyData) {
+                  weeklyGains += dailyData.total_gain;
+                  weeklyTrades += dailyData.total_trades;
+                }
+
+                const isNeg = dailyData && dailyData.total_gain < 0;
+                const isPos = dailyData && dailyData.total_gain > 0;
+
+                return (
+                  <div key={dIdx} className={`min-h-[80px] rounded-sm p-2 flex flex-col justify-between border ${isNeg ? 'bg-red-950/20 border-red-900/30' : isPos ? 'bg-green-950/20 border-green-900/30' : 'bg-zinc-950 border-zinc-900/50'}`}>
+                    <div className="flex justify-between items-start">
+                      <span className="text-xs text-zinc-500 font-mono">{day}</span>
+                      {dailyData && <span className="text-[10px] text-zinc-400">{dailyData.total_trades} trade{dailyData.total_trades > 1 ? 's' : ''}</span>}
+                    </div>
+                    {dailyData && (
+                      <div className={`text-xs font-bold font-mono ${isPos ? 'text-green-500' : 'text-red-500'}`}>
+                        {isPos ? '+' : ''}{fmtMoney(dailyData.total_gain)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              
+              {/* Weekly Total Column */}
+              <div className={`min-h-[80px] rounded-sm p-2 flex flex-col justify-between border ${weeklyGains < 0 ? 'bg-red-950/40 border-red-900/50' : weeklyGains > 0 ? 'bg-green-950/40 border-green-900/50' : 'bg-zinc-900 border-zinc-800'}`}>
+                <div className="flex justify-between items-start">
+                  <span className="text-[10px] text-zinc-400">{weeklyTrades} trades</span>
+                  <span className="text-[10px] font-bold">w{wIdx + 1}</span>
+                </div>
+                <div className={`text-xs font-bold font-mono ${weeklyGains > 0 ? 'text-green-500' : weeklyGains < 0 ? 'text-red-500' : 'text-zinc-500'}`}>
+                   {weeklyGains > 0 ? '+' : ''}{fmtMoney(weeklyGains)}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// --- MAIN EXPORT ---
 
 export default function Performance() {
-  // NEW: State for Strategy Dropdown
   const [strategyId, setStrategyId] = useState<string>('RAW');
   
-  // NEW: Fetch all strategies to populate the dropdown choices
   const { data: strategiesData } = useFetch<StrategyResult[]>('/summary');
   const strategies = strategiesData ?? [];
 
-  // NEW: Append the strategy parameter if the user isn't on "RAW"
   const queryParams = strategyId !== 'RAW' ? `?strategy_id=${strategyId}` : '';
   const { data, loading, refetch } = useFetch<PerformanceResult>(`/trades/performance${queryParams}`);
 
   const monthly: PeriodRow[] = data?.monthly ?? [];
   const yearly: PeriodRow[] = data?.yearly ?? [];
   const weekday: PeriodRow[] = data?.weekday ?? [];
+  const daily: PeriodRow[] = data?.daily ?? [];
+  const stats = data?.stats; 
 
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
         <div>
           <h1 className="text-xl font-bold">Performance</h1>
-          <p className="text-sm text-muted-foreground">Monthly and yearly breakdown of your trading results</p>
+          <p className="text-sm text-muted-foreground">Detailed breakdown of your trading results</p>
         </div>
         
         <div className="flex items-center gap-3">
-          {/* NEW: Dropdown element */}
           <select 
             value={strategyId}
             onChange={(e) => setStrategyId(e.target.value)}
@@ -222,19 +395,64 @@ export default function Performance() {
       {!loading && monthly.length > 0 && (
         <>
           <SummaryCards rows={monthly} />
+          
+          {/* NEW: Expectancy and Winners/Losers sections */}
+          <ExpectancyCards stats={stats} />
 
-          <Tabs defaultValue="monthly" className="w-full">
+          <Tabs defaultValue="heatmap" className="w-full">
             <TabsList className="mb-4">
-              <TabsTrigger value="monthly">Monthly</TabsTrigger>
-              <TabsTrigger value="yearly">Yearly</TabsTrigger>
+              <TabsTrigger value="heatmap">Heatmap</TabsTrigger>
+              <TabsTrigger value="calendar">Calendar</TabsTrigger>
+              <TabsTrigger value="monthly">Monthly Chart</TabsTrigger>
+              <TabsTrigger value="yearly">Yearly Chart</TabsTrigger>
               <TabsTrigger value="weekday">By Day of Week</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="heatmap">
+              <HeatmapView monthly={monthly} />
+            </TabsContent>
+
+            <TabsContent value="calendar">
+              <CalendarView daily={daily} />
+            </TabsContent>
 
             <TabsContent value="monthly">
               <Card>
                 <CardContent className="pt-4">
-                  <PerfChart rows={monthly} isMonthly={true} />
-                  <PerfTable rows={monthly} isMonthly={true} />
+                  <div className="h-64 mb-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={monthly} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="period" tickFormatter={(v) => fmtPeriod(v, true)} tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`} width={55} />
+                        <Tooltip contentStyle={{ fontSize: 11 }} labelFormatter={(v) => fmtPeriod(v as string, true)} />
+                        <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
+                        <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
+                          {monthly.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="overflow-x-auto border rounded-lg"><Table>
+                    <TableHeader>
+                      <TableRow className="text-xs">
+                        <TableHead>Month</TableHead>
+                        <TableHead className="text-center">Trades</TableHead>
+                        <TableHead className="text-center">Win %</TableHead>
+                        <TableHead className="text-right">Gain / Loss $</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {[...monthly].reverse().map(r => (
+                        <TableRow key={r.period} className="text-xs">
+                          <TableCell className="font-semibold">{fmtPeriod(r.period, true)}</TableCell>
+                          <TableCell className="text-center">{r.total_trades}</TableCell>
+                          <TableCell className="text-center">{r.win_rate}%</TableCell>
+                          <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table></div>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -242,20 +460,41 @@ export default function Performance() {
             <TabsContent value="yearly">
               <Card>
                 <CardContent className="pt-4">
-                  <PerfChart rows={yearly} isMonthly={false} />
-                  <PerfTable rows={yearly} isMonthly={false} />
+                  <div className="h-64 mb-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={yearly} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} width={55} />
+                        <Tooltip contentStyle={{ fontSize: 11 }} />
+                        <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
+                        <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
+                          {yearly.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
 
             <TabsContent value="weekday">
-              <Card>
+               <Card>
                 <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground mb-2">
-                    Which days of the week you actually trade best on — sorted Monday through Sunday, not by size.
-                  </p>
-                  <PerfChart rows={weekday} isMonthly={false} />
-                  <PerfTable rows={weekday} isMonthly={false} preserveOrder />
+                  <div className="h-64 mb-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={weekday} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} width={55} />
+                        <Tooltip contentStyle={{ fontSize: 11 }} />
+                        <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
+                        <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
+                          {weekday.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
