@@ -194,13 +194,6 @@ function ExpectancyCards({ stats }: { stats?: AdvancedStats }) {
 function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
   // Extract unique years from the 'YYYY-MM' period strings
   const years = Array.from(new Set(monthly.map(m => m.period.split('-')[0]))).filter(Boolean).sort().reverse();
-  // Extract unique years from the 'YYYY-MM' period strings properly
-  const years = Array.from(new Set(monthly.map(m => {
-    if (m.period && m.period.includes('-')) {
-      return m.period.split('-')[0];
-    }
-    return null;
-  }))).filter((yr): yr is string => Boolean(yr)).sort().reverse();
 
   if (years.length === 0) return <div className="p-8 text-center text-muted-foreground">No monthly data available for heatmap.</div>;
 
@@ -228,10 +221,8 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
                 {MONTH_NAMES.map((_, i) => {
                   const moString = (i + 1).toString().padStart(2, '0');
                   const match = monthly.find(m => m.period === `${yr}-${moString}`);
-                  const targetPeriod = `${yr}-${moString}`;
-                  const match = monthly.find(m => m.period === targetPeriod);
                   if (!match) return <td key={i} className="p-2 bg-muted/10 rounded-md text-center text-muted-foreground text-xs font-mono">-</td>;
-
+                  
                   ytdTotal += match.pct_return;
                   const isPos = match.pct_return > 0;
                   const isNeg = match.pct_return < 0;
@@ -246,7 +237,6 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
                 </td>
               </tr>
             )
-            );
           })}
         </tbody>
       </table>
@@ -306,10 +296,10 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
             <div key={wIdx} className="grid grid-cols-8 gap-1">
               {week.map((day, dIdx) => {
                 if (!day) return <div key={dIdx} className="bg-zinc-950 min-h-[80px] rounded-sm p-2 border border-zinc-900/50" />;
-
+                
                 const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
                 const dailyData = daily.find(d => d.period === dateStr);
-
+                
                 if (dailyData) {
                   weeklyGains += dailyData.total_gain;
                   weeklyTrades += dailyData.total_trades;
@@ -332,7 +322,7 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
                   </div>
                 );
               })}
-
+              
               {/* Weekly Total Column */}
               <div className={`min-h-[80px] rounded-sm p-2 flex flex-col justify-between border ${weeklyGains < 0 ? 'bg-red-950/40 border-red-900/50' : weeklyGains > 0 ? 'bg-green-950/40 border-green-900/50' : 'bg-zinc-900 border-zinc-800'}`}>
                 <div className="flex justify-between items-start">
@@ -355,7 +345,7 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
 
 export default function Performance() {
   const [strategyId, setStrategyId] = useState<string>('RAW');
-
+  
   const { data: strategiesData } = useFetch<StrategyResult[]>('/summary');
   const strategies = strategiesData ?? [];
 
@@ -375,7 +365,7 @@ export default function Performance() {
           <h1 className="text-xl font-bold">Performance</h1>
           <p className="text-sm text-muted-foreground">Detailed breakdown of your trading results</p>
         </div>
-
+        
         <div className="flex items-center gap-3">
           <select 
             value={strategyId}
@@ -405,7 +395,7 @@ export default function Performance() {
       {!loading && monthly.length > 0 && (
         <>
           <SummaryCards rows={monthly} />
-
+          
           {/* NEW: Expectancy and Winners/Losers sections */}
           <ExpectancyCards stats={stats} />
 
