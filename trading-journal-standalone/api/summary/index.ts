@@ -61,8 +61,7 @@ function matchesTime(
   const t = trade.trade_executed_at;
   if (!t) return false;
 
-  // Expect "HH:MM" or "HH:MM:SS"
-  const time = t.substring(0, 5);
+  const time = t.substring(0, 5); // "HH:MM"
 
   if (timeStart && time < timeStart) return false;
   if (timeEnd && time > timeEnd) return false;
@@ -118,4 +117,20 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
 
   const [trades, rawStrategies] = await Promise.all([
     sql.unsafe(
-      `SELECT id, trade_placed_at, trade
+      `SELECT id, trade_placed_at, trade_executed_at, coin_token, cisd_break,
+              inverse_candle_size, distance_from_asia,
+              reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, profit_loss
+       FROM trades`
+    ),
+    sql.unsafe('SELECT * FROM strategies WHERE active = true ORDER BY sort_order ASC, id ASC'),
+  ]);
+
+  const strategies: Strategy[] = (rawStrategies as any[]).map((s) => ({
+    ...s,
+    conditions: parseJsonArray<Condition>(s.conditions),
+    days: parseJsonArray<number>(s.days),
+    time_start: s.time_start ?? null,
+    time_end: s.time_end ?? null,
+    tp1_rr: Number(s.tp1_rr),
+    tp2_rr: s.tp2_rr != null ? Number(s.tp2_rr) : null,
+    split_percent: s.split
