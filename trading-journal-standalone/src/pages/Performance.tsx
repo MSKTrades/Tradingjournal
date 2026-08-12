@@ -191,16 +191,83 @@ function ExpectancyCards({ stats }: { stats?: AdvancedStats }) {
   );
 }
 
-function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
-  // Extract unique years from the 'YYYY-MM' period strings properly
-  const years = Array.from(new Set(monthly.map(m => {
-    if (m.period && m.period.includes('-')) {
-      return m.period.split('-')[0];
-    }
-    return null;
-  }))).filter((yr): yr is string => Boolean(yr)).sort().reverse();
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  if (years.length === 0) return <div className="p-8 text-center text-muted-foreground">No monthly data available for heatmap.</div>;
+function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
+  if (!monthly || monthly.length === 0) {
+    return <div className="p-8 text-center text-muted-foreground">No monthly data available for heatmap.</div>;
+  }
+
+  // Helper to extract year and month safely from any period string format
+  const parsePeriod = (period: string) => {
+    if (!period) return { year: null, monthIndex: null };
+    
+    // Match 4-digit year
+    const yearMatch = period.match(/\b(20\d{2}|\d{4})\b/);
+    const year = yearMatch ? yearMatch[0] : period.split('-')[0];
+
+    // Match month index (0-11) by name
+    let monthIndex = -1;
+    const lower = period.toLowerCase();
+    MONTH_NAMES.forEach((m, idx) => {
+      if (lower.includes(m.toLowerCase())) {
+        monthIndex = idx;
+      }
+    });
+
+    // If month not found by name, check numeric (e.g. YYYY-MM)
+    if (monthIndex === -1 && period.includes('-')) {
+      const parts = period.split('-');
+      if (parts.length >= 2) {
+        const parsedNum = parseInt(parts[1], 10);
+        if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+          monthIndex = parsedNum - 1;
+        }
+      }
+    }
+
+    return { year, monthIndex };
+  };
+
+  const yearsMap = new Map<string, Map<number, PeriodRow>>();
+
+  monthly.forEach(item => {
+    const { year, monthIndex } = parsePeriod(item.period);
+    if (year && monthIndex !== null && monthIndex >= 0 && monthIndex <= 11) {
+      if (!yearsMap.has(year)) {
+        yearsMap.set(year, new Map());
+      }
+      yearsMap.get(year)!.set(monthIndex, item);
+    }
+  });
+
+  const years = Array.from(yearsMap.keys()).sort().reverse();
+
+  if (years.length === 0) {
+    return (
+      <div className="overflow-x-auto p-4 bg-card rounded-xl border border-border">
+        <h3 className="text-sm font-bold mb-4">Performance by month (Raw Data View)</h3>
+        <table className="w-full border-separate border-spacing-1">
+          <thead>
+            <tr>
+              <th className="p-2 bg-muted/40 text-xs font-semibold rounded-md text-left">Period</th>
+              <th className="p-2 bg-muted/40 text-xs font-semibold rounded-md text-right">Return</th>
+            </tr>
+          </thead>
+          <tbody>
+            {monthly.map((row, idx) => (
+              <tr key={idx}>
+                <td className="p-2 font-mono text-xs border border-border rounded-md">{row.period}</td>
+                <td className={`p-2 font-mono text-xs text-right rounded-md ${row.pct_return > 0 ? 'text-green-500' : row.pct_return < 0 ? 'text-red-500' : ''}`}>
+                  {row.pct_return > 0 ? '+' : ''}{row.pct_return?.toFixed(2)}%
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-x-auto p-4 bg-card rounded-xl border border-border">
@@ -219,14 +286,13 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
         </thead>
         <tbody>
           {years.map(yr => {
+            const monthDataMap = yearsMap.get(yr)!;
             let ytdTotal = 0;
             return (
               <tr key={yr}>
                 <td className="p-2 font-bold text-sm text-center border border-border rounded-md">{yr}</td>
                 {MONTH_NAMES.map((_, i) => {
-                  const moString = (i + 1).toString().padStart(2, '0');
-                  const targetPeriod = `${yr}-${moString}`;
-                  const match = monthly.find(m => m.period === targetPeriod);
+                  const match = monthDataMap.get(i);
                   if (!match) return <td key={i} className="p-2 bg-muted/10 rounded-md text-center text-muted-foreground text-xs font-mono">-</td>;
                   
                   ytdTotal += match.pct_return;
