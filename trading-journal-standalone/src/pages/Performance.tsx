@@ -192,10 +192,36 @@ function ExpectancyCards({ stats }: { stats?: AdvancedStats }) {
 }
 
 function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
-  // Extract unique years from the 'YYYY-MM' period strings
-  const years = Array.from(new Set(monthly.map(m => m.period.split('-')[0]))).filter(Boolean).sort().reverse();
+  // Robust helper to safely extract year and month from any period string format (YYYY-MM, YYYY-MM-DD, ISO, etc.)
+  const parsePeriod = (period: string) => {
+    if (!period) return null;
+    const parts = period.split('T')[0].split('-');
+    if (parts.length >= 2) {
+      const yr = parts[0];
+      const mo = parseInt(parts[1], 10);
+      if (yr.length === 4 && !isNaN(mo)) {
+        return { year: yr, month: mo - 1 }; // 0-indexed month
+      }
+    }
+    const d = new Date(period);
+    if (!isNaN(d.getTime())) {
+      return { year: d.getFullYear().toString(), month: d.getMonth() };
+    }
+    return null;
+  };
 
-  if (years.length === 0) return <div className="p-8 text-center text-muted-foreground">No monthly data available for heatmap.</div>;
+  const parsedMonthly = useMemo(() => {
+    return monthly.map(m => ({
+      ...m,
+      parsed: parsePeriod(m.period)
+    })).filter(m => m.parsed !== null);
+  }, [monthly]);
+
+  const years = Array.from(new Set(parsedMonthly.map(m => m.parsed!.year))).sort().reverse();
+
+  if (years.length === 0) {
+    return <div className="p-8 text-center text-muted-foreground">No valid monthly data available for heatmap.</div>;
+  }
 
   return (
     <div className="overflow-x-auto p-4 bg-card rounded-xl border border-border">
@@ -219,8 +245,7 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
               <tr key={yr}>
                 <td className="p-2 font-bold text-sm text-center border border-border rounded-md">{yr}</td>
                 {MONTH_NAMES.map((_, i) => {
-                  const moString = (i + 1).toString().padStart(2, '0');
-                  const match = monthly.find(m => m.period === `${yr}-${moString}`);
+                  const match = parsedMonthly.find(m => m.parsed!.year === yr && m.parsed!.month === i);
                   if (!match) return <td key={i} className="p-2 bg-muted/10 rounded-md text-center text-muted-foreground text-xs font-mono">-</td>;
                   
                   ytdTotal += match.pct_return;
@@ -236,7 +261,7 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
                   {ytdTotal > 0 ? '+' : ''}{ytdTotal.toFixed(2)}%
                 </td>
               </tr>
-            )
+            );
           })}
         </tbody>
       </table>
@@ -250,7 +275,23 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  // Calendar Math: Monday is first day of week.
+  // Helper to normalize daily period matching across different date string formats
+  const findDailyData = (y: number, m: number, d: number) => {
+    return daily.find(item => {
+      if (!item.period) return false;
+      const parsed = new Date(item.period);
+      if (!isNaN(parsed.getTime())) {
+        return (
+          parsed.getFullYear() === y &&
+          parsed.getMonth() === m &&
+          parsed.getDate() === d
+        );
+      }
+      const target = `${y}-${(m + 1).toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+      return item.period.startsWith(target);
+    });
+  };
+
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayOfMonth = new Date(year, month, 1).getDay();
   const offset = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1; // 0 = Mon, 6 = Sun
@@ -272,13 +313,21 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
 
   return (
     <div className="bg-black text-white p-4 rounded-xl border border-border">
-      <div className="flex items-center gap-4 mb-4">
+      <div className="flex items-center gap-4 mb-4 justify-between">
         <h2 className="text-xl font-bold flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-zinc-800" onClick={handlePrev}><ChevronLeft className="h-4 w-4" /></Button>
           {MONTH_NAMES[month]} <span className="text-muted-foreground font-normal">{year}</span>
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-zinc-800" onClick={handleNext}><ChevronRight className="h-4 w-4" /></Button>
         </h2>
+        <div className="flex gap-1">
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-zinc-800" onClick={handlePrev}><ChevronLeft className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-zinc-800" onClick={handleNext}><ChevronRight className="h-4 w-4" /></Button>
+        </div>
       </div>
+
+      {daily.length === 0 && (
+        <div className="mb-4 p-3 bg-zinc-900 border border-zinc-800 rounded text-xs text-zinc-400 text-center">
+          Note: No daily performance data (`daily`) received from backend. Ensure your API endpoint returns a `daily` array of trade results per day (`period: "YYYY-MM-DD"`).
+        </div>
+      )}
 
       <div className="grid grid-cols-8 gap-1 mb-1">
         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
@@ -297,8 +346,7 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
               {week.map((day, dIdx) => {
                 if (!day) return <div key={dIdx} className="bg-zinc-950 min-h-[80px] rounded-sm p-2 border border-zinc-900/50" />;
                 
-                const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-                const dailyData = daily.find(d => d.period === dateStr);
+                const dailyData = findDailyData(year, month, day);
                 
                 if (dailyData) {
                   weeklyGains += dailyData.total_gain;
@@ -340,6 +388,8 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
     </div>
   );
 }
+
+
 
 // --- MAIN EXPORT ---
 
