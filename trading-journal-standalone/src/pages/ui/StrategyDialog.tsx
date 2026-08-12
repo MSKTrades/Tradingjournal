@@ -148,6 +148,37 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
             </p>
           </div>
 
+          <div>
+  <Label className="mb-2 block">Time Window (Time Executed)</Label>
+  <div className="grid grid-cols-2 gap-3">
+    <div className="flex flex-col gap-1">
+      <Label className="text-xs text-muted-foreground">Start Time</Label>
+      <Input
+        type="time"
+        value={form.time_start ?? ''}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          setField('time_start', e.target.value || null)
+        }
+      />
+    </div>
+    <div className="flex flex-col gap-1">
+      <Label className="text-xs text-muted-foreground">End Time</Label>
+      <Input
+        type="time"
+        value={form.time_end ?? ''}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          setField('time_end', e.target.value || null)
+        }
+      />
+    </div>
+  </div>
+  <p className="text-xs text-muted-foreground mt-1.5">
+    {form.time_start || form.time_end
+      ? `Only trades executed between ${form.time_start || '00:00'} and ${form.time_end || '23:59'} qualify.`
+      : 'No time window — all times allowed.'}
+  </p>
+</div>
+
           <div className="flex flex-col gap-3">
             <Label>Take Profit Rules</Label>
             <div className="grid grid-cols-2 gap-3">
