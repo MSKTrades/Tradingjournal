@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, withApi } from '../_db';
+import { db, withApi } from '../db';
 
 function calcDuration(
   placedDate: string | null, execTime: string | null,
