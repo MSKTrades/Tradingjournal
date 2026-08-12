@@ -41,15 +41,34 @@ function matchesDay(trade: Trade, days: number[] | null | undefined): boolean {
 
 function matchesTime(
   trade: Trade,
-  timeStart: string | null,
-  timeEnd: string | null
+  timeStart: string | null | undefined,
+  timeEnd: string | null | undefined
 ): boolean {
-  if (!timeStart && !timeEnd) return true;
+  // Treat empty strings or undefined as null
+  const start = timeStart && timeStart.trim() !== '' ? timeStart : null;
+  const end = timeEnd && timeEnd.trim() !== '' ? timeEnd : null;
+
+  // If no time filter is set, allow all trades
+  if (!start && !end) return true;
+
   const t = trade.trade_executed_at;
   if (!t) return false;
-  const time = String(t).substring(0, 5);
-  if (timeStart && time < timeStart) return false;
-  if (timeEnd && time > timeEnd) return false;
+
+  let timeStr = String(t);
+
+  // If it's a full ISO string (e.g. "2024-05-15T14:30:00"), extract the time portion after 'T' or space
+  if (timeStr.includes('T')) {
+    timeStr = timeStr.split('T')[1];
+  } else if (timeStr.includes(' ')) {
+    timeStr = timeStr.split(' ')[1];
+  }
+
+  // Get HH:MM
+  const time = timeStr.substring(0, 5);
+
+  if (start && time < start) return false;
+  if (end && time > end) return false;
+
   return true;
 }
 
