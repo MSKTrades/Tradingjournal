@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, withApi } from '../_db';
+import { db, withApi } from '../db';
 
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
