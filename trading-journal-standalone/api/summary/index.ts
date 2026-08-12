@@ -35,8 +35,9 @@ function parseJsonArray<T>(value: any): T[] {
 function matchesDay(trade: Trade, days: number[] | null | undefined): boolean {
   if (!days || days.length === 0) return true;
   if (!trade.trade_placed_at) return false;
-  const dow = new Date(trade.trade_placed_at + 'T00:00:00').getDay();
-  return days.includes(dow);
+  const d = new Date(trade.trade_placed_at);
+  if (isNaN(d.getTime())) return false;
+  return days.includes(d.getUTCDay());
 }
 
 function matchesTime(
