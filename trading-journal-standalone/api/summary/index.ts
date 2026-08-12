@@ -4,6 +4,7 @@ import { db, withApi } from '../db.js';
 type Trade = {
   id: number;
   trade_placed_at: string | null;
+  trade_executed_at: string | null;
   coin_token: string | null;
   cisd_break: number | null;
   inverse_candle_size: number | null;
@@ -23,6 +24,8 @@ type Strategy = {
   name: string;
   conditions: Condition[];
   days: number[] | null;
+  time_start: string | null;
+  time_end: string | null;
   tp1_rr: number;
   tp2_rr: number | null;
   split_percent: number | null;
@@ -47,6 +50,23 @@ function matchesDay(trade: Trade, days: number[] | null | undefined): boolean {
   if (!trade.trade_placed_at) return false;
   const dow = new Date(trade.trade_placed_at).getDay();
   return days.includes(dow);
+}
+
+function matchesTime(
+  trade: Trade,
+  timeStart: string | null,
+  timeEnd: string | null
+): boolean {
+  if (!timeStart && !timeEnd) return true;
+  const t = trade.trade_executed_at;
+  if (!t) return false;
+
+  // Expect "HH:MM" or "HH:MM:SS"
+  const time = t.substring(0, 5);
+
+  if (timeStart && time < timeStart) return false;
+  if (timeEnd && time > timeEnd) return false;
+  return true;
 }
 
 function getFieldValue(trade: Trade, field: string): number | null {
@@ -98,76 +118,4 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
 
   const [trades, rawStrategies] = await Promise.all([
     sql.unsafe(
-      `SELECT id, trade_placed_at, coin_token, cisd_break,
-              inverse_candle_size, distance_from_asia,
-              reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, profit_loss
-       FROM trades`
-    ),
-    sql.unsafe('SELECT * FROM strategies WHERE active = true ORDER BY sort_order ASC, id ASC'),
-  ]);
-
-  // Normalize jsonb fields
-  const strategies: Strategy[] = (rawStrategies as any[]).map((s) => ({
-    ...s,
-    conditions: parseJsonArray<Condition>(s.conditions),
-    days: parseJsonArray<number>(s.days),
-    tp1_rr: Number(s.tp1_rr),
-    tp2_rr: s.tp2_rr != null ? Number(s.tp2_rr) : null,
-    split_percent: s.split_percent != null ? Number(s.split_percent) : null,
-    active: Boolean(s.active),
-  }));
-
-  const results = strategies.map((strategy) => {
-    const tp1 = strategy.tp1_rr;
-    const tp2 = strategy.tp2_rr;
-    const split = strategy.split_percent;
-
-    const qualifying = (trades as Trade[]).filter((trade) => {
-      if (!matchesDay(trade, strategy.days)) return false;
-      if (!strategy.conditions || strategy.conditions.length === 0) return true;
-      return strategy.conditions.every((cond) =>
-        evalCondition(getFieldValue(trade, cond.field), cond.op, cond.value)
-      );
-    });
-
-    const tradeResults = qualifying.map((trade) => ({
-      id: trade.id,
-      date: trade.trade_placed_at ?? '',
-      pair: trade.coin_token ?? '',
-      r: calcR(trade, tp1, tp2, split),
-    }));
-
-    const total = tradeResults.length;
-    const wins = tradeResults.filter((t) => t.r > 0).length;
-    const losses = tradeResults.filter((t) => t.r < 0).length;
-    const totalR = tradeResults.reduce((s, t) => s + t.r, 0);
-    const grossWinR = tradeResults.filter((t) => t.r > 0).reduce((s, t) => s + t.r, 0);
-    const grossLossR = -tradeResults.filter((t) => t.r < 0).reduce((s, t) => s + t.r, 0);
-    const profitFactor =
-      grossLossR > 0
-        ? Math.round((grossWinR / grossLossR) * 100) / 100
-        : grossWinR > 0
-          ? null
-          : 0;
-
-    return {
-      id: strategy.id,
-      name: strategy.name,
-      tp1_rr: tp1,
-      tp2_rr: tp2,
-      split_percent: split,
-      conditions: strategy.conditions,
-      days: strategy.days,
-      total_trades: total,
-      wins,
-      losses,
-      win_rate: total > 0 ? Math.round((wins / total) * 100) : 0,
-      total_r: Math.round(totalR * 100) / 100,
-      avg_r: total > 0 ? Math.round((totalR / total) * 100) / 100 : 0,
-      profit_factor: profitFactor,
-      trades: tradeResults,
-    };
-  });
-
-  res.status(200).json(results);
-});
+      `SELECT id, trade_placed_at, trade
