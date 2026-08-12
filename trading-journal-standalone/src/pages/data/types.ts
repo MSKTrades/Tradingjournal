@@ -48,6 +48,8 @@ export type Strategy = {
   name: string;
   conditions: Condition[];
   days: number[] | null; // 0=Sun..6=Sat; empty/null = all days allowed
+  time_start: string | null; // e.g. "07:00"
+  time_end: string | null;   // e.g. "11:00"
   tp1_rr: number;
   tp2_rr: number | null;
   split_percent: number | null;
@@ -72,6 +74,8 @@ export type StrategyResult = {
   split_percent: number | null;
   conditions: Condition[];
   days: number[] | null;
+  time_start: string | null;
+  time_end: string | null;
   total_trades: number;
   wins: number;
   losses: number;
