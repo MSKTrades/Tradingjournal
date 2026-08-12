@@ -6,7 +6,6 @@ import { TrendingUp, TrendingDown, Target, ChevronDown, ChevronUp, RefreshCw } f
 import { Button } from '../lib/ui/button';
 import { useFetch } from '../lib/api';
 import { StrategyResult, Condition, FIELD_LABELS } from './data/types';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 function condLabel(c: Condition) {
   return `${FIELD_LABELS[c.field] ?? c.field} ${c.op} ${c.value}`;
@@ -21,30 +20,6 @@ function RBadge({ r, size = 'sm' }: { r: number; size?: 'sm' | 'lg' }) {
   if (r > 0) return <Badge className={`bg-green-500/20 text-green-700 dark:text-green-300 border-green-400/30 ${cls}`}>+{r}R</Badge>;
   if (r < 0) return <Badge className={`bg-red-500/20 text-red-700 dark:text-red-300 border-red-400/30 ${cls}`}>{r}R</Badge>;
   return <Badge className={`bg-yellow-500/20 text-yellow-700 dark:text-yellow-300 border-yellow-400/30 ${cls}`}>0R</Badge>;
-}
-
-function EquityCurve({ trades }: { trades: StrategyResult['trades'] }) {
-  const sorted = [...trades].sort((a, b) => a.date.localeCompare(b.date));
-  let cum = 0;
-  const data = sorted.map(t => {
-    cum += t.r;
-    return { date: t.date.split('T')[0] ?? t.date, r: Math.round(cum * 100) / 100 };
-  });
-
-  const positive = cum >= 0;
-  const color = positive ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))';
-
-  return (
-    <ResponsiveContainer width="100%" height={100}>
-      <AreaChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-        <XAxis dataKey="date" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
-        <YAxis tick={{ fontSize: 9 }} />
-        <Tooltip contentStyle={{ fontSize: 11 }} />
-        <Area type="monotone" dataKey="r" stroke={color} fill={color} fillOpacity={0.2} strokeWidth={1.5} dot={false} />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
 }
 
 function StrategyCard({ result }: { result: StrategyResult }) {
@@ -103,8 +78,6 @@ function StrategyCard({ result }: { result: StrategyResult }) {
           </div>
         </div>
 
-        {result.total_trades > 0 && <EquityCurve trades={result.trades} />}
-
         {result.total_trades === 0 && (
           <p className="text-xs text-muted-foreground text-center py-2">No trades match this strategy yet.</p>
         )}
@@ -113,7 +86,7 @@ function StrategyCard({ result }: { result: StrategyResult }) {
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 text-xs text-muted-foreground w-full"
+            className="h-6 text-xs text-muted-foreground w-full mt-2"
             onClick={() => setExpanded(p => !p)}
           >
             {expanded ? <ChevronUp className="w-3 h-3 mr-1" /> : <ChevronDown className="w-3 h-3 mr-1" />}
