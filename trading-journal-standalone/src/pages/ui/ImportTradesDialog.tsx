@@ -128,13 +128,50 @@ function autoDetect(headers: string[]): Record<number, string> {
 
 function parseDate(val: unknown): string | null {
   if (val == null || val === '') return null;
+
+  // Excel serial number
   if (typeof val === 'number') {
     const d = XLSX.SSF.parse_date_code(val);
-    if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+    if (d) {
+      return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+    }
   }
-  if (val instanceof Date) return val.toISOString().split('T')[0] ?? null;
-  const d = new Date(String(val).trim());
-  return isNaN(d.getTime()) ? String(val).trim() : (d.toISOString().split('T')[0] ?? null);
+
+  // Date object (comes from cellDates: true)
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // String fallback – try to parse without timezone shift
+  const s = String(val).trim();
+
+  // Already in YYYY-MM-DD format
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    return s.substring(0, 10);
+  }
+
+  // DD/MM/YYYY or DD-MM-YYYY (common in AU/UK)
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (dmy) {
+    const day = dmy[1].padStart(2, '0');
+    const month = dmy[2].padStart(2, '0');
+    const year = dmy[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // Last resort
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  return s || null;
 }
 
 function parseTime(val: unknown): string | null {
