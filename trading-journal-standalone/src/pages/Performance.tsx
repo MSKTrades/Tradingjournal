@@ -192,8 +192,13 @@ function ExpectancyCards({ stats }: { stats?: AdvancedStats }) {
 }
 
 function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
-  // Extract unique years from the 'YYYY-MM' period strings
-  const years = Array.from(new Set(monthly.map(m => m.period.split('-')[0]))).filter(Boolean).sort().reverse();
+  // Extract unique years from the 'YYYY-MM' period strings properly
+  const years = Array.from(new Set(monthly.map(m => {
+    if (m.period && m.period.includes('-')) {
+      return m.period.split('-')[0];
+    }
+    return null;
+  }))).filter((yr): yr is string => Boolean(yr)).sort().reverse();
 
   if (years.length === 0) return <div className="p-8 text-center text-muted-foreground">No monthly data available for heatmap.</div>;
 
@@ -220,7 +225,8 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
                 <td className="p-2 font-bold text-sm text-center border border-border rounded-md">{yr}</td>
                 {MONTH_NAMES.map((_, i) => {
                   const moString = (i + 1).toString().padStart(2, '0');
-                  const match = monthly.find(m => m.period === `${yr}-${moString}`);
+                  const targetPeriod = `${yr}-${moString}`;
+                  const match = monthly.find(m => m.period === targetPeriod);
                   if (!match) return <td key={i} className="p-2 bg-muted/10 rounded-md text-center text-muted-foreground text-xs font-mono">-</td>;
                   
                   ytdTotal += match.pct_return;
@@ -236,7 +242,7 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
                   {ytdTotal > 0 ? '+' : ''}{ytdTotal.toFixed(2)}%
                 </td>
               </tr>
-            )
+            );
           })}
         </tbody>
       </table>
