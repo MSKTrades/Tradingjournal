@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Card, CardContent } from '../lib/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../lib/ui/tabs';
@@ -9,7 +10,7 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { useFetch } from '../lib/api';
-import { fmtMoney, plColor } from './data/types';
+import { fmtMoney, plColor, StrategyResult } from './data/types';
 
 type PeriodRow = {
   period: string;
@@ -28,10 +29,25 @@ type PerformanceResult = { monthly: PeriodRow[]; yearly: PeriodRow[]; weekday: P
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+// FIXED BUG: Parses the incoming date properly instead of string-splicing broken strings
 function fmtPeriod(p: string, isMonthly: boolean): string {
   if (!isMonthly) return p;
-  const [yr, mo] = p.split('-');
-  return `${MONTH_NAMES[Number(mo) - 1] ?? mo} ${yr?.slice(2)}`;
+  
+  // Try to parse it as a standard Date first
+  try {
+    const d = new Date(p);
+    if (!isNaN(d.getTime())) {
+      return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`;
+    }
+  } catch (e) {}
+
+  // Fallback if parsing fails (for standard YYYY-MM)
+  if (p.includes('-')) {
+    const [yr, mo] = p.split('-');
+    return `${MONTH_NAMES[Number(mo) - 1] ?? mo} ${yr?.slice(2)}`;
+  }
+  
+  return p;
 }
 
 function fmtPF(v: number | null): string {
@@ -153,7 +169,16 @@ function PerfTable({ rows, isMonthly, preserveOrder = false }: { rows: PeriodRow
 }
 
 export default function Performance() {
-  const { data, loading, refetch } = useFetch<PerformanceResult>('/trades/performance');
+  // NEW: State for Strategy Dropdown
+  const [strategyId, setStrategyId] = useState<string>('RAW');
+  
+  // NEW: Fetch all strategies to populate the dropdown choices
+  const { data: strategiesData } = useFetch<StrategyResult[]>('/summary');
+  const strategies = strategiesData ?? [];
+
+  // NEW: Append the strategy parameter if the user isn't on "RAW"
+  const queryParams = strategyId !== 'RAW' ? `?strategy_id=${strategyId}` : '';
+  const { data, loading, refetch } = useFetch<PerformanceResult>(`/trades/performance${queryParams}`);
 
   const monthly: PeriodRow[] = data?.monthly ?? [];
   const yearly: PeriodRow[] = data?.yearly ?? [];
@@ -161,14 +186,29 @@ export default function Performance() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
         <div>
           <h1 className="text-xl font-bold">Performance</h1>
           <p className="text-sm text-muted-foreground">Monthly and yearly breakdown of your trading results</p>
         </div>
-        <Button variant="outline" size="sm" onClick={refetch}>
-          <RefreshCw className="w-4 h-4 mr-1" /> Refresh
-        </Button>
+        
+        <div className="flex items-center gap-3">
+          {/* NEW: Dropdown element */}
+          <select 
+            value={strategyId}
+            onChange={(e) => setStrategyId(e.target.value)}
+            className="flex h-9 w-full sm:w-48 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="RAW">All Trades (RAW)</option>
+            {strategies.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+
+          <Button variant="outline" size="sm" onClick={refetch}>
+            <RefreshCw className="w-4 h-4 mr-1" /> Refresh
+          </Button>
+        </div>
       </div>
 
       {loading && <div className="text-center py-16 text-muted-foreground">Loading…</div>}
