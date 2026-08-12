@@ -19,12 +19,18 @@ export default function Strategies() {
   const [editStrat, setEditStrat] = useState<Strategy | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  const strategies: Strategy[] = (rawStrategies ?? []).map((s: Strategy) => ({
-    ...s,
-    tp1_rr: Number(s.tp1_rr),
-    tp2_rr: s.tp2_rr != null ? Number(s.tp2_rr) : null,
-    split_percent: s.split_percent != null ? Number(s.split_percent) : null,
-  }));
+const strategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
+  ...s,
+  conditions: Array.isArray(s.conditions)
+    ? s.conditions
+    : (typeof s.conditions === 'string' ? JSON.parse(s.conditions || '[]') : []),
+  days: Array.isArray(s.days)
+    ? s.days
+    : (typeof s.days === 'string' ? JSON.parse(s.days || '[]') : []),
+  tp1_rr: Number(s.tp1_rr),
+  tp2_rr: s.tp2_rr != null ? Number(s.tp2_rr) : null,
+  split_percent: s.split_percent != null ? Number(s.split_percent) : null,
+}));
 
   async function handleSave(payload: StrategyPayload) {
     if (payload.id != null) await api.put(`/strategies/${payload.id}`, payload);
