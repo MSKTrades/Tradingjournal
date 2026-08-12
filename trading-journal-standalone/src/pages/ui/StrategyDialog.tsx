@@ -17,6 +17,8 @@ export type StrategyPayload = {
   name: string;
   conditions: Condition[];
   days: number[];
+  time_start: string | null;
+  time_end: string | null;
   tp1_rr: number;
   tp2_rr: number | null;
   split_percent: number | null;
@@ -25,16 +27,33 @@ export type StrategyPayload = {
 };
 
 function emptyStrategy(): StrategyPayload {
-  return { name: '', conditions: [], days: [], tp1_rr: 3, tp2_rr: null, split_percent: null, active: true, sort_order: 0 };
+  return {
+    name: '',
+    conditions: [],
+    days: [],
+    time_start: null,
+    time_end: null,
+    tp1_rr: 3,
+    tp2_rr: null,
+    split_percent: null,
+    active: true,
+    sort_order: 0,
+  };
 }
 
 function toPayload(s: Strategy): StrategyPayload {
   return {
-    id: s.id, name: s.name, conditions: s.conditions ?? [], days: s.days ?? [],
+    id: s.id,
+    name: s.name,
+    conditions: s.conditions ?? [],
+    days: s.days ?? [],
+    time_start: s.time_start ?? null,
+    time_end: s.time_end ?? null,
     tp1_rr: Number(s.tp1_rr),
     tp2_rr: s.tp2_rr != null ? Number(s.tp2_rr) : null,
     split_percent: s.split_percent != null ? Number(s.split_percent) : null,
-    active: s.active, sort_order: s.sort_order,
+    active: s.active,
+    sort_order: s.sort_order,
   };
 }
 
