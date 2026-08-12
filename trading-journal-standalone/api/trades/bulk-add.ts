@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, withApi } from '../_db';
+import { db, withApi } from '../db.js';
 
 function sanitizeDate(val: string | null | undefined): string | null {
   if (!val) return null;
