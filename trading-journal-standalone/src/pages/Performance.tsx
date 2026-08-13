@@ -4,168 +4,26 @@ import { db, withApi } from '../db.js';
 const WEEKDAY_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-type Condition = { field: string; op: string; value: number };
-
-// --- Same filter helpers as summary/index.ts, duplicated here on purpose so
-// this endpoint has no dependency on that file and can't be broken by
-// changes made there (or vice versa). Keep them in sync if you touch the
-// filtering logic in one place. ---
-function parseJsonArray<T>(value: any): T[] {
-  if (Array.isArray(value)) return value;
-  if (typeof value === 'string') {
-    try { const p = JSON.parse(value || '[]'); return Array.isArray(p) ? p : []; }
-    catch { return []; }
-  }
-  return [];
-}
-
-function matchesDay(trade: any, days: number[] | null | undefined): boolean {
-  if (!days || days.length === 0) return true;
-  if (!trade.trade_placed_at) return false;
-  const d = new Date(trade.trade_placed_at);
-  if (isNaN(d.getTime())) return false;
-  return days.includes(d.getUTCDay());
-}
-
-function matchesTime(trade: any, timeStart: string | null, timeEnd: string | null): boolean {
-  if (!timeStart && !timeEnd) return true;
-  const t = trade.trade_executed_at;
-  if (!t) return false;
-  const time = String(t).substring(0, 5);
-  if (timeStart && time < timeStart) return false;
-  if (timeEnd && time > timeEnd) return false;
-  return true;
-}
-
-function getFieldValue(trade: any, field: string): number | null {
-  if (field === 'cisd_break') return trade.cisd_break != null ? Number(trade.cisd_break) : null;
-  if (field === 'inverse_candles') return trade.inverse_candle_size != null ? Number(trade.inverse_candle_size) : null;
-  if (field === 'gap_from_asia_h') return trade.distance_from_asia != null ? Number(trade.distance_from_asia) : null;
-  return null;
-}
-
-function evalCondition(val: number | null, op: string, threshold: number): boolean {
-  if (val === null || val === undefined) return false;
-  switch (op) {
-    case '<': return val < threshold;
-    case '<=': return val <= threshold;
-    case '>': return val > threshold;
-    case '>=': return val >= threshold;
-    case '=': return val === threshold;
-    case '!=': return val !== threshold;
-    default: return false;
-  }
-}
-
-function isWin(t: any): boolean {
-  if (t.profit_loss === 'Profit') return true;
-  if (t.profit_loss === 'Loss') return false;
-  return Number(t.gain_loss ?? 0) > 0;
-}
-function isLoss(t: any): boolean {
-  if (t.profit_loss === 'Loss') return true;
-  if (t.profit_loss === 'Profit') return false;
-  return Number(t.gain_loss ?? 0) < 0;
-}
-
-function toISODate(t: any): string {
-  const raw = t.trade_placed_at;
-  if (!raw) return '';
-  if (raw instanceof Date) return raw.toISOString().substring(0, 10);
-  return String(raw).substring(0, 10);
-}
-
-function computeStreaks(list: any[]) {
-  let maxWin = 0, maxLoss = 0, curWin = 0, curLoss = 0;
-  const winStreaks: number[] = [], lossStreaks: number[] = [];
-  for (const t of list) {
-    if (isWin(t)) {
-      curWin++;
-      if (curLoss > 0) { lossStreaks.push(curLoss); curLoss = 0; }
-      maxWin = Math.max(maxWin, curWin);
-    } else if (isLoss(t)) {
-      curLoss++;
-      if (curWin > 0) { winStreaks.push(curWin); curWin = 0; }
-      maxLoss = Math.max(maxLoss, curLoss);
-    }
-  }
-  if (curWin > 0) winStreaks.push(curWin);
-  if (curLoss > 0) lossStreaks.push(curLoss);
-  return {
-    maxWin, maxLoss,
-    avgWin: winStreaks.length ? winStreaks.reduce((a, b) => a + b, 0) / winStreaks.length : 0,
-    avgLoss: lossStreaks.length ? lossStreaks.reduce((a, b) => a + b, 0) / lossStreaks.length : 0,
-  };
-}
-
-function computeAdvancedStats(list: any[]) {
-  const winners = list.filter(isWin);
-  const losers = list.filter(isLoss);
-  const n = list.length;
-  const winRate = n > 0 ? winners.length / n : 0;
-  const lossRate = n > 0 ? losers.length / n : 0;
-  const avgWin = winners.length ? winners.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0) / winners.length : 0;
-  const avgLoss = losers.length ? losers.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0) / losers.length : 0;
-  const expectancy = winRate * avgWin + lossRate * avgLoss;
-  const grossWin = winners.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
-  const grossLoss = -losers.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
-  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? 999 : 0);
-  const bestWin = winners.length ? Math.max(...winners.map(t => Number(t.gain_loss_pct ?? 0))) : 0;
-  const avgWinPct = winners.length ? winners.reduce((s, t) => s + Number(t.gain_loss_pct ?? 0), 0) / winners.length : 0;
-  const worstLoss = losers.length ? Math.min(...losers.map(t => Number(t.gain_loss_pct ?? 0))) : 0;
-  const avgLossPct = losers.length ? losers.reduce((s, t) => s + Number(t.gain_loss_pct ?? 0), 0) / losers.length : 0;
-  const streaks = computeStreaks(list);
-
-  return {
-    expectancy: Math.round(expectancy * 100) / 100,
-    avg_win: Math.round(avgWin * 100) / 100,
-    avg_loss: Math.round(avgLoss * 100) / 100,
-    profit_factor: Math.round(profitFactor * 100) / 100,
-    total_winners: winners.length,
-    best_win: Math.round(bestWin * 100) / 100,
-    avg_win_pct: Math.round(avgWinPct * 100) / 100,
-    max_cons_wins: streaks.maxWin,
-    avg_cons_wins: Math.round(streaks.avgWin * 100) / 100,
-    total_losers: losers.length,
-    worst_loss: Math.round(worstLoss * 100) / 100,
-    avg_loss_pct: Math.round(avgLossPct * 100) / 100,
-    max_cons_losses: streaks.maxLoss,
-    avg_cons_losses: Math.round(streaks.avgLoss * 100) / 100,
-  };
-}
-
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== 'GET') { res.status(405).json({ error: 'Method not allowed' }); return; }
   const sql = db();
-
-  let trades: any[] = await sql.unsafe(
-    `SELECT id, trade_placed_at, trade_executed_at, coin_token, profit_loss, gain_loss, gain_loss_pct,
-            start_capital, end_capital, cisd_break, inverse_candle_size, distance_from_asia,
-            reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr
+  const trades: any[] = await sql.unsafe(
+    `SELECT trade_placed_at, profit_loss, gain_loss, start_capital, end_capital,
+            reached_1r2, reached_1r3
      FROM trades
      WHERE trade_placed_at IS NOT NULL
      ORDER BY trade_placed_at ASC, COALESCE(trade_number, 999999) ASC, created_at ASC`
   );
 
-  // --- Strategy filtering (matches the ?strategy_id= param your frontend already sends) ---
-  const strategyIdParam = req.query.strategy_id;
-  if (strategyIdParam) {
-    const strategyId = Number(Array.isArray(strategyIdParam) ? strategyIdParam[0] : strategyIdParam);
-    const strategyRows = await sql.unsafe('SELECT * FROM strategies WHERE id = $1', [strategyId]);
-    const s = strategyRows[0];
-    if (!s) { res.status(404).json({ error: 'Strategy not found' }); return; }
-
-    const conditions = parseJsonArray<Condition>(s.conditions);
-    const days = parseJsonArray<number>(s.days);
-    const timeStart = s.time_start ?? null;
-    const timeEnd = s.time_end ?? null;
-
-    trades = trades.filter(trade => {
-      if (!matchesDay(trade, days)) return false;
-      if (!matchesTime(trade, timeStart, timeEnd)) return false;
-      if (!conditions.length) return true;
-      return conditions.every(c => evalCondition(getFieldValue(trade, c.field), c.op, Number(c.value)));
-    });
+  function isWin(t: any): boolean {
+    if (t.profit_loss === 'Profit') return true;
+    if (t.profit_loss === 'Loss') return false;
+    return Number(t.gain_loss ?? 0) > 0;
+  }
+  function isLoss(t: any): boolean {
+    if (t.profit_loss === 'Loss') return true;
+    if (t.profit_loss === 'Profit') return false;
+    return Number(t.gain_loss ?? 0) < 0;
   }
 
   function aggregate(key: (t: any) => string) {
@@ -197,35 +55,16 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     });
   }
 
-  const toYYYYMM  = (t: any) => toISODate(t).substring(0, 7);
-  const toYYYY    = (t: any) => toISODate(t).substring(0, 4);
-  const toDay     = (t: any) => toISODate(t);
-  const toWeekday = (t: any) => {
-    const iso = toISODate(t);
-    if (!iso) return 'Unknown';
-    return WEEKDAY_NAMES[new Date(iso + 'T00:00:00Z').getUTCDay()] ?? 'Unknown';
-  };
-  const toHour = (t: any) => {
-    const raw = t.trade_executed_at;
-    if (!raw) return 'Unknown';
-    const s = String(raw);
-    const hh = s.includes('T') ? s.split('T')[1]!.substring(0, 2)
-             : s.includes(' ') ? s.split(' ')[1]!.substring(0, 2)
-             : s.substring(0, 2);
-    const n = Number(hh);
-    return isNaN(n) ? 'Unknown' : String(n).padStart(2, '0') + ':00';
-  };
+  const toYYYYMM = (t: any) => (t.trade_placed_at ?? '').toString().substring(0, 7);
+  const toYYYY   = (t: any) => (t.trade_placed_at ?? '').toString().substring(0, 4);
+  const toWeekday = (t: any) => WEEKDAY_NAMES[new Date(t.trade_placed_at).getDay()] ?? 'Unknown';
 
   const weekdayRows = aggregate(toWeekday);
   const weekdaySorted = WEEKDAY_ORDER.map(name => weekdayRows.find(r => r.period === name)).filter(Boolean);
-  const hourlySorted = aggregate(toHour).filter(r => r.period !== 'Unknown').sort((a, b) => a.period.localeCompare(b.period));
 
   res.status(200).json({
     monthly: aggregate(toYYYYMM),
     yearly: aggregate(toYYYY),
     weekday: weekdaySorted,
-    daily: aggregate(toDay),
-    hourly: hourlySorted,
-    stats: computeAdvancedStats(trades),
   });
 });
