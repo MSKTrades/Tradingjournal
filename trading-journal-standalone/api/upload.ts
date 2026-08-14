@@ -5,9 +5,20 @@ import { withApi } from './_db.js';
 // Generates short-lived client tokens so the browser can upload trade
 // screenshots directly to Vercel Blob storage (bypassing this function's
 // body-size limit entirely — only the small token request round-trips here,
-// the actual image bytes go straight to Blob). Requires a Blob store to be
-// attached to the Vercel project (Storage tab -> Create Database -> Blob),
-// which sets BLOB_READ_WRITE_TOKEN automatically.
+// the actual image bytes go straight to Blob). Requires a *public* Blob
+// store attached to the Vercel project (Storage tab -> Create Database ->
+// Blob -> access: Public — a private store won't work, since every call
+// below uses access: 'public').
+//
+// If more than one Blob store is ever connected to this project, Vercel
+// scopes each store's token behind a store-name-prefixed variable
+// (e.g. `forexblob_READ_WRITE_TOKEN`) instead of the plain
+// `BLOB_READ_WRITE_TOKEN` — connecting a second store does NOT repoint the
+// generic name at it. Prefer the explicit `forexblob_` token so this always
+// resolves to the intended public store regardless of what else is
+// connected; fall back to the generic name for a single-store setup.
+const BLOB_TOKEN = process.env.forexblob_READ_WRITE_TOKEN || process.env.BLOB_READ_WRITE_TOKEN;
+
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
 
@@ -17,6 +28,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const jsonResponse = await handleUpload({
       body,
       request: req as any,
+      token: BLOB_TOKEN,
       onBeforeGenerateToken: async () => ({
         allowedContentTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
         addRandomSuffix: true,
