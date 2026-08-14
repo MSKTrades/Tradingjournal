@@ -118,12 +118,16 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
   const { accounts, activeAccountId } = useAccount();
   const [form, setForm] = useState<TradePayload>(() => empty(activeAccountId ?? 0, nextTradeNumber));
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [addingField, setAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState('text');
 
   useEffect(() => {
-    if (open) setForm(trade ? fromTrade(trade) : empty(activeAccountId ?? 0, nextTradeNumber));
+    if (open) {
+      setForm(trade ? fromTrade(trade) : empty(activeAccountId ?? 0, nextTradeNumber));
+      setSaveError(null);
+    }
   }, [open, trade, activeAccountId, nextTradeNumber]);
 
   function set<K extends keyof TradePayload>(k: K, v: TradePayload[K]) {
@@ -152,8 +156,19 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
 
   async function handleSave() {
     setSaving(true);
-    try { await onSave(form); onClose(); }
-    finally { setSaving(false); }
+    setSaveError(null);
+    try {
+      await onSave(form);
+      onClose();
+    } catch (e: any) {
+      // Previously a failed save closed nothing but also said nothing —
+      // the dialog just quietly re-enabled the Save button, so a rejected
+      // request looked identical to a successful one and it was easy to
+      // walk away thinking the edits had landed when they hadn't.
+      setSaveError(e?.message ?? 'Save failed. Your changes were not saved — please try again.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleAddField() {
@@ -185,6 +200,7 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
           </h2>
         </div>
         <div className="flex items-center gap-2">
+          {saveError && <p className="text-xs text-destructive max-w-[320px] truncate" title={saveError}>{saveError}</p>}
           <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
           <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save Trade'}</Button>
         </div>
