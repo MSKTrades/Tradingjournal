@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Button } from '../../lib/ui/button';
 import { Input, Label, Select } from '../../lib/ui/form';
 import { Trade, CustomColumn, SESSIONS, fmtMoney } from '../data/types';
@@ -15,12 +14,6 @@ type Props = {
   trade: Trade | null;
   customColumns: CustomColumn[];
   nextTradeNumber: number;
-  // Every trade currently loaded for this account — used only to compute the
-  // small Insights column on the right (win rate / profit factor / pie
-  // chart). Not touched by save/load; passing the same array Journal.tsx
-  // already has in memory avoids a second network round-trip just to open
-  // the panel.
-  allTrades: Trade[];
   onSave: (t: TradePayload) => Promise<void>;
   onClose: () => void;
   onAddCustomColumn: (name: string, type: string) => Promise<void>;
@@ -121,82 +114,7 @@ function StructureSelect({ label, value, onChange }: { label: string; value: str
   );
 }
 
-const PIE_COLORS = { win: '#22c55e', loss: '#ef4444', breakeven: '#94a3b8' };
-
-function InsightsColumn({ allTrades, activeAccountId }: { allTrades: Trade[]; activeAccountId: number | null }) {
-  const stats = useMemo(() => {
-    const scoped = allTrades.filter(t => t.account_id === activeAccountId);
-    const wins = scoped.filter(t => t.profit_loss === 'Profit');
-    const losses = scoped.filter(t => t.profit_loss === 'Loss');
-    const breakeven = scoped.filter(t => t.profit_loss === 'Breakeven');
-    const decided = wins.length + losses.length;
-    const winRate = decided > 0 ? Math.round((wins.length / decided) * 100) : 0;
-    const grossWin = wins.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
-    const grossLoss = -losses.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
-    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? null : 0);
-    const pieData = [
-      { name: 'Wins', value: wins.length, color: PIE_COLORS.win },
-      { name: 'Losses', value: losses.length, color: PIE_COLORS.loss },
-      { name: 'Breakeven', value: breakeven.length, color: PIE_COLORS.breakeven },
-    ].filter(d => d.value > 0);
-    return { total: scoped.length, wins: wins.length, losses: losses.length, breakeven: breakeven.length, winRate, profitFactor, pieData };
-  }, [allTrades, activeAccountId]);
-
-  return (
-    <div className="flex flex-col gap-4">
-      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Insights</p>
-
-      <div className="grid grid-cols-1 gap-2.5">
-        <div className="rounded-lg border border-border bg-muted/30 p-3">
-          <p className="text-[10px] text-muted-foreground">Total Trades</p>
-          <p className="text-lg font-bold">{stats.total}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-muted/30 p-3">
-          <p className="text-[10px] text-muted-foreground">Win Rate</p>
-          <p className="text-lg font-bold">{stats.winRate}%</p>
-          <p className="text-[10px] text-muted-foreground">{stats.wins}W / {stats.losses}L / {stats.breakeven}BE</p>
-        </div>
-        <div className="rounded-lg border border-border bg-muted/30 p-3">
-          <p className="text-[10px] text-muted-foreground">Profit Factor</p>
-          <p className="text-lg font-bold">{stats.profitFactor === null ? '∞' : stats.profitFactor.toFixed(2)}</p>
-        </div>
-      </div>
-
-      {stats.pieData.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {/* Fixed-height chart box on its own — the legend used to live
-              inside this div too, but ResponsiveContainer's height="100%"
-              filled the whole box and pushed the legend to visually spill
-              out past the bottom edge, overlapping the caption below it. */}
-          <div className="h-32">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={stats.pieData} dataKey="value" nameKey="name" innerRadius={30} outerRadius={55} paddingAngle={2}>
-                  {stats.pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                </Pie>
-                <Tooltip contentStyle={{ fontSize: 11 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex flex-col gap-1">
-            {stats.pieData.map(d => (
-              <div key={d.name} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <span className="w-2 h-2 rounded-full" style={{ background: d.color }} />
-                {d.name} ({d.value})
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <p className="text-[10px] text-muted-foreground leading-relaxed">
-        Based on every trade currently in this account. Filtered stats (by strategy, date range, etc.) live on the Performance page.
-      </p>
-    </div>
-  );
-}
-
-export default function TradeDetailPanel({ open, trade, customColumns, nextTradeNumber, allTrades, onSave, onClose, onAddCustomColumn }: Props) {
+export default function TradeDetailPanel({ open, trade, customColumns, nextTradeNumber, onSave, onClose, onAddCustomColumn }: Props) {
   const { accounts, activeAccountId } = useAccount();
   const [form, setForm] = useState<TradePayload>(() => empty(activeAccountId ?? 0, nextTradeNumber));
   const [saving, setSaving] = useState(false);
@@ -278,7 +196,7 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
       {/* Drawer — covers ~60% of the viewport (100% on small screens) rather
           than a full-screen takeover, so the journal table stays visible
           (dimmed) behind it, similar to FX Replay's trade panel. */}
-      <div className="relative h-full w-full sm:w-[60vw] sm:min-w-[820px] max-w-[1200px] bg-background border-l border-border shadow-2xl flex flex-col animate-drawer-slide">
+      <div className="relative h-full w-full sm:w-[60vw] sm:min-w-[680px] max-w-[1100px] bg-background border-l border-border shadow-2xl flex flex-col animate-drawer-slide">
         {/* Top bar */}
         <div className="h-14 shrink-0 flex items-center justify-between px-5 border-b border-border">
           <div className="flex items-center gap-3 min-w-0">
@@ -474,16 +392,12 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
             </CollapsibleSection>
           </div>
 
-          {/* Middle: notes + screenshots */}
-          <div className="flex-1 min-w-0 overflow-y-auto px-6 py-6 border-r border-border">
+          {/* Right: notes + screenshots. Insights (win rate / profit factor /
+              pie chart) moved to the Journal page itself — that's where you
+              see every trade at once, so that's where trends about "every
+              trade" belong, rather than tucked inside one trade's editor. */}
+          <div className="flex-1 min-w-0 overflow-y-auto px-6 py-6">
             <NotesEditor blocks={form.notes_blocks} onChange={(blocks) => set('notes_blocks', blocks)} />
-          </div>
-
-          {/* Right: insights — visible without scrolling the page horizontally,
-              this used to be unreachable because the panel had nothing past
-              the notes column. */}
-          <div className="w-[220px] shrink-0 overflow-y-auto px-4 py-5">
-            <InsightsColumn allTrades={allTrades} activeAccountId={activeAccountId} />
           </div>
         </div>
       </div>
