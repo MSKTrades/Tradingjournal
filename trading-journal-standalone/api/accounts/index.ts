@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, withApi } from '../db.js';
+import { db, withApi } from '../_db.js';
 
 async function listAccounts() {
   const sql = db();

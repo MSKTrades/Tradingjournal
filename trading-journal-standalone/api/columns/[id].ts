@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, withApi } from '../db.js';
+import { db, withApi } from '../_db.js';
 
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== 'DELETE') { res.status(405).json({ error: 'Method not allowed' }); return; }
