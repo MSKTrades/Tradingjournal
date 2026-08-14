@@ -84,6 +84,19 @@ CREATE TABLE IF NOT EXISTS custom_columns (
   sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
+-- Trade rules you define for yourself ("Waited for CISD?", "Risk <= 1%?").
+-- Global across accounts, same as `strategies` — one trader, one rule set.
+-- Checked off per trade (see trades.checklist_results below) only when a
+-- trade opts into using the checklist at all (trades.checklist_enabled) —
+-- not every trade needs one, so it's never mandatory.
+CREATE TABLE IF NOT EXISTS checklist_items (
+  id          SERIAL PRIMARY KEY,
+  text        TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  active      BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_trades_placed_at ON trades (trade_placed_at);
 CREATE INDEX IF NOT EXISTS idx_trades_number    ON trades (trade_number);
 
@@ -101,6 +114,10 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS notes_blocks JSONB NOT NULL DEFAULT 
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_price NUMERIC;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp_price NUMERIC;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_price NUMERIC;
+
+-- Idempotent column additions for the trade rules checklist.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS checklist_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS checklist_results JSONB NOT NULL DEFAULT '{}'::jsonb;  -- { "<checklist_item id>": true|false }
 
 -- ============================================================================
 -- REPAIR: undo double-JSON-encoding caused by a real driver-behavior bug in
