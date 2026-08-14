@@ -54,6 +54,10 @@ export type Trade = {
   extra_data: Record<string, unknown>;
   screenshots: string[];
   notes_blocks: NoteBlock[];
+  // Checklist is opt-in per trade (not every trade type needs one) — when
+  // off, checklist_results is just whatever was last recorded and ignored.
+  checklist_enabled: boolean;
+  checklist_results: Record<string, boolean>; // keyed by ChecklistItem id (as string, since it round-trips through JSON)
   created_at: string;
 };
 
@@ -87,6 +91,15 @@ export type CustomColumn = {
   data_type: string;
   visible: boolean;
   sort_order: number;
+};
+
+// A user-defined trade rule ("Did I wait for the CISD?", "Risk <= 1%?").
+// Global across accounts, same as Strategy — one trader, one set of rules.
+export type ChecklistItem = {
+  id: number;
+  text: string;
+  sort_order: number;
+  active: boolean;
 };
 
 export type StrategyResult = {
