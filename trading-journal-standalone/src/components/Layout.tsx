@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTheme } from '../lib/theme';
 import Logo from './Logo';
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/journal',      label: 'Journal',     icon: BookOpen   },
   { to: '/performance',  label: 'Performance', icon: TrendingUp },
   { to: '/strategies',   label: 'Strategies',  icon: Settings   },
+  { to: '/checklists',   label: 'Checklists',  icon: ListChecks },
 ];
 
 const COLLAPSE_KEY = 'forexforge_sidebar_collapsed';
