@@ -55,8 +55,12 @@ export type Trade = {
   screenshots: string[];
   notes_blocks: NoteBlock[];
   // Checklist is opt-in per trade (not every trade type needs one) — when
-  // off, checklist_results is just whatever was last recorded and ignored.
+  // off, checklist_id/checklist_results are just whatever was last recorded
+  // and ignored. checklist_id records WHICH checklist this trade was graded
+  // against; checklist_results is keyed by checklist_item id, not checklist
+  // id, so it doesn't care which checklist that item came from.
   checklist_enabled: boolean;
+  checklist_id: number | null;
   checklist_results: Record<string, boolean>; // keyed by ChecklistItem id (as string, since it round-trips through JSON)
   created_at: string;
 };
@@ -93,13 +97,26 @@ export type CustomColumn = {
   sort_order: number;
 };
 
-// A user-defined trade rule ("Did I wait for the CISD?", "Risk <= 1%?").
-// Global across accounts, same as Strategy — one trader, one set of rules.
+// A user-defined trade rule ("Did I wait for the CISD?", "Risk <= 1%?"),
+// belonging to one Checklist.
 export type ChecklistItem = {
   id: number;
+  checklist_id: number;
   text: string;
   sort_order: number;
   active: boolean;
+};
+
+// A named, reusable rule set (e.g. "London Reversal", "Breakout Setup").
+// Global across accounts, same as Strategy — one trader, several rule sets,
+// one per setup they trade. Managed on its own Checklists tab; picked per
+// trade from the trade screen.
+export type Checklist = {
+  id: number;
+  name: string;
+  sort_order: number;
+  active: boolean;
+  items: ChecklistItem[];
 };
 
 export type StrategyResult = {
@@ -120,6 +137,19 @@ export type StrategyResult = {
   avg_r: number;
   profit_factor: number | null;
   trades: Array<{ id: number; date: string; pair: string; r: number }>;
+};
+
+// Economic-calendar event for the Home/Summary screen's news widget.
+// impact/country/date come through verbatim from the upstream feed's own
+// labels rather than a fixed enum, since that feed isn't ours to control.
+export type NewsEvent = {
+  title: string;
+  country: string;
+  date: string; // ISO timestamp
+  impact: string;
+  forecast: string | null;
+  previous: string | null;
+  actual: string | null;
 };
 
 export const FIELD_LABELS: Record<string, string> = {
