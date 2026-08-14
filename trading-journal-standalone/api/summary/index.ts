@@ -48,16 +48,19 @@ type NewsEvent = {
 // should never break because a third party changed or dropped this feed.
 const FF_CALENDAR_URL = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
 
+async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchForexFactoryNews(): Promise<{ events: NewsEvent[]; error: string | null }> {
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    let resp: Response;
-    try {
-      resp = await fetch(FF_CALENDAR_URL, { signal: controller.signal });
-    } finally {
-      clearTimeout(timeout);
-    }
+    const resp = await fetchWithTimeout(FF_CALENDAR_URL, 8000);
     if (!resp.ok) throw new Error(`Upstream returned ${resp.status}`);
     const raw = (await resp.json()) as unknown;
     if (!Array.isArray(raw)) throw new Error('Unexpected feed shape (not an array)');
@@ -79,6 +82,86 @@ async function fetchForexFactoryNews(): Promise<{ events: NewsEvent[]; error: st
     console.error('Forex Factory news fetch failed:', err);
     return { events: [], error: 'Unable to load market news right now.' };
   }
+}
+
+type Headline = {
+  title: string;
+  link: string;
+  pubDate: string | null;
+  source: string;
+};
+
+// General market/international headlines, alongside the economic calendar.
+// Two feeds, fetched independently so one going down doesn't take the other
+// with it: ForexLive for market-specific news, BBC World for broader
+// international context (macro/geopolitical events move currency pairs even
+// when they're not on an economic calendar). Both are plain public RSS —
+// no API key, no auth — which also means no contract either; if a feed
+// changes shape this degrades to fewer headlines, not a crash.
+const HEADLINE_FEEDS: Array<{ url: string; source: string }> = [
+  { url: 'https://www.forexlive.com/feed/news', source: 'ForexLive' },
+  { url: 'http://feeds.bbci.co.uk/news/world/rss.xml', source: 'BBC World' },
+];
+
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .trim();
+}
+
+// Hand-rolled instead of pulling in an XML parser dependency — RSS 2.0
+// <item> blocks are simple and regular enough that a couple of regexes
+// cover every feed this function actually points at.
+function parseRssItems(xml: string, source: string, limit: number): Headline[] {
+  const items: Headline[] = [];
+  const itemBlocks = xml.match(/<item\b[\s\S]*?<\/item>/g) ?? [];
+  for (const block of itemBlocks.slice(0, limit)) {
+    const title = block.match(/<title>([\s\S]*?)<\/title>/)?.[1];
+    const link = block.match(/<link>([\s\S]*?)<\/link>/)?.[1];
+    const pubDate = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1];
+    if (!title || !link) continue;
+    items.push({
+      title: decodeXmlEntities(title),
+      link: decodeXmlEntities(link),
+      pubDate: pubDate ? decodeXmlEntities(pubDate) : null,
+      source,
+    });
+  }
+  return items;
+}
+
+async function fetchHeadlines(): Promise<{ headlines: Headline[]; error: string | null }> {
+  const results = await Promise.all(
+    HEADLINE_FEEDS.map(async (feed) => {
+      try {
+        const resp = await fetchWithTimeout(feed.url, 8000);
+        if (!resp.ok) throw new Error(`Upstream returned ${resp.status}`);
+        const xml = await resp.text();
+        return parseRssItems(xml, feed.source, 8);
+      } catch (err: any) {
+        console.error(`Headline fetch failed for ${feed.source}:`, err);
+        return [] as Headline[];
+      }
+    })
+  );
+
+  const headlines = results
+    .flat()
+    .sort((a, b) => {
+      const ta = a.pubDate ? new Date(a.pubDate).getTime() : 0;
+      const tb = b.pubDate ? new Date(b.pubDate).getTime() : 0;
+      return tb - ta;
+    });
+
+  // Only surface an error if EVERY feed came back empty — one dead feed
+  // among several just means fewer headlines, not a broken widget.
+  const error = headlines.length === 0 ? 'Unable to load market news right now.' : null;
+  return { headlines, error };
 }
 
 function parseJsonArray<T>(value: any): T[] {
@@ -161,13 +244,21 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     return;
   }
 
-  // ?resource=news serves the Home/Summary screen's economic-calendar
-  // widget. Kept in this same file/function (branched by query param)
-  // rather than a new endpoint, since this project is already at 11 of the
-  // Vercel Hobby plan's 12-function cap.
+  // ?resource=news serves the Home/Summary screen's news widget: the
+  // economic calendar (events) and general market/international headlines
+  // (headlines) are fetched concurrently and reported independently, so one
+  // source failing doesn't blank out the other. Kept in this same
+  // file/function (branched by query param) rather than a new endpoint,
+  // since this project is already at 11 of the Vercel Hobby plan's
+  // 12-function cap.
   if (req.query.resource === 'news') {
-    const result = await fetchForexFactoryNews();
-    res.status(200).json(result);
+    const [calendar, headlines] = await Promise.all([fetchForexFactoryNews(), fetchHeadlines()]);
+    res.status(200).json({
+      events: calendar.events,
+      eventsError: calendar.error,
+      headlines: headlines.headlines,
+      headlinesError: headlines.error,
+    });
     return;
   }
 
