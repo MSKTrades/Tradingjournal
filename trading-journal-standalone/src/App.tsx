@@ -6,6 +6,7 @@ import Summary from './pages/Summary';
 import Journal from './pages/Journal';
 import Performance from './pages/Performance';
 import Strategies from './pages/Strategies';
+import Checklists from './pages/Checklists';
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
               <Route path="/journal" element={<Journal />} />
               <Route path="/performance" element={<Performance />} />
               <Route path="/strategies" element={<Strategies />} />
+              <Route path="/checklists" element={<Checklists />} />
             </Routes>
           </Layout>
         </BrowserRouter>
