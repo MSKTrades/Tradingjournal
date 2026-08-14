@@ -313,7 +313,7 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
           <CollapsibleSection
             storageKey="forexforge_panel_smc_open"
             title="SMC / ICT Metrics (optional)"
-            subtitle="Structure, liquidity, CISD, and other session-based metrics"
+            subtitle="Structure and session-based metrics"
           >
             <div className="grid grid-cols-2 gap-3">
               <StructureSelect label="15M Structure" value={form.structure_15m} onChange={v => set('structure_15m', v)} />
@@ -321,17 +321,6 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
               <div className="col-span-2">
                 <StructureSelect label="1M Before Chart" value={form.before_chart_1m} onChange={v => set('before_chart_1m', v)} />
               </div>
-              <NumField label="CISD Break (candles)" field="cisd_break" step={1} min={0} placeholder="e.g. 7" />
-              <NumField label="Total Inverse Candles" field="total_inverse_candles" step={1} min={0} />
-              <NumField label="Inverse Candle Size" field="inverse_candle_size" step={0.01} min={0} placeholder="e.g. 0.35" />
-              <NumField label="Distance from Asia H/L" field="distance_from_asia" step={0.1} min={0} />
-              <div className="col-span-2 flex flex-col gap-1">
-                <Label className="text-xs">Liquidity Swept</Label>
-                <Input value={form.liquidity_swept ?? ''} placeholder="e.g. Asia Session High, PDH, equal highs..."
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('liquidity_swept', e.target.value || null)} />
-              </div>
-              <NumField label="Liquidity Swept No." field="liquidity_swept_no" step={1} min={0} />
-              <NumField label="SL Pips" field="sl_pips" step={0.1} min={0} />
               <NumField label="Partial 1 (RR)" field="partial_1" step={0.1} min={0} />
               <NumField label="Partial 2 (RR)" field="partial_2" step={0.1} min={0} />
               <NumField label="Max RR Reached" field="max_rr" step={0.1} min={0} />
