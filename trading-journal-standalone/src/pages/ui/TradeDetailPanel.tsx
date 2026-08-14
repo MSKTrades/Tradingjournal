@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
-import { Input, Label, Select } from '../../lib/ui/form';
-import { Trade, CustomColumn, SESSIONS, fmtMoney } from '../data/types';
+import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
+import { Trade, CustomColumn, ChecklistItem, SESSIONS, fmtMoney } from '../data/types';
 import { useAccount } from '../../lib/accounts';
 import { cn } from '../../lib/utils';
 import NotesEditor from './NotesEditor';
@@ -13,10 +13,13 @@ type Props = {
   open: boolean;
   trade: Trade | null;
   customColumns: CustomColumn[];
+  checklistItems: ChecklistItem[];
   nextTradeNumber: number;
   onSave: (t: TradePayload) => Promise<void>;
   onClose: () => void;
   onAddCustomColumn: (name: string, type: string) => Promise<void>;
+  onAddChecklistItem: (text: string) => Promise<void>;
+  onDeleteChecklistItem: (id: number) => Promise<void>;
 };
 
 const INSTRUMENTS = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'GBPJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAGUSD'];
@@ -41,6 +44,7 @@ function empty(accountId: number, tradeNumber: number): TradePayload {
     partial_1: null, partial_2: null,
     reached_1r2: false, reached_1r3: false, reached_1r4: false, reached_1r5: false,
     max_rr: null, comments: null, extra_data: {}, screenshots: [], notes_blocks: [],
+    checklist_enabled: false, checklist_results: {},
   };
 }
 
@@ -114,7 +118,10 @@ function StructureSelect({ label, value, onChange }: { label: string; value: str
   );
 }
 
-export default function TradeDetailPanel({ open, trade, customColumns, nextTradeNumber, onSave, onClose, onAddCustomColumn }: Props) {
+export default function TradeDetailPanel({
+  open, trade, customColumns, checklistItems, nextTradeNumber, onSave, onClose,
+  onAddCustomColumn, onAddChecklistItem, onDeleteChecklistItem,
+}: Props) {
   const { accounts, activeAccountId } = useAccount();
   const [form, setForm] = useState<TradePayload>(() => empty(activeAccountId ?? 0, nextTradeNumber));
   const [saving, setSaving] = useState(false);
@@ -122,6 +129,8 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
   const [addingField, setAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState('text');
+  const [addingRule, setAddingRule] = useState(false);
+  const [newRuleText, setNewRuleText] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -135,6 +144,9 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
   }
   function setExtra(key: string, value: unknown) {
     setForm(p => ({ ...p, extra_data: { ...p.extra_data, [key]: value } }));
+  }
+  function setChecklistResult(itemId: number, value: boolean) {
+    setForm(p => ({ ...p, checklist_results: { ...p.checklist_results, [String(itemId)]: value } }));
   }
 
   function NumField({ label, field, step = 0.01, min, placeholder }: {
@@ -181,6 +193,18 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
       setNewFieldType('text');
     } finally {
       setAddingField(false);
+    }
+  }
+
+  async function handleAddRule() {
+    const trimmed = newRuleText.trim();
+    if (!trimmed) return;
+    setAddingRule(true);
+    try {
+      await onAddChecklistItem(trimmed);
+      setNewRuleText('');
+    } finally {
+      setAddingRule(false);
     }
   }
 
@@ -384,6 +408,69 @@ export default function TradeDetailPanel({ open, trade, customColumns, nextTrade
                     </Select>
                     <Button size="sm" onClick={handleAddField} disabled={!newFieldName.trim()}>Add</Button>
                     <Button size="sm" variant="ghost" onClick={() => { setAddingField(false); setNewFieldName(''); }}>
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CollapsibleSection>
+
+            <CollapsibleSection
+              storageKey="forexforge_panel_checklist_open"
+              title="Checklist"
+              subtitle={form.checklist_enabled ? 'Enabled for this trade' : 'Off — turn on to grade this trade against your rules'}
+            >
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Enable checklist for this trade</Label>
+                <Switch checked={form.checklist_enabled} onCheckedChange={v => set('checklist_enabled', v)} />
+              </div>
+
+              {form.checklist_enabled && (
+                checklistItems.length > 0 ? (
+                  <div className="flex flex-col gap-2">
+                    {checklistItems.map(item => (
+                      <div key={item.id} className="flex items-center gap-2 group">
+                        <Checkbox
+                          checked={!!form.checklist_results[String(item.id)]}
+                          onCheckedChange={() => setChecklistResult(item.id, !form.checklist_results[String(item.id)])}
+                          aria-label={item.text}
+                        />
+                        <span className="text-xs flex-1">{item.text}</span>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteChecklistItem(item.id)}
+                          className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No rules defined yet — add your first one below.</p>
+                )
+              )}
+
+              {!addingRule ? (
+                <button
+                  type="button"
+                  onClick={() => setAddingRule(true)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add a rule
+                </button>
+              ) : (
+                <div className="flex flex-col gap-2 border border-dashed border-border rounded-md p-2.5">
+                  <Input
+                    value={newRuleText}
+                    placeholder="e.g. Waited for CISD break"
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewRuleText(e.target.value)}
+                    onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && handleAddRule()}
+                    className="text-xs"
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={handleAddRule} disabled={!newRuleText.trim()}>Add</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setAddingRule(false); setNewRuleText(''); }}>
                       <X className="w-3.5 h-3.5" />
                     </Button>
                   </div>
