@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, FileUp } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import TradeDialog, { TradePayload } from './ui/TradeDialog';
+import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
 import ManageColumnsDialog from './ui/ManageColumnsDialog';
 import ImportTradesDialog, { ImportedTrade } from './ui/ImportTradesDialog';
 import { Trade, CustomColumn, fmtMoney, fmtPct, fmtNum, plColor } from './data/types';
@@ -270,7 +270,7 @@ export default function Journal() {
         </Table>
       </div>
 
-      <TradeDialog
+      <TradeDetailPanel
         open={dialogOpen}
         trade={editTrade}
         customColumns={customCols}
@@ -278,6 +278,7 @@ export default function Journal() {
         accountId={activeAccountId ?? 0}
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
+        onAddCustomColumn={handleAddCol}
       />
 
       <ImportTradesDialog
@@ -297,7 +298,7 @@ export default function Journal() {
         onToggleDefault={toggleVis}
         customColumns={customCols}
         onAddCustomColumn={handleAddCol}
-        onDeleteCustomColumn={async (id: number) => { await api.del(`/columns/${id}`); refetchCols(); }}
+        onDeleteCustomColumn={async (id: number) => { await api.del(`/columns?id=${id}`); refetchCols(); }}
       />
     </div>
   );

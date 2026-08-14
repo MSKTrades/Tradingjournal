@@ -15,7 +15,8 @@
     "recharts": "^2.12.7",
     "lucide-react": "^0.427.0",
     "xlsx": "^0.18.5",
-    "postgres": "^3.4.4"
+    "postgres": "^3.4.4",
+    "@vercel/blob": "^2.8.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

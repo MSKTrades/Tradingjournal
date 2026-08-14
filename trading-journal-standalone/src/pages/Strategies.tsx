@@ -33,20 +33,20 @@ const strategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
 }));
 
   async function handleSave(payload: StrategyPayload) {
-    if (payload.id != null) await api.put(`/strategies/${payload.id}`, payload);
+    if (payload.id != null) await api.put(`/strategies?id=${payload.id}`, payload);
     else await api.post('/strategies', payload);
     refetch();
   }
 
   async function handleDelete(id: number) {
     setDeleteId(id);
-    await api.del(`/strategies/${id}`);
+    await api.del(`/strategies?id=${id}`);
     setDeleteId(null);
     refetch();
   }
 
   async function handleToggleActive(strategy: Strategy) {
-    await api.put(`/strategies/${strategy.id}`, { ...strategy, active: !strategy.active });
+    await api.put(`/strategies?id=${strategy.id}`, { ...strategy, active: !strategy.active });
     refetch();
   }
 

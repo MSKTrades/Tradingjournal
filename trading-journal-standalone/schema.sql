@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS trades (
   max_rr                 NUMERIC,
   comments               TEXT,
   extra_data             JSONB NOT NULL DEFAULT '{}'::jsonb,  -- custom column values
+  screenshots            JSONB NOT NULL DEFAULT '[]'::jsonb,  -- array of Vercel Blob URLs
   created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -87,6 +88,9 @@ CREATE INDEX IF NOT EXISTS idx_trades_account   ON trades (account_id);
 -- created before the day-of-week / session-window strategy filters existed.
 ALTER TABLE strategies ADD COLUMN IF NOT EXISTS time_start TEXT;
 ALTER TABLE strategies ADD COLUMN IF NOT EXISTS time_end TEXT;
+
+-- Idempotent column addition for the trade detail screenshots feature.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS screenshots JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- ============================================================================
 -- MIGRATION: multi-account support. Everything above already reflects the

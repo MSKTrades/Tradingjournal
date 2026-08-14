@@ -75,12 +75,12 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
   }, [load, setActiveAccountId]);
 
   const updateAccount = useCallback(async (id: number, patch: AccountPatch) => {
-    await api.put(`/accounts/${id}`, patch);
+    await api.put(`/accounts?id=${id}`, patch);
     await load();
   }, [load]);
 
   const deleteAccount = useCallback(async (id: number) => {
-    await api.del(`/accounts/${id}`);
+    await api.del(`/accounts?id=${id}`);
     await load();
   }, [load]);
 

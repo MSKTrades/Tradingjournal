@@ -49,6 +49,7 @@ export type Trade = {
   max_rr: number | null;
   comments: string | null;
   extra_data: Record<string, unknown>;
+  screenshots: string[];
   created_at: string;
 };
 
