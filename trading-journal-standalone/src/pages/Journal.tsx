@@ -71,6 +71,7 @@ function renderCell(trade: Trade, key: string): React.ReactNode {
     return <Badge variant={v === 'Long' ? 'default' : 'secondary'} className="text-xs">{v === 'Long' ? '▲' : '▼'} {String(v)}</Badge>;
   }
   if (key === 'profit_loss') {
+    if (v === 'Breakeven') return <span className="font-semibold text-xs text-muted-foreground">➖ Breakeven</span>;
     const isProfit = v === 'Profit';
     return <span className={`font-semibold text-xs ${isProfit ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{isProfit ? '✅ Profit' : '❌ Loss'}</span>;
   }
@@ -106,16 +107,25 @@ export default function Journal() {
   const customCols: CustomColumn[] = rawCols ?? [];
   const nextTradeNumber = trades.length === 0 ? 1 : Math.max(0, ...trades.map(t => t.trade_number ?? 0)) + 1;
 
+  // Custom columns don't live directly on the Trade object — their values
+  // sit inside extra_data — so sorting has to check there too, not just
+  // `a[sort.key]`, or clicking a custom field's header would silently no-op.
+  const customColKeys = useMemo(() => new Set(customCols.map(c => c.col_key)), [customCols]);
+  function sortValue(t: Trade, key: string): unknown {
+    return customColKeys.has(key) ? t.extra_data?.[key] : t[key as keyof Trade];
+  }
+
   const sorted = useMemo(() => {
     if (!sort.dir) return trades;
     return [...trades].sort((a, b) => {
-      const av = a[sort.key as keyof Trade], bv = b[sort.key as keyof Trade];
+      const av = sortValue(a, sort.key), bv = sortValue(b, sort.key);
       if (av == null && bv == null) return 0;
       if (av == null) return 1; if (bv == null) return -1;
       const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
       return sort.dir === 'asc' ? cmp : -cmp;
     });
-  }, [trades, sort]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trades, sort, customColKeys]);
 
   function toggleSort(key: string) {
     setSort(p => p.key !== key ? { key, dir: 'asc' } : p.dir === 'asc' ? { key, dir: 'desc' } : p.dir === 'desc' ? { key, dir: null } : { key, dir: 'asc' });
@@ -220,7 +230,9 @@ export default function Journal() {
                 </TableHead>
               ))}
               {visibleCustom.map(c => (
-                <TableHead key={c.col_key} className="whitespace-nowrap px-2 py-2 text-xs">{c.name}</TableHead>
+                <TableHead key={c.col_key} className="cursor-pointer select-none whitespace-nowrap px-2 py-2 text-xs" onClick={() => toggleSort(c.col_key)}>
+                  <span className="inline-flex items-center gap-1">{c.name} <SortIcon col={c.col_key} /></span>
+                </TableHead>
               ))}
               <TableHead className="w-16 px-2">Act</TableHead>
             </TableRow>
@@ -237,8 +249,12 @@ export default function Journal() {
               </TableRow>
             )}
             {sorted.map(trade => (
-              <TableRow key={trade.id} className={cn('hover:bg-muted/30 text-xs', selectedIds.has(trade.id) && 'bg-primary/5')}>
-                <TableCell className="px-2 py-1.5">
+              <TableRow
+                key={trade.id}
+                className={cn('hover:bg-muted/30 text-xs cursor-pointer', selectedIds.has(trade.id) && 'bg-primary/5')}
+                onClick={() => { setEditTrade(trade); setDialogOpen(true); }}
+              >
+                <TableCell className="px-2 py-1.5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                   <Checkbox checked={selectedIds.has(trade.id)} onCheckedChange={() => toggleSelect(trade.id)} aria-label={`Select trade ${trade.id}`} />
                 </TableCell>
                 {visibleCols.map(c => (
@@ -247,7 +263,7 @@ export default function Journal() {
                 {visibleCustom.map(col => (
                   <TableCell key={col.col_key} className="px-2 py-1.5 text-xs">{String(trade.extra_data?.[col.col_key] ?? '—')}</TableCell>
                 ))}
-                <TableCell className="px-2 py-1.5">
+                <TableCell className="px-2 py-1.5" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                   <div className="flex gap-0.5">
                     <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
                       onClick={() => { setEditTrade(trade); setDialogOpen(true); }}>
@@ -270,6 +286,7 @@ export default function Journal() {
         trade={editTrade}
         customColumns={customCols}
         nextTradeNumber={nextTradeNumber}
+        allTrades={trades}
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
         onAddCustomColumn={handleAddCol}
