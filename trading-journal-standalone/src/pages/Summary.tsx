@@ -1,16 +1,12 @@
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../lib/ui/card';
+import { useMemo } from 'react';
+import { Card, CardContent } from '../lib/ui/card';
 import { Badge } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
-import { TrendingUp, TrendingDown, Target, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, RefreshCw, ListChecks } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { StrategyResult, Condition, FIELD_LABELS } from './data/types';
-
-function condLabel(c: Condition) {
-  return `${FIELD_LABELS[c.field] ?? c.field} ${c.op} ${c.value}`;
-}
+import { StrategyResult, Trade, ChecklistItem } from './data/types';
 
 function fmtPF(v: number | null) {
   return v === null ? '∞' : v.toFixed(2);
@@ -23,106 +19,80 @@ function RBadge({ r, size = 'sm' }: { r: number; size?: 'sm' | 'lg' }) {
   return <Badge className={`bg-yellow-500/20 text-yellow-700 dark:text-yellow-300 border-yellow-400/30 ${cls}`}>0R</Badge>;
 }
 
-function StrategyCard({ result }: { result: StrategyResult }) {
-  const [expanded, setExpanded] = useState(false);
+// Compliance is only computed from trades that explicitly recorded a
+// true/false for a given rule — a rule added after older trades were
+// logged has no opinion on them, so it's excluded from that rule's
+// denominator rather than silently counted as "broken".
+function useChecklistCompliance(trades: Trade[], items: ChecklistItem[]) {
+  return useMemo(() => {
+    const enabledTrades = trades.filter(t => t.checklist_enabled);
+    const ruleStats = items.map(item => {
+      let followed = 0, broken = 0;
+      enabledTrades.forEach(t => {
+        const v = t.checklist_results?.[String(item.id)];
+        if (v === true) followed++;
+        else if (v === false) broken++;
+      });
+      const total = followed + broken;
+      const pct = total > 0 ? Math.round((followed / total) * 100) : null;
+      return { item, followed, broken, total, pct };
+    });
+    const totalChecks = ruleStats.reduce((s, r) => s + r.total, 0);
+    const totalFollowed = ruleStats.reduce((s, r) => s + r.followed, 0);
+    const overallPct = totalChecks > 0 ? Math.round((totalFollowed / totalChecks) * 100) : null;
+    return { enabledCount: enabledTrades.length, ruleStats, overallPct };
+  }, [trades, items]);
+}
 
-  const isPositive = result.total_r > 0;
-  const borderColor = result.total_trades === 0
-    ? 'border-border'
-    : isPositive ? 'border-green-500/40' : 'border-red-500/40';
+function ChecklistCompliance({ trades, items }: { trades: Trade[]; items: ChecklistItem[] }) {
+  const { enabledCount, ruleStats, overallPct } = useChecklistCompliance(trades, items);
+
+  if (items.length === 0 || enabledCount === 0) return null;
+
+  const sorted = [...ruleStats].sort((a, b) => b.broken - a.broken);
 
   return (
-    <Card className={`border ${borderColor} flex flex-col`}>
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-sm font-semibold leading-tight">{result.name}</CardTitle>
-          <RBadge r={result.total_r} size="lg" />
-        </div>
-        <div className="flex flex-wrap gap-1 mt-1">
-          {(result.conditions ?? []).map((c, i) => (
-            <span key={i} className="text-[10px] bg-muted rounded px-1.5 py-0.5 text-muted-foreground font-mono">
-              {condLabel(c)}
-            </span>
-          ))}
-          <span className="text-[10px] bg-primary/10 text-primary rounded px-1.5 py-0.5 font-mono">
-            TP1={result.tp1_rr}R
-            {result.tp2_rr != null ? ` / TP2=${result.tp2_rr}R (${result.split_percent}% split)` : ''}
-          </span>
-        </div>
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-3 pt-0">
-        <div className="grid grid-cols-5 gap-2 text-center">
-          <div>
-            <p className="text-[10px] text-muted-foreground">Trades</p>
-            <p className="text-base font-bold">{result.total_trades}</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">Wins</p>
-            <p className="text-base font-bold text-green-600 dark:text-green-400">{result.wins}</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">Win %</p>
-            <p className="text-base font-bold">{result.win_rate}%</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">Avg R</p>
-            <p className={`text-base font-bold ${result.avg_r >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-              {result.avg_r > 0 ? '+' : ''}{result.avg_r}
-            </p>
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">PF</p>
-            <p className={`text-base font-bold ${result.profit_factor !== null && result.profit_factor < 1 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-              {fmtPF(result.profit_factor)}
-            </p>
-          </div>
-        </div>
-
-        {result.total_trades === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-2">No trades match this strategy yet.</p>
-        )}
-
-        {result.total_trades > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 text-xs text-muted-foreground w-full mt-2"
-            onClick={() => setExpanded(p => !p)}
-          >
-            {expanded ? <ChevronUp className="w-3 h-3 mr-1" /> : <ChevronDown className="w-3 h-3 mr-1" />}
-            {expanded ? 'Hide' : 'Show'} trades
-          </Button>
-        )}
-
-        {expanded && (
-          <div className="max-h-48 overflow-y-auto rounded border border-border">
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <ListChecks className="w-4 h-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Checklist Compliance</h2>
+        <span className="text-xs text-muted-foreground">
+          {enabledCount} trade{enabledCount !== 1 ? 's' : ''} graded against your rules
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs text-muted-foreground">Overall Follow Rate</p>
+            <p className="text-2xl font-bold">{overallPct === null ? '—' : `${overallPct}%`}</p>
+          </CardContent>
+        </Card>
+        <Card className="sm:col-span-3">
+          <CardContent className="pt-4 pb-3">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-xs py-1">Date</TableHead>
-                  <TableHead className="text-xs py-1">Pair</TableHead>
-                  <TableHead className="text-xs py-1 text-right">R</TableHead>
+                  <TableHead>Rule</TableHead>
+                  <TableHead className="text-center">Followed</TableHead>
+                  <TableHead className="text-center">Broken</TableHead>
+                  <TableHead className="text-center">Follow %</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {[...result.trades]
-                  .sort((a, b) => b.date.localeCompare(a.date))
-                  .map(t => (
-                    <TableRow key={t.id}>
-                      <TableCell className="text-xs py-1 font-mono">{t.date?.split('T')[0] ?? t.date}</TableCell>
-                      <TableCell className="text-xs py-1">{t.pair}</TableCell>
-                      <TableCell className="text-xs py-1 text-right">
-                        <RBadge r={t.r} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                {sorted.map(r => (
+                  <TableRow key={r.item.id}>
+                    <TableCell className="text-sm">{r.item.text}</TableCell>
+                    <TableCell className="text-center text-green-600 dark:text-green-400">{r.followed}</TableCell>
+                    <TableCell className="text-center text-red-500 dark:text-red-400">{r.broken}</TableCell>
+                    <TableCell className="text-center">{r.pct === null ? '—' : `${r.pct}%`}</TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
 
@@ -130,6 +100,10 @@ export default function Summary() {
   const { activeAccountId, activeAccount } = useAccount();
   const { data, loading, refetch } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const results: StrategyResult[] = data ?? [];
+  const { data: rawTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
+  const { data: rawChecklist } = useFetch<ChecklistItem[]>('/checklist');
+  const trades: Trade[] = rawTrades ?? [];
+  const checklistItems: ChecklistItem[] = rawChecklist ?? [];
 
   const bestR = results.length > 0 ? Math.max(...results.map(r => r.total_r)) : null;
   const bestName = results.find(r => r.total_r === bestR)?.name ?? '—';
@@ -182,6 +156,8 @@ export default function Summary() {
         </div>
       )}
 
+      <ChecklistCompliance trades={trades} items={checklistItems} />
+
       {loading && <div className="text-center py-20 text-muted-foreground">Calculating…</div>}
 
       {!loading && results.length === 0 && (
@@ -229,11 +205,6 @@ export default function Summary() {
         </div>
       )}
 
-      {!loading && results.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {results.map(r => <StrategyCard key={r.id} result={r} />)}
-        </div>
-      )}
     </div>
   );
 }
