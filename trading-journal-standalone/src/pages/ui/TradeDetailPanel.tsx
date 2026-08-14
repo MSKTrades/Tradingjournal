@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, ChecklistItem, SESSIONS, fmtMoney } from '../data/types';
+import { Trade, CustomColumn, Checklist, SESSIONS, fmtMoney } from '../data/types';
 import { useAccount } from '../../lib/accounts';
 import { cn } from '../../lib/utils';
 import NotesEditor from './NotesEditor';
@@ -13,13 +13,14 @@ type Props = {
   open: boolean;
   trade: Trade | null;
   customColumns: CustomColumn[];
-  checklistItems: ChecklistItem[];
+  // Checklists are managed on their own Checklists tab now — the trade
+  // panel only picks one and grades a trade against it, it doesn't
+  // create/edit rules itself.
+  checklists: Checklist[];
   nextTradeNumber: number;
   onSave: (t: TradePayload) => Promise<void>;
   onClose: () => void;
   onAddCustomColumn: (name: string, type: string) => Promise<void>;
-  onAddChecklistItem: (text: string) => Promise<void>;
-  onDeleteChecklistItem: (id: number) => Promise<void>;
 };
 
 const INSTRUMENTS = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'GBPJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAGUSD'];
@@ -44,7 +45,7 @@ function empty(accountId: number, tradeNumber: number): TradePayload {
     partial_1: null, partial_2: null,
     reached_1r2: false, reached_1r3: false, reached_1r4: false, reached_1r5: false,
     max_rr: null, comments: null, extra_data: {}, screenshots: [], notes_blocks: [],
-    checklist_enabled: false, checklist_results: {},
+    checklist_enabled: false, checklist_id: null, checklist_results: {},
   };
 }
 
@@ -119,8 +120,7 @@ function StructureSelect({ label, value, onChange }: { label: string; value: str
 }
 
 export default function TradeDetailPanel({
-  open, trade, customColumns, checklistItems, nextTradeNumber, onSave, onClose,
-  onAddCustomColumn, onAddChecklistItem, onDeleteChecklistItem,
+  open, trade, customColumns, checklists, nextTradeNumber, onSave, onClose, onAddCustomColumn,
 }: Props) {
   const { accounts, activeAccountId } = useAccount();
   const [form, setForm] = useState<TradePayload>(() => empty(activeAccountId ?? 0, nextTradeNumber));
@@ -129,8 +129,6 @@ export default function TradeDetailPanel({
   const [addingField, setAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState('text');
-  const [addingRule, setAddingRule] = useState(false);
-  const [newRuleText, setNewRuleText] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -138,6 +136,8 @@ export default function TradeDetailPanel({
       setSaveError(null);
     }
   }, [open, trade, activeAccountId, nextTradeNumber]);
+
+  const activeChecklist = checklists.find(c => c.id === form.checklist_id) ?? null;
 
   function set<K extends keyof TradePayload>(k: K, v: TradePayload[K]) {
     setForm(p => ({ ...p, [k]: v }));
@@ -193,18 +193,6 @@ export default function TradeDetailPanel({
       setNewFieldType('text');
     } finally {
       setAddingField(false);
-    }
-  }
-
-  async function handleAddRule() {
-    const trimmed = newRuleText.trim();
-    if (!trimmed) return;
-    setAddingRule(true);
-    try {
-      await onAddChecklistItem(trimmed);
-      setNewRuleText('');
-    } finally {
-      setAddingRule(false);
     }
   }
 
@@ -418,63 +406,56 @@ export default function TradeDetailPanel({
             <CollapsibleSection
               storageKey="forexforge_panel_checklist_open"
               title="Checklist"
-              subtitle={form.checklist_enabled ? 'Enabled for this trade' : 'Off — turn on to grade this trade against your rules'}
+              subtitle={form.checklist_enabled ? (activeChecklist ? activeChecklist.name : 'Enabled — pick a checklist below') : 'Off — turn on to grade this trade against your rules'}
             >
               <div className="flex items-center justify-between">
                 <Label className="text-xs">Enable checklist for this trade</Label>
-                <Switch checked={form.checklist_enabled} onCheckedChange={v => set('checklist_enabled', v)} />
+                <Switch
+                  checked={form.checklist_enabled}
+                  onCheckedChange={v => set('checklist_enabled', v)}
+                />
               </div>
 
               {form.checklist_enabled && (
-                checklistItems.length > 0 ? (
-                  <div className="flex flex-col gap-2">
-                    {checklistItems.map(item => (
-                      <div key={item.id} className="flex items-center gap-2 group">
-                        <Checkbox
-                          checked={!!form.checklist_results[String(item.id)]}
-                          onCheckedChange={() => setChecklistResult(item.id, !form.checklist_results[String(item.id)])}
-                          aria-label={item.text}
-                        />
-                        <span className="text-xs flex-1">{item.text}</span>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteChecklistItem(item.id)}
-                          className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">No rules defined yet — add your first one below.</p>
-                )
-              )}
+                checklists.length > 0 ? (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-xs">Checklist</Label>
+                      <Select
+                        value={form.checklist_id ?? ''}
+                        onChange={e => set('checklist_id', e.target.value ? Number(e.target.value) : null)}
+                      >
+                        <option value="">Select a checklist…</option>
+                        {checklists.map(cl => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
+                      </Select>
+                    </div>
 
-              {!addingRule ? (
-                <button
-                  type="button"
-                  onClick={() => setAddingRule(true)}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add a rule
-                </button>
-              ) : (
-                <div className="flex flex-col gap-2 border border-dashed border-border rounded-md p-2.5">
-                  <Input
-                    value={newRuleText}
-                    placeholder="e.g. Waited for CISD break"
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewRuleText(e.target.value)}
-                    onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && handleAddRule()}
-                    className="text-xs"
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={handleAddRule} disabled={!newRuleText.trim()}>Add</Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setAddingRule(false); setNewRuleText(''); }}>
-                      <X className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </div>
+                    {activeChecklist && (
+                      activeChecklist.items.length > 0 ? (
+                        <div className="flex flex-col gap-2 mt-1">
+                          {activeChecklist.items.map(item => (
+                            <div key={item.id} className="flex items-center gap-2">
+                              <Checkbox
+                                checked={!!form.checklist_results[String(item.id)]}
+                                onCheckedChange={() => setChecklistResult(item.id, !form.checklist_results[String(item.id)])}
+                                aria-label={item.text}
+                              />
+                              <span className="text-xs flex-1">{item.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          This checklist has no rules yet — add some on the <strong>Checklists</strong> tab.
+                        </p>
+                      )
+                    )}
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    No checklists yet — create one on the <strong>Checklists</strong> tab first.
+                  </p>
+                )
               )}
             </CollapsibleSection>
           </div>
