@@ -33,7 +33,12 @@ export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLS
   return (
     <select
       className={cn(
-        'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring',
+        // bg-transparent (used elsewhere) lets the popup's native OS/browser
+        // styling show through when the dropdown opens — usually an opaque
+        // white, which reads as broken against the dark theme. An explicit
+        // bg-background here (plus the `select option` rule in index.css)
+        // keeps both the closed control and the open popup themed.
+        'h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring',
         className
       )}
       {...props}
