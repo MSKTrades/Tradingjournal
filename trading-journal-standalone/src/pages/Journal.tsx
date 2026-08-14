@@ -107,7 +107,7 @@ export default function Journal() {
 
   const trades: Trade[] = rawTrades ?? [];
   const customCols: CustomColumn[] = rawCols ?? [];
-  const lastEndCapital = trades.length > 0 ? (trades[0]?.end_capital ?? null) : null;
+  const nextTradeNumber = trades.length === 0 ? 1 : Math.max(0, ...trades.map(t => t.trade_number ?? 0)) + 1;
 
   const sorted = useMemo(() => {
     if (!sort.dir) return trades;
@@ -131,12 +131,10 @@ export default function Journal() {
   }
 
   async function handleSave(payload: TradePayload) {
-    // Always pin to the currently selected account — belt-and-suspenders
-    // alongside TradeDialog's own default, in case the account switched
-    // while the dialog was open.
-    const withAccount = { ...payload, account_id: activeAccountId ?? payload.account_id };
-    if (withAccount.id != null) await api.put(`/trades/${withAccount.id}`, withAccount);
-    else await api.post('/trades', withAccount);
+    // account_id comes from the panel's own Account selector now, so trades
+    // can be assigned to (or reassigned to) any account from right there.
+    if (payload.id != null) await api.put(`/trades/${payload.id}`, payload);
+    else await api.post('/trades', payload);
     refetchTrades();
   }
 
@@ -274,8 +272,7 @@ export default function Journal() {
         open={dialogOpen}
         trade={editTrade}
         customColumns={customCols}
-        lastEndCapital={lastEndCapital}
-        accountId={activeAccountId ?? 0}
+        nextTradeNumber={nextTradeNumber}
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
         onAddCustomColumn={handleAddCol}
@@ -284,6 +281,7 @@ export default function Journal() {
       <ImportTradesDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
+        customColumns={customCols}
         onImport={async (rows: ImportedTrade[]) => {
           await api.post('/trades/bulk-add', { trades: rows, account_id: activeAccountId });
           refetchTrades();
