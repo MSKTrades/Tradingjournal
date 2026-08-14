@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, withApi } from '../_db.js';
+import { db, withApi, recalcAccountCapital } from '../_db.js';
 
 function sanitizeDate(val: string | null | undefined): string | null {
   if (!val) return null;
@@ -75,38 +75,30 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const closedSession   = sanitizeText(p.closed_session);
     const tradeDuration   = computeDuration(tradePlacedAt, tradeExecutedAt, dateClosed, timeClosed);
 
-    const dollarRisk  = (p.start_capital ?? 0) * (p.position_size ?? 0) / 100;
-    const gain_loss   = p.profit_loss === 'Profit' ? dollarRisk * (p.rr ?? 0)
-                       : p.profit_loss === 'Loss' ? -dollarRisk : null;
-    const gain_loss_pct = (gain_loss != null && p.start_capital) ? gain_loss / p.start_capital * 100 : null;
-    const end_capital = (gain_loss != null && p.start_capital != null) ? p.start_capital + gain_loss : null;
-
     try {
       await sql.unsafe(
         `INSERT INTO trades (
           account_id,
-          trade_number, start_capital, end_capital, gain_loss, gain_loss_pct,
+          trade_number,
           structure_15m, wr_1m, before_chart_1m, direction,
           liquidity_swept, distance_from_asia, liquidity_swept_no,
           cisd_break, total_inverse_candles, inverse_candle_size, sl_pips, position_size,
-          profit_loss, rr,
+          profit_loss, rr, entry_price, tp_price, sl_price,
           coin_token, trade_placed_at, trade_executed_at, session_in,
           date_closed, time_closed, closed_session, trade_duration,
           partial_1, partial_2, reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr,
           comments, extra_data
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-          $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
+          $20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36::jsonb
         )`,
         [
           accountId,
-          p.trade_number, p.start_capital, end_capital,
-          gain_loss != null ? Math.round(gain_loss * 100) / 100 : null,
-          gain_loss_pct != null ? Math.round(gain_loss_pct * 100) / 100 : null,
+          p.trade_number,
           p.structure_15m, p.wr_1m, p.before_chart_1m ?? null, p.direction ?? 'Long',
           p.liquidity_swept, p.distance_from_asia, p.liquidity_swept_no,
           p.cisd_break, p.total_inverse_candles, p.inverse_candle_size, p.sl_pips, p.position_size,
-          p.profit_loss, p.rr,
+          p.profit_loss, p.rr, p.entry_price ?? null, p.tp_price ?? null, p.sl_price ?? null,
           p.coin_token, tradePlacedAt, tradeExecutedAt, sessionIn,
           dateClosed, timeClosed, closedSession, tradeDuration,
           p.partial_1, p.partial_2,
@@ -119,6 +111,11 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       skipped++;
     }
   }
+
+  // start_capital / end_capital / gain_loss / gain_loss_pct for every trade
+  // in this account (including the ones just imported) are derived here,
+  // once, rather than per-row above.
+  if (inserted > 0) await recalcAccountCapital(sql, accountId);
 
   res.status(200).json({ inserted, skipped });
 });

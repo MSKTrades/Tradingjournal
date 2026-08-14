@@ -1,5 +1,17 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, withApi } from '../_db.js';
+import { db, withApi, recalcAccountCapital } from '../_db.js';
+
+// `comments` and `screenshots` are derived from notes_blocks server-side so
+// they can never drift out of sync with what's actually in the editor —
+// `comments` powers the Journal table's text column / any future search,
+// `screenshots` is a flat list for possible future thumbnail use.
+function deriveFromNotesBlocks(notesBlocks: any) {
+  const blocks = Array.isArray(notesBlocks) ? notesBlocks : [];
+  const comments = blocks.filter((b: any) => b?.type === 'text' && b.value)
+    .map((b: any) => b.value).join('\n\n').trim() || null;
+  const screenshots = blocks.filter((b: any) => b?.type === 'image' && b.url).map((b: any) => b.url);
+  return { comments, screenshots };
+}
 
 function calcDuration(
   placedDate: string | null, execTime: string | null,
@@ -47,45 +59,45 @@ async function addTrade(p: any) {
   const accountId = Number(p.account_id);
   if (!accountId || isNaN(accountId)) throw new Error('account_id is required');
 
-  const dollarRisk = (p.start_capital ?? 0) * (p.position_size ?? 0) / 100;
-  const gain_loss  = p.profit_loss === 'Profit' ? dollarRisk * (p.rr ?? 0)
-                    : p.profit_loss === 'Loss' ? -dollarRisk : 0;
-  const gain_loss_pct = p.start_capital ? (gain_loss / p.start_capital * 100) : 0;
-  const end_capital   = (p.start_capital ?? 0) + gain_loss;
+  // start_capital / end_capital / gain_loss / gain_loss_pct are never taken
+  // from the client — they're filled in by recalcAccountCapital right after
+  // insert, derived from the account's starting_balance and every trade's
+  // position_size / profit_loss / rr in chronological order.
   const trade_duration = calcDuration(p.trade_placed_at, p.trade_executed_at, p.date_closed, p.time_closed);
+  const { comments, screenshots } = deriveFromNotesBlocks(p.notes_blocks);
 
   const rows = await sql.unsafe(
     `INSERT INTO trades (
       account_id,
-      trade_number, start_capital, end_capital, gain_loss, gain_loss_pct,
+      trade_number,
       structure_15m, wr_1m, before_chart_1m, direction,
       liquidity_swept, distance_from_asia, liquidity_swept_no,
       cisd_break, total_inverse_candles, inverse_candle_size, sl_pips, position_size,
-      profit_loss, rr,
+      profit_loss, rr, entry_price, tp_price, sl_price,
       coin_token, trade_placed_at, trade_executed_at, session_in,
       date_closed, time_closed, closed_session, trade_duration,
       partial_1, partial_2, reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr,
-      comments, extra_data, screenshots
+      comments, extra_data, screenshots, notes_blocks
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-      $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb,$38::jsonb
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
+      $20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,
+      $35,$36::jsonb,$37::jsonb,$38::jsonb
     ) RETURNING id`,
     [
       accountId,
-      p.trade_number, p.start_capital, end_capital,
-      Math.round(gain_loss * 100) / 100,
-      Math.round(gain_loss_pct * 100) / 100,
+      p.trade_number,
       p.structure_15m, p.wr_1m, p.before_chart_1m, p.direction,
       p.liquidity_swept, p.distance_from_asia, p.liquidity_swept_no,
       p.cisd_break, p.total_inverse_candles, p.inverse_candle_size, p.sl_pips, p.position_size,
-      p.profit_loss, p.rr,
+      p.profit_loss, p.rr, p.entry_price, p.tp_price, p.sl_price,
       p.coin_token, p.trade_placed_at, p.trade_executed_at, p.session_in,
       p.date_closed, p.time_closed, p.closed_session, trade_duration,
       p.partial_1, p.partial_2,
       p.reached_1r2 ?? false, p.reached_1r3 ?? false, p.reached_1r4 ?? false, p.reached_1r5 ?? false,
-      p.max_rr, p.comments, JSON.stringify(p.extra_data ?? {}), JSON.stringify(p.screenshots ?? []),
+      p.max_rr, comments, JSON.stringify(p.extra_data ?? {}), JSON.stringify(screenshots), JSON.stringify(p.notes_blocks ?? []),
     ]
   );
+  await recalcAccountCapital(sql, accountId);
   return rows[0];
 }
 
