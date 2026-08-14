@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import { Card, CardContent } from '../lib/ui/card';
 import { Badge, Switch } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
-import { TrendingUp, TrendingDown, Target, RefreshCw, ListChecks, Newspaper } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, RefreshCw, ListChecks, Newspaper, Globe, ExternalLink } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { StrategyResult, Trade, Checklist, NewsEvent } from './data/types';
+import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney } from './data/types';
 
 function fmtPF(v: number | null) {
   return v === null ? '∞' : v.toFixed(2);
@@ -25,6 +25,26 @@ function RBadge({ r, size = 'sm' }: { r: number; size?: 'sm' | 'lg' }) {
 // explicitly recorded a true/false for a given rule count toward that
 // rule's denominator — a rule added after a trade was graded has no
 // opinion on it, so it's excluded rather than silently counted as broken.
+// Outcome summary for one group of trades — win rate + realized P/L, using
+// the trade's own already-computed gain_loss (the real, position-sized
+// dollar result) rather than a re-derived R-multiple, so this always
+// matches what the Journal table shows for the same trades.
+function summarizeOutcome(group: Trade[]) {
+  const wins = group.filter(t => t.profit_loss === 'Profit').length;
+  const losses = group.filter(t => t.profit_loss === 'Loss').length;
+  const decided = wins + losses;
+  const winRate = decided > 0 ? Math.round((wins / decided) * 100) : null;
+  const totalGL = group.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
+  const avgGL = group.length > 0 ? totalGL / group.length : 0;
+  return {
+    count: group.length,
+    wins, losses,
+    winRate,
+    totalGL: Math.round(totalGL * 100) / 100,
+    avgGL: Math.round(avgGL * 100) / 100,
+  };
+}
+
 function useChecklistCompliance(trades: Trade[], checklists: Checklist[]) {
   return useMemo(() => {
     return checklists
@@ -44,7 +64,28 @@ function useChecklistCompliance(trades: Trade[], checklists: Checklist[]) {
         const totalChecks = ruleStats.reduce((s, r) => s + r.total, 0);
         const totalFollowed = ruleStats.reduce((s, r) => s + r.followed, 0);
         const overallPct = totalChecks > 0 ? Math.round((totalFollowed / totalChecks) * 100) : null;
-        return { checklist: cl, enabledCount: clTrades.length, ruleStats, overallPct };
+
+        // "Followed the checklist" means every single rule was explicitly
+        // checked off — one broken (or ungraded) rule puts a trade in the
+        // other bucket. That's a stricter bar than the overall follow rate
+        // above, but it's the honest reading of "did I follow my rules on
+        // this trade" — this is what actually answers whether following
+        // the checklist correlates with a better result.
+        const fullCompliance = cl.items.length > 0
+          ? clTrades.filter(t => cl.items.every(item => t.checklist_results?.[String(item.id)] === true))
+          : [];
+        const notFullCompliance = cl.items.length > 0
+          ? clTrades.filter(t => !cl.items.every(item => t.checklist_results?.[String(item.id)] === true))
+          : [];
+
+        return {
+          checklist: cl,
+          enabledCount: clTrades.length,
+          ruleStats,
+          overallPct,
+          fullCompliance: summarizeOutcome(fullCompliance),
+          notFullCompliance: summarizeOutcome(notFullCompliance),
+        };
       })
       .filter(s => s.enabledCount > 0);
   }, [trades, checklists]);
@@ -61,7 +102,7 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
         <ListChecks className="w-4 h-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">Checklist Compliance</h2>
       </div>
-      {stats.map(({ checklist, enabledCount, ruleStats, overallPct }) => {
+      {stats.map(({ checklist, enabledCount, ruleStats, overallPct, fullCompliance, notFullCompliance }) => {
         const sorted = [...ruleStats].sort((a, b) => b.broken - a.broken);
         return (
           <div key={checklist.id}>
@@ -101,6 +142,56 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
                 </CardContent>
               </Card>
             </div>
+
+            {(fullCompliance.count > 0 || notFullCompliance.count > 0) && (
+              <div className="mt-3">
+                <p className="text-xs text-muted-foreground mb-2">
+                  Result when every rule was followed, vs. when at least one wasn't
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Card className="border-green-400/30">
+                    <CardContent className="pt-4 pb-3">
+                      <p className="text-xs text-muted-foreground">All Rules Followed</p>
+                      <p className="text-2xl font-bold">
+                        {fullCompliance.count} trade{fullCompliance.count !== 1 ? 's' : ''}
+                      </p>
+                      {fullCompliance.count > 0 ? (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {fullCompliance.winRate === null ? 'No wins/losses yet' : `${fullCompliance.winRate}% win rate`}
+                          {' '}({fullCompliance.wins}W / {fullCompliance.losses}L)
+                          {' '}&middot;{' '}
+                          <span className={fullCompliance.totalGL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}>
+                            {fullCompliance.totalGL > 0 ? '+' : ''}{fmtMoney(fullCompliance.totalGL)} total
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground mt-1">No fully-compliant trades yet</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                  <Card className="border-red-400/30">
+                    <CardContent className="pt-4 pb-3">
+                      <p className="text-xs text-muted-foreground">Not Fully Followed</p>
+                      <p className="text-2xl font-bold">
+                        {notFullCompliance.count} trade{notFullCompliance.count !== 1 ? 's' : ''}
+                      </p>
+                      {notFullCompliance.count > 0 ? (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {notFullCompliance.winRate === null ? 'No wins/losses yet' : `${notFullCompliance.winRate}% win rate`}
+                          {' '}({notFullCompliance.wins}W / {notFullCompliance.losses}L)
+                          {' '}&middot;{' '}
+                          <span className={notFullCompliance.totalGL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}>
+                            {notFullCompliance.totalGL > 0 ? '+' : ''}{fmtMoney(notFullCompliance.totalGL)} total
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground mt-1">Every graded trade followed all rules</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            )}
           </div>
         );
       })}
@@ -132,64 +223,127 @@ function useTodayNews(events: NewsEvent[]) {
   }, [events]);
 }
 
+function fmtHeadlineTime(pubDate: string | null): string {
+  if (!pubDate) return '';
+  const d = new Date(pubDate);
+  if (isNaN(d.getTime())) return '';
+  const diffMin = Math.round((Date.now() - d.getTime()) / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+// Split 50/50: the economic calendar (scheduled, data-driven events) on the
+// left, general market/international headlines (unscheduled, narrative
+// news) on the right — different kinds of "what's moving the market today"
+// that don't belong squeezed into one list.
 function NewsWidget() {
-  const { data, loading } = useFetch<{ events: NewsEvent[]; error: string | null }>('/summary?resource=news');
+  const { data, loading } = useFetch<{
+    events: NewsEvent[]; eventsError: string | null;
+    headlines: Headline[]; headlinesError: string | null;
+  }>('/summary?resource=news');
   const [showAll, setShowAll] = useState(false);
   const todayEvents = useTodayNews(data?.events ?? []);
-  const visible = showAll ? todayEvents : todayEvents.filter(e => e.impact.toLowerCase() !== 'low');
+  const visibleEvents = showAll ? todayEvents : todayEvents.filter(e => e.impact.toLowerCase() !== 'low');
+  const headlines = (data?.headlines ?? []).slice(0, 10);
 
   return (
-    <Card className="mb-6">
-      <CardContent className="pt-4 pb-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Newspaper className="w-4 h-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Today's Market News</h2>
-            <span className="text-xs text-muted-foreground">
-              {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-            </span>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6 items-stretch">
+      <Card>
+        <CardContent className="pt-4 pb-4 h-full flex flex-col">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Newspaper className="w-4 h-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Today's Market News</h2>
+              <span className="text-xs text-muted-foreground hidden sm:inline">
+                {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Show low impact</span>
+              <Switch checked={showAll} onCheckedChange={setShowAll} />
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Show low impact</span>
-            <Switch checked={showAll} onCheckedChange={setShowAll} />
-          </div>
-        </div>
 
-        {loading && <p className="text-sm text-muted-foreground py-2">Loading market news…</p>}
+          {loading && <p className="text-sm text-muted-foreground py-2">Loading market news…</p>}
 
-        {!loading && data?.error && (
-          <p className="text-sm text-muted-foreground py-2">{data.error}</p>
-        )}
+          {!loading && data?.eventsError && (
+            <p className="text-sm text-muted-foreground py-2">{data.eventsError}</p>
+          )}
 
-        {!loading && !data?.error && visible.length === 0 && (
-          <p className="text-sm text-muted-foreground py-2">
-            {showAll ? 'No economic events scheduled for today.' : 'No high/medium impact events scheduled for today.'}
-          </p>
-        )}
+          {!loading && !data?.eventsError && visibleEvents.length === 0 && (
+            <p className="text-sm text-muted-foreground py-2">
+              {showAll ? 'No economic events scheduled for today.' : 'No high/medium impact events scheduled for today.'}
+            </p>
+          )}
 
-        {!loading && !data?.error && visible.length > 0 && (
-          <div className="flex flex-col divide-y divide-border">
-            {visible.map((e, i) => (
-              <div key={i} className="flex items-center gap-3 py-2 text-sm">
-                <span className="font-mono text-xs text-muted-foreground w-14 shrink-0">
-                  {new Date(e.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                <span className="text-xs font-semibold text-muted-foreground w-10 shrink-0">{e.country}</span>
-                <NewsImpactBadge impact={e.impact} />
-                <span className="flex-1 truncate">{e.title}</span>
-                {(e.forecast || e.previous || e.actual) && (
-                  <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
-                    {e.actual && <>A: {e.actual} </>}
-                    {e.forecast && <>F: {e.forecast} </>}
-                    {e.previous && <>P: {e.previous}</>}
+          {!loading && !data?.eventsError && visibleEvents.length > 0 && (
+            <div className="flex flex-col divide-y divide-border max-h-[320px] overflow-y-auto">
+              {visibleEvents.map((e, i) => (
+                <div key={i} className="flex items-center gap-3 py-2 text-sm">
+                  <span className="font-mono text-xs text-muted-foreground w-14 shrink-0">
+                    {new Date(e.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
                   </span>
-                )}
-              </div>
-            ))}
+                  <span className="text-xs font-semibold text-muted-foreground w-10 shrink-0">{e.country}</span>
+                  <NewsImpactBadge impact={e.impact} />
+                  <span className="flex-1 truncate">{e.title}</span>
+                  {(e.forecast || e.previous || e.actual) && (
+                    <span className="text-xs text-muted-foreground shrink-0 hidden xl:inline">
+                      {e.actual && <>A: {e.actual} </>}
+                      {e.forecast && <>F: {e.forecast} </>}
+                      {e.previous && <>P: {e.previous}</>}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-4 pb-4 h-full flex flex-col">
+          <div className="flex items-center gap-2 mb-3">
+            <Globe className="w-4 h-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Market &amp; International News</h2>
           </div>
-        )}
-      </CardContent>
-    </Card>
+
+          {loading && <p className="text-sm text-muted-foreground py-2">Loading headlines…</p>}
+
+          {!loading && data?.headlinesError && (
+            <p className="text-sm text-muted-foreground py-2">{data.headlinesError}</p>
+          )}
+
+          {!loading && !data?.headlinesError && headlines.length === 0 && (
+            <p className="text-sm text-muted-foreground py-2">No headlines available right now.</p>
+          )}
+
+          {!loading && !data?.headlinesError && headlines.length > 0 && (
+            <div className="flex flex-col divide-y divide-border max-h-[320px] overflow-y-auto">
+              {headlines.map((h, i) => (
+                <a
+                  key={i}
+                  href={h.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start gap-2 py-2 text-sm group hover:bg-muted/30 -mx-1 px-1 rounded"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate group-hover:text-primary">{h.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {h.source}{h.pubDate && <> &middot; {fmtHeadlineTime(h.pubDate)}</>}
+                    </p>
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
