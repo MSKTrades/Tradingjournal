@@ -152,6 +152,16 @@ export type NewsEvent = {
   actual: string | null;
 };
 
+// General market/international headline for the news widget's second
+// column, sourced from plain RSS (ForexLive, BBC World) rather than the
+// economic-calendar feed.
+export type Headline = {
+  title: string;
+  link: string;
+  pubDate: string | null;
+  source: string;
+};
+
 export const FIELD_LABELS: Record<string, string> = {
   cisd_break: 'CISD Break',
   inverse_candles: 'Inv. Candle Size',
