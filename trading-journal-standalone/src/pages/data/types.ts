@@ -32,6 +32,9 @@ export type Trade = {
   position_size: number | null;
   profit_loss: string | null;
   rr: number | null;
+  entry_price: number | null;
+  tp_price: number | null;
+  sl_price: number | null;
   coin_token: string | null;
   trade_placed_at: string | null;
   trade_executed_at: string | null;
@@ -50,8 +53,16 @@ export type Trade = {
   comments: string | null;
   extra_data: Record<string, unknown>;
   screenshots: string[];
+  notes_blocks: NoteBlock[];
   created_at: string;
 };
+
+// Ordered content stream for the trade detail panel's notes editor — lets
+// text and pasted/uploaded screenshots interleave in whatever order they
+// were written, Notion-style, instead of two separate fields.
+export type NoteBlock =
+  | { type: 'text'; value: string }
+  | { type: 'image'; url: string };
 
 export type Condition = { field: string; op: string; value: number };
 
