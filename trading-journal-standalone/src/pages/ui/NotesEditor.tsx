@@ -81,19 +81,37 @@ export default function NotesEditor({ blocks, onChange }: Props) {
     if (uploading) return;
     setUploadError(null);
     setUploading(true);
+
+    // The upload has two network hops — get a client token from /api/upload,
+    // then PUT the bytes straight to Blob storage — and neither the fetch()
+    // calls underneath nor the SDK impose their own timeout. If either hop
+    // stalls (Blob store not provisioned, a proxy/firewall silently dropping
+    // the *.vercel-storage.com connection, etc.) the button would otherwise
+    // spin forever and — because `uploading` never resets — silently swallow
+    // every retry too. A hard timeout guarantees it always resolves one way
+    // or the other.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+
     try {
       const blob = await upload(file.name, file, {
         access: 'public',
         handleUploadUrl: '/api/upload',
         contentType: file.type,
+        abortSignal: controller.signal,
       });
       const next = normalized.slice();
       next.splice(i + 1, 0, { type: 'image', url: blob.url }, { type: 'text', value: '' });
       onChange(next);
       setFocusIndex(i + 2);
     } catch (e: any) {
-      setUploadError(e?.message ?? 'Upload failed. Make sure Blob storage is set up for this Vercel project.');
+      if (e?.name === 'AbortError') {
+        setUploadError('Upload timed out after 45s. Check that a Blob store is connected to this Vercel project (Storage tab) and that your network allows connections to *.vercel-storage.com, then try again.');
+      } else {
+        setUploadError(e?.message ?? 'Upload failed. Make sure Blob storage is set up for this Vercel project.');
+      }
     } finally {
+      clearTimeout(timeout);
       setUploading(false);
     }
   }
