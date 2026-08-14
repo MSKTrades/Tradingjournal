@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Button } from '../lib/ui/button';
 import { Badge, Checkbox } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
@@ -87,6 +88,74 @@ function renderCell(trade: Trade, key: string): React.ReactNode {
   if (typeof v === 'number') return fmtNum(v, 2);
   if (v == null || v === '' || typeof v === 'object') return <span className="text-muted-foreground">—</span>;
   return String(v);
+}
+
+// Win/Loss/Breakeven read as a status, not a generic category — green/red
+// carry that meaning everywhere else in this app (P/L badges, capital
+// cards), so they're reused here rather than picking new colors. Breakeven
+// stays the app's neutral muted-foreground token on purpose: it should
+// recede next to the two outcomes that actually matter, not compete with
+// them as a third "category". Direct counts in the legend (not just color)
+// are the required secondary encoding for a colorblind-safe read.
+function JournalInsights({ trades }: { trades: Trade[] }) {
+  const stats = useMemo(() => {
+    const wins = trades.filter(t => t.profit_loss === 'Profit');
+    const losses = trades.filter(t => t.profit_loss === 'Loss');
+    const breakeven = trades.filter(t => t.profit_loss === 'Breakeven');
+    const decided = wins.length + losses.length;
+    const winRate = decided > 0 ? Math.round((wins.length / decided) * 100) : 0;
+    const grossWin = wins.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
+    const grossLoss = -losses.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
+    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? null : 0);
+    const pieData = [
+      { name: 'Wins', value: wins.length, color: 'hsl(var(--success))' },
+      { name: 'Losses', value: losses.length, color: 'hsl(var(--destructive))' },
+      { name: 'Breakeven', value: breakeven.length, color: 'hsl(var(--muted-foreground))' },
+    ].filter(d => d.value > 0);
+    return { total: trades.length, wins: wins.length, losses: losses.length, breakeven: breakeven.length, winRate, profitFactor, pieData };
+  }, [trades]);
+
+  if (trades.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-stretch gap-3 mb-4">
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[110px]">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Trades</p>
+        <p className="text-xl font-bold">{stats.total}</p>
+      </div>
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[140px]">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Win Rate</p>
+        <p className="text-xl font-bold">{stats.winRate}%</p>
+        <p className="text-[10px] text-muted-foreground">{stats.wins}W / {stats.losses}L / {stats.breakeven}BE</p>
+      </div>
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[110px]">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Profit Factor</p>
+        <p className="text-xl font-bold">{stats.profitFactor === null ? '∞' : stats.profitFactor.toFixed(2)}</p>
+      </div>
+      {stats.pieData.length > 0 && (
+        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 flex items-center gap-3">
+          <div className="w-16 h-16 shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={stats.pieData} dataKey="value" nameKey="name" innerRadius={16} outerRadius={30} paddingAngle={2}>
+                  {stats.pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+                <Tooltip contentStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex flex-col gap-1">
+            {stats.pieData.map(d => (
+              <div key={d.name} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} />
+                {d.name} ({d.value})
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Journal() {
@@ -217,6 +286,8 @@ export default function Journal() {
         </div>
       )}
 
+      <JournalInsights trades={trades} />
+
       <div className="rounded-lg border border-border overflow-x-auto">
         <Table>
           <TableHeader>
@@ -286,7 +357,6 @@ export default function Journal() {
         trade={editTrade}
         customColumns={customCols}
         nextTradeNumber={nextTradeNumber}
-        allTrades={trades}
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
         onAddCustomColumn={handleAddCol}
