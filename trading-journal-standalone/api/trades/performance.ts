@@ -141,7 +141,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   let trades: any[] = await sql.unsafe(
     `SELECT id, trade_placed_at, trade_executed_at, coin_token, profit_loss, gain_loss, gain_loss_pct,
             start_capital, end_capital, cisd_break, inverse_candle_size, distance_from_asia,
-            reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr
+            reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, rr, session_in
      FROM trades
      WHERE trade_placed_at IS NOT NULL
      ORDER BY trade_placed_at ASC, COALESCE(trade_number, 999999) ASC, created_at ASC`
@@ -185,6 +185,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       const grossWin  = ts.filter(isWin).reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
       const grossLoss = -ts.filter(isLoss).reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
       const profitFactor = grossLoss > 0 ? Math.round((grossWin / grossLoss) * 100) / 100 : (grossWin > 0 ? null : 0);
+      const rrValues = ts.map(t => t.rr).filter((v: any) => v !== null && v !== undefined && !isNaN(Number(v))).map(Number);
+      const avgRr = rrValues.length ? rrValues.reduce((a: number, b: number) => a + b, 0) / rrValues.length : null;
       return {
         period, total_trades: total, wins, losses,
         win_rate: total > 0 ? Math.round(wins / total * 100) : 0,
@@ -193,6 +195,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         start_capital: Math.round(startCap * 100) / 100,
         end_capital: Math.round(endCap * 100) / 100,
         profit_factor: profitFactor,
+        avg_rr: avgRr !== null ? Math.round(avgRr * 100) / 100 : null,
       };
     });
   }
@@ -220,12 +223,25 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const weekdaySorted = WEEKDAY_ORDER.map(name => weekdayRows.find(r => r.period === name)).filter(Boolean);
   const hourlySorted = aggregate(toHour).filter(r => r.period !== 'Unknown').sort((a, b) => a.period.localeCompare(b.period));
 
+  // Session breakdown - "which session is my edge actually working in?" View
+  // sorted in time-of-day order (not alphabetical) so it reads left-to-right
+  // the way a trading day unfolds. Trades without a session logged land in
+  // 'Unknown' at the end rather than being silently dropped.
+  const SESSION_ORDER = ['Asia', 'Pre-London', 'London', 'London/NY Overlap', 'New York', 'Unknown'];
+  const toSession = (t: any) => t.session_in || 'Unknown';
+  const sessionRows = aggregate(toSession);
+  const sessionSorted = SESSION_ORDER
+    .map(name => sessionRows.find(r => r.period === name))
+    .filter(Boolean)
+    .concat(sessionRows.filter(r => !SESSION_ORDER.includes(r.period))); // any custom session values not in the known list
+
   res.status(200).json({
     monthly: aggregate(toYYYYMM),
     yearly: aggregate(toYYYY),
     weekday: weekdaySorted,
     daily: aggregate(toDay),
     hourly: hourlySorted,
+    session: sessionSorted,
     stats: computeAdvancedStats(trades),
   });
 });
