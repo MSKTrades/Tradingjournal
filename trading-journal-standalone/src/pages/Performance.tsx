@@ -24,6 +24,7 @@ type PeriodRow = {
   start_capital: number;
   end_capital: number;
   profit_factor: number | null;
+  avg_rr: number | null;
 };
 
 type AdvancedStats = {
@@ -43,11 +44,12 @@ type AdvancedStats = {
   avg_cons_losses: number;
 };
 
-type PerformanceResult = { 
-  monthly: PeriodRow[]; 
-  yearly: PeriodRow[]; 
+type PerformanceResult = {
+  monthly: PeriodRow[];
+  yearly: PeriodRow[];
   weekday: PeriodRow[];
   daily?: PeriodRow[];   // NEW: Required for Calendar
+  session?: PeriodRow[]; // Win-rate / R-multiple breakdown by trading session
   stats?: AdvancedStats; // NEW: Required for Expectancy & Win/Loss cards
 };
 
@@ -411,6 +413,7 @@ export default function Performance() {
   const yearly: PeriodRow[] = data?.yearly ?? [];
   const weekday: PeriodRow[] = data?.weekday ?? [];
   const daily: PeriodRow[] = data?.daily ?? [];
+  const session: PeriodRow[] = data?.session ?? [];
   const stats = data?.stats; 
 
   return (
@@ -461,6 +464,7 @@ export default function Performance() {
               <TabsTrigger value="monthly">Monthly Chart</TabsTrigger>
               <TabsTrigger value="yearly">Yearly Chart</TabsTrigger>
               <TabsTrigger value="weekday">By Day of Week</TabsTrigger>
+              <TabsTrigger value="session">By Session</TabsTrigger>
             </TabsList>
 
             <TabsContent value="heatmap">
@@ -550,6 +554,59 @@ export default function Performance() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="session">
+              <Card>
+                <CardContent className="pt-4">
+                  {session.length === 0 ? (
+                    <div className="p-8 text-center text-muted-foreground">
+                      No trades have a Session logged yet. Set the <strong>Session</strong> field when adding a trade to see this breakdown.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="h-64 mb-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={session} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                            <XAxis dataKey="period" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" height={40} />
+                            <YAxis tick={{ fontSize: 10 }} width={55} />
+                            <Tooltip contentStyle={{ fontSize: 11 }} />
+                            <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
+                            <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
+                              {session.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="overflow-x-auto border rounded-lg"><Table>
+                        <TableHeader>
+                          <TableRow className="text-xs">
+                            <TableHead>Session</TableHead>
+                            <TableHead className="text-center">Trades</TableHead>
+                            <TableHead className="text-center">Win %</TableHead>
+                            <TableHead className="text-center">Avg R</TableHead>
+                            <TableHead className="text-center">Profit Factor</TableHead>
+                            <TableHead className="text-right">Gain / Loss $</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {session.map(r => (
+                            <TableRow key={r.period} className="text-xs">
+                              <TableCell className="font-semibold">{r.period}</TableCell>
+                              <TableCell className="text-center">{r.total_trades}</TableCell>
+                              <TableCell className="text-center">{r.win_rate}%</TableCell>
+                              <TableCell className="text-center">{r.avg_rr !== null ? `${r.avg_rr}R` : '—'}</TableCell>
+                              <TableCell className="text-center">{fmtPF(r.profit_factor)}</TableCell>
+                              <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table></div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
