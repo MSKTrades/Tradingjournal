@@ -26,8 +26,11 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
        RETURNING id`,
       [
         p.name,
-        JSON.stringify(p.conditions ?? []),
-        JSON.stringify(p.days ?? []),
+        // Raw values, not JSON.stringify()'d — see api/trades/index.ts for
+        // why pre-stringifying a value bound to a `::jsonb` cast
+        // double-encodes it (the driver serializes it a second time).
+        p.conditions ?? [],
+        p.days ?? [],
         p.time_start ?? null,
         p.time_end ?? null,
         p.tp1_rr,
@@ -55,8 +58,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
        WHERE id = $11`,
       [
         p.name,
-        JSON.stringify(p.conditions ?? []),
-        JSON.stringify(p.days ?? []),
+        p.conditions ?? [],
+        p.days ?? [],
         p.time_start ?? null,
         p.time_end ?? null,
         p.tp1_rr,
