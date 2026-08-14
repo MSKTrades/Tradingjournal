@@ -19,6 +19,68 @@ type Trade = {
 
 type Condition = { field: string; op: string; value: number };
 
+type FFRawEvent = {
+  title?: string;
+  country?: string;
+  date?: string;
+  impact?: string;
+  forecast?: string;
+  previous?: string;
+  actual?: string;
+};
+
+type NewsEvent = {
+  title: string;
+  country: string;
+  date: string; // ISO timestamp, as sent by the upstream feed
+  impact: string; // 'Low' | 'Medium' | 'High' | 'Holiday' (upstream's own labels)
+  forecast: string | null;
+  previous: string | null;
+  actual: string | null;
+};
+
+// There's no official Forex Factory API — this is a widely-used unofficial
+// JSON mirror of their economic calendar (hosted by FairEconomy, the same
+// data many third-party trading tools pull from). It isn't guaranteed to
+// stay at this URL or in this shape forever, so every failure mode here
+// (network error, non-200, unexpected payload shape) degrades to an empty
+// events list with an `error` string instead of throwing — the Home screen
+// should never break because a third party changed or dropped this feed.
+const FF_CALENDAR_URL = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
+
+async function fetchForexFactoryNews(): Promise<{ events: NewsEvent[]; error: string | null }> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let resp: Response;
+    try {
+      resp = await fetch(FF_CALENDAR_URL, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!resp.ok) throw new Error(`Upstream returned ${resp.status}`);
+    const raw = (await resp.json()) as unknown;
+    if (!Array.isArray(raw)) throw new Error('Unexpected feed shape (not an array)');
+
+    const events: NewsEvent[] = (raw as FFRawEvent[])
+      .filter((e) => e && e.title && e.date)
+      .map((e) => ({
+        title: String(e.title),
+        country: String(e.country ?? ''),
+        date: String(e.date),
+        impact: String(e.impact ?? 'Low'),
+        forecast: e.forecast != null && e.forecast !== '' ? String(e.forecast) : null,
+        previous: e.previous != null && e.previous !== '' ? String(e.previous) : null,
+        actual: e.actual != null && e.actual !== '' ? String(e.actual) : null,
+      }));
+
+    return { events, error: null };
+  } catch (err: any) {
+    console.error('Forex Factory news fetch failed:', err);
+    return { events: [], error: 'Unable to load market news right now.' };
+  }
+}
+
 function parseJsonArray<T>(value: any): T[] {
   if (Array.isArray(value)) return value;
   if (typeof value === 'string') {
@@ -96,6 +158,16 @@ function calcR(trade: Trade, tp1: number, tp2: number | null, splitPct: number |
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  // ?resource=news serves the Home/Summary screen's economic-calendar
+  // widget. Kept in this same file/function (branched by query param)
+  // rather than a new endpoint, since this project is already at 11 of the
+  // Vercel Hobby plan's 12-function cap.
+  if (req.query.resource === 'news') {
+    const result = await fetchForexFactoryNews();
+    res.status(200).json(result);
     return;
   }
 
