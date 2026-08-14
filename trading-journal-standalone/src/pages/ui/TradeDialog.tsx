@@ -12,6 +12,7 @@ type Props = {
   trade: Trade | null;
   customColumns: CustomColumn[];
   lastEndCapital: number | null;
+  accountId: number;
   onSave: (t: TradePayload) => Promise<void>;
   onClose: () => void;
 };
@@ -19,8 +20,9 @@ type Props = {
 const INSTRUMENTS = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'GBPJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAGUSD'];
 const STRUCTURE_OPTS = ['Bullish', 'Bearish', 'Ranging'];
 
-function empty(lastCap: number | null): TradePayload {
+function empty(lastCap: number | null, accountId: number): TradePayload {
   return {
+    account_id: accountId,
     trade_number: null, start_capital: lastCap, end_capital: null,
     gain_loss: null, gain_loss_pct: null,
     structure_15m: null, wr_1m: null, before_chart_1m: null,
@@ -81,13 +83,13 @@ function StructureSelect({ label, value, onChange }: { label: string; value: str
   );
 }
 
-export default function TradeDialog({ open, trade, customColumns, lastEndCapital, onSave, onClose }: Props) {
-  const [form, setForm] = useState<TradePayload>(empty(null));
+export default function TradeDialog({ open, trade, customColumns, lastEndCapital, accountId, onSave, onClose }: Props) {
+  const [form, setForm] = useState<TradePayload>(() => empty(null, accountId));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) setForm(trade ? fromTrade(trade) : empty(lastEndCapital));
-  }, [open, trade, lastEndCapital]);
+    if (open) setForm(trade ? fromTrade(trade) : empty(lastEndCapital, accountId));
+  }, [open, trade, lastEndCapital, accountId]);
 
   function set<K extends keyof TradePayload>(k: K, v: TradePayload[K]) {
     setForm(p => ({ ...p, [k]: v }));

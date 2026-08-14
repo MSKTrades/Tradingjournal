@@ -19,14 +19,16 @@ function calcDuration(
   } catch { return null; }
 }
 
-async function listTrades() {
+async function listTrades(accountId: number) {
   const sql = db();
   const rows = await sql.unsafe(
     `SELECT * FROM trades
+     WHERE account_id = $1
      ORDER BY
        COALESCE(trade_number, 999999) ASC,
        COALESCE(trade_placed_at, created_at::date) ASC,
-       created_at ASC`
+       created_at ASC`,
+    [accountId]
   );
   if (rows.length === 0) return [];
 
@@ -42,6 +44,9 @@ async function listTrades() {
 
 async function addTrade(p: any) {
   const sql = db();
+  const accountId = Number(p.account_id);
+  if (!accountId || isNaN(accountId)) throw new Error('account_id is required');
+
   const dollarRisk = (p.start_capital ?? 0) * (p.position_size ?? 0) / 100;
   const gain_loss  = p.profit_loss === 'Profit' ? dollarRisk * (p.rr ?? 0)
                     : p.profit_loss === 'Loss' ? -dollarRisk : 0;
@@ -51,6 +56,7 @@ async function addTrade(p: any) {
 
   const rows = await sql.unsafe(
     `INSERT INTO trades (
+      account_id,
       trade_number, start_capital, end_capital, gain_loss, gain_loss_pct,
       structure_15m, wr_1m, before_chart_1m, direction,
       liquidity_swept, distance_from_asia, liquidity_swept_no,
@@ -62,9 +68,10 @@ async function addTrade(p: any) {
       comments, extra_data
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-      $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36::jsonb
+      $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb
     ) RETURNING id`,
     [
+      accountId,
       p.trade_number, p.start_capital, end_capital,
       Math.round(gain_loss * 100) / 100,
       Math.round(gain_loss_pct * 100) / 100,
@@ -84,7 +91,13 @@ async function addTrade(p: any) {
 
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   if (req.method === 'GET') {
-    res.status(200).json(await listTrades());
+    // Tolerant of a missing/invalid account_id (e.g. during the first render
+    // before the account context has resolved) — return an empty list rather
+    // than erroring, since the frontend will refetch once it has a real id.
+    const accountIdParam = req.query.account_id;
+    const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
+    if (!accountId || isNaN(accountId)) { res.status(200).json([]); return; }
+    res.status(200).json(await listTrades(accountId));
   } else if (req.method === 'POST') {
     res.status(200).json(await addTrade(req.body));
   } else {

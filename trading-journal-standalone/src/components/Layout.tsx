@@ -1,6 +1,10 @@
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp } from 'lucide-react';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useTheme } from '../lib/theme';
+import Logo from './Logo';
+import AccountSwitcher from './AccountSwitcher';
 
 const NAV_ITEMS = [
   { to: '/',             label: 'Summary',     icon: BarChart2  },
@@ -9,40 +13,85 @@ const NAV_ITEMS = [
   { to: '/strategies',   label: 'Strategies',  icon: Settings   },
 ];
 
+const COLLAPSE_KEY = 'forexforge_sidebar_collapsed';
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
+  const { theme, toggle } = useTheme();
+  const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(COLLAPSE_KEY) === '1');
+
+  const setAndPersistCollapsed = (v: boolean) => {
+    setCollapsed(v);
+    window.localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0');
+  };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <header className="border-b border-border bg-card shadow-sm sticky top-0 z-30">
-        <div className="max-w-screen-xl mx-auto px-4 flex items-center gap-6 h-14">
-          <span className="font-bold text-base tracking-tight text-foreground shrink-0">
-            📈 Fractal Backtester
-          </span>
-          <nav className="flex gap-1">
-            {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
-              const active = pathname === to;
-              return (
-                <Link
-                  key={to}
-                  to={to}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                    active
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                  )}
-                >
-                  <Icon className="w-4 h-4" />
-                  {label}
-                </Link>
-              );
-            })}
-          </nav>
+    <div className="min-h-screen bg-background text-foreground flex">
+      <aside
+        className={cn(
+          'shrink-0 bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex flex-col sticky top-0 h-screen transition-[width] duration-150',
+          collapsed ? 'w-[68px]' : 'w-60'
+        )}
+      >
+        <div className={cn('h-16 flex items-center border-b border-sidebar-border', collapsed ? 'justify-center px-0' : 'px-5')}>
+          <Logo collapsed={collapsed} size={30} />
         </div>
-      </header>
 
-      <main className="flex-1 max-w-screen-xl mx-auto w-full px-4 py-6">
+        <AccountSwitcher collapsed={collapsed} />
+
+        <nav className="flex-1 py-4 px-3 space-y-1">
+          {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
+            const active = pathname === to;
+            return (
+              <Link
+                key={to}
+                to={to}
+                title={collapsed ? label : undefined}
+                className={cn(
+                  'flex items-center gap-3 rounded-md text-sm font-medium transition-colors relative',
+                  collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5',
+                  active
+                    ? 'bg-sidebar-active/15 text-sidebar-active'
+                    : 'text-sidebar-muted hover:text-sidebar-foreground hover:bg-white/5'
+                )}
+              >
+                {active && !collapsed && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r-full bg-sidebar-active" />
+                )}
+                <Icon className="w-[18px] h-[18px] shrink-0" />
+                {!collapsed && <span>{label}</span>}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className={cn('border-t border-sidebar-border py-3 px-3 space-y-1', collapsed && 'px-0')}>
+          <button
+            onClick={toggle}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            className={cn(
+              'flex items-center gap-3 rounded-md text-sm font-medium text-sidebar-muted hover:text-sidebar-foreground hover:bg-white/5 transition-colors w-full',
+              collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
+            )}
+          >
+            {theme === 'dark' ? <Sun className="w-[18px] h-[18px] shrink-0" /> : <Moon className="w-[18px] h-[18px] shrink-0" />}
+            {!collapsed && <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>}
+          </button>
+          <button
+            onClick={() => setAndPersistCollapsed(!collapsed)}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className={cn(
+              'flex items-center gap-3 rounded-md text-sm font-medium text-sidebar-muted hover:text-sidebar-foreground hover:bg-white/5 transition-colors w-full',
+              collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
+            )}
+          >
+            {collapsed ? <PanelLeftOpen className="w-[18px] h-[18px] shrink-0" /> : <PanelLeftClose className="w-[18px] h-[18px] shrink-0" />}
+            {!collapsed && <span>Collapse</span>}
+          </button>
+        </div>
+      </aside>
+
+      <main className="flex-1 min-w-0 px-6 py-6 lg:px-8 lg:py-8 max-w-[1600px]">
         {children}
       </main>
     </div>

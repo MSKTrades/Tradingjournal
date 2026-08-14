@@ -102,13 +102,24 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   try {
     const sql = db();
 
+    // Tolerant of a missing/invalid account_id (e.g. before the account
+    // context has resolved on first render) — return empty results rather
+    // than erroring, since the frontend refetches once it has a real id.
+    const accountIdParam = req.query.account_id;
+    const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
+    if (!accountId || isNaN(accountId)) {
+      res.status(200).json([]);
+      return;
+    }
+
     const [tradesRaw, strategiesRaw] = await Promise.all([
       sql.unsafe(`
         SELECT id, trade_placed_at, trade_executed_at, coin_token, cisd_break,
                inverse_candle_size, distance_from_asia,
                reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, profit_loss
         FROM trades
-      `),
+        WHERE account_id = $1
+      `, [accountId]),
       sql.unsafe(`
         SELECT * FROM strategies 
         WHERE active = true 

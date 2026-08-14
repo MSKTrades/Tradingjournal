@@ -1,4 +1,4 @@
-# Trading Journal — Standalone (Vercel + Postgres)
+# ForexForge — Standalone (Vercel + Postgres)
 
 This is a full rebuild of your Retool trading journal as a standalone app:
 Vite + React frontend, Vercel serverless functions for the backend, and a

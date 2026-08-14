@@ -1,5 +1,16 @@
+export type Account = {
+  id: number;
+  name: string;
+  type: string | null;         // free-form label, e.g. "Live", "Paper", "Backtest"
+  starting_balance: number | null;
+  active: boolean;
+  sort_order: number;
+  created_at: string;
+};
+
 export type Trade = {
   id: number;
+  account_id: number;
   trade_number: number | null;
   start_capital: number | null;
   end_capital: number | null;

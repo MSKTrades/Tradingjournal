@@ -138,13 +138,23 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== 'GET') { res.status(405).json({ error: 'Method not allowed' }); return; }
   const sql = db();
 
+  // Tolerant of a missing/invalid account_id (e.g. before the account context
+  // has resolved on first render) — return empty results instead of erroring.
+  const accountIdParam = req.query.account_id;
+  const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
+  if (!accountId || isNaN(accountId)) {
+    res.status(200).json({ monthly: [], yearly: [], weekday: [], daily: [], hourly: [], session: [], stats: undefined });
+    return;
+  }
+
   let trades: any[] = await sql.unsafe(
     `SELECT id, trade_placed_at, trade_executed_at, coin_token, profit_loss, gain_loss, gain_loss_pct,
             start_capital, end_capital, cisd_break, inverse_candle_size, distance_from_asia,
             reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, rr, session_in
      FROM trades
-     WHERE trade_placed_at IS NOT NULL
-     ORDER BY trade_placed_at ASC, COALESCE(trade_number, 999999) ASC, created_at ASC`
+     WHERE trade_placed_at IS NOT NULL AND account_id = $1
+     ORDER BY trade_placed_at ASC, COALESCE(trade_number, 999999) ASC, created_at ASC`,
+    [accountId]
   );
 
   // --- Strategy filtering (matches the ?strategy_id= param your frontend already sends) ---

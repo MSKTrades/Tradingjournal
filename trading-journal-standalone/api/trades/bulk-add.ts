@@ -60,6 +60,9 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const rows: any[] = req.body.trades ?? [];
   if (rows.length === 0) { res.status(200).json({ inserted: 0, skipped: 0 }); return; }
 
+  const accountId = Number(req.body.account_id);
+  if (!accountId || isNaN(accountId)) { res.status(400).json({ error: 'account_id is required' }); return; }
+
   const sql = db();
   let inserted = 0, skipped = 0;
 
@@ -81,6 +84,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     try {
       await sql.unsafe(
         `INSERT INTO trades (
+          account_id,
           trade_number, start_capital, end_capital, gain_loss, gain_loss_pct,
           structure_15m, wr_1m, before_chart_1m, direction,
           liquidity_swept, distance_from_asia, liquidity_swept_no,
@@ -92,9 +96,10 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
           comments, extra_data
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-          $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36::jsonb
+          $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb
         )`,
         [
+          accountId,
           p.trade_number, p.start_capital, end_capital,
           gain_loss != null ? Math.round(gain_loss * 100) / 100 : null,
           gain_loss_pct != null ? Math.round(gain_loss_pct * 100) / 100 : null,

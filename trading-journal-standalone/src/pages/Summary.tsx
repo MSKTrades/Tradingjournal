@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { TrendingUp, TrendingDown, Target, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { useFetch } from '../lib/api';
+import { useAccount } from '../lib/accounts';
 import { StrategyResult, Condition, FIELD_LABELS } from './data/types';
 
 function condLabel(c: Condition) {
@@ -126,7 +127,8 @@ function StrategyCard({ result }: { result: StrategyResult }) {
 }
 
 export default function Summary() {
-  const { data, loading, refetch } = useFetch<StrategyResult[]>('/summary');
+  const { activeAccountId, activeAccount } = useAccount();
+  const { data, loading, refetch } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const results: StrategyResult[] = data ?? [];
 
   const bestR = results.length > 0 ? Math.max(...results.map(r => r.total_r)) : null;
@@ -140,6 +142,7 @@ export default function Summary() {
           <h1 className="text-xl font-bold">Strategy Summary</h1>
           <p className="text-sm text-muted-foreground">
             Each strategy independently filters &amp; scores your journal trades
+            {activeAccount && <> &middot; <span className="font-medium text-foreground">{activeAccount.name}</span></>}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={refetch}>

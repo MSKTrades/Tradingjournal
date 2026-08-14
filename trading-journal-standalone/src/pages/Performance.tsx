@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { useFetch } from '../lib/api';
+import { useAccount } from '../lib/accounts';
 import { fmtMoney, plColor, StrategyResult } from './data/types';
 
 // --- TYPES ---
@@ -402,11 +403,15 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
 
 export default function Performance() {
   const [strategyId, setStrategyId] = useState<string>('RAW');
+  const { activeAccountId } = useAccount();
 
-  const { data: strategiesData } = useFetch<StrategyResult[]>('/summary');
+  const { data: strategiesData } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const strategies = strategiesData ?? [];
 
-  const queryParams = strategyId !== 'RAW' ? `?strategy_id=${strategyId}` : '';
+  const params = new URLSearchParams();
+  if (strategyId !== 'RAW') params.set('strategy_id', strategyId);
+  if (activeAccountId) params.set('account_id', String(activeAccountId));
+  const queryParams = params.toString() ? `?${params.toString()}` : '';
   const { data, loading, refetch } = useFetch<PerformanceResult>(`/trades/performance${queryParams}`);
 
   const monthly: PeriodRow[] = data?.monthly ?? [];

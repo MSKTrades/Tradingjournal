@@ -34,17 +34,19 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
 
     await sql.unsafe(
       `UPDATE trades SET
-        trade_number=$1, start_capital=$2, end_capital=$3, gain_loss=$4, gain_loss_pct=$5,
-        structure_15m=$6, wr_1m=$7, before_chart_1m=$8, direction=$9,
-        liquidity_swept=$10, distance_from_asia=$11, liquidity_swept_no=$12,
-        cisd_break=$13, total_inverse_candles=$14, inverse_candle_size=$15, sl_pips=$16, position_size=$17,
-        profit_loss=$18, rr=$19,
-        coin_token=$20, trade_placed_at=$21, trade_executed_at=$22, session_in=$23,
-        date_closed=$24, time_closed=$25, closed_session=$26, trade_duration=$27,
-        partial_1=$28, partial_2=$29, reached_1r2=$30, reached_1r3=$31, reached_1r4=$32, reached_1r5=$33,
-        max_rr=$34, comments=$35, extra_data=$36::jsonb
-      WHERE id=$37`,
+        account_id=$1,
+        trade_number=$2, start_capital=$3, end_capital=$4, gain_loss=$5, gain_loss_pct=$6,
+        structure_15m=$7, wr_1m=$8, before_chart_1m=$9, direction=$10,
+        liquidity_swept=$11, distance_from_asia=$12, liquidity_swept_no=$13,
+        cisd_break=$14, total_inverse_candles=$15, inverse_candle_size=$16, sl_pips=$17, position_size=$18,
+        profit_loss=$19, rr=$20,
+        coin_token=$21, trade_placed_at=$22, trade_executed_at=$23, session_in=$24,
+        date_closed=$25, time_closed=$26, closed_session=$27, trade_duration=$28,
+        partial_1=$29, partial_2=$30, reached_1r2=$31, reached_1r3=$32, reached_1r4=$33, reached_1r5=$34,
+        max_rr=$35, comments=$36, extra_data=$37::jsonb
+      WHERE id=$38`,
       [
+        p.account_id,
         p.trade_number, p.start_capital, end_capital,
         Math.round(gain_loss * 100) / 100,
         Math.round(gain_loss_pct * 100) / 100,

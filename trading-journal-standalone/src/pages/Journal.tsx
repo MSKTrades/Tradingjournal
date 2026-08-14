@@ -4,6 +4,7 @@ import { Badge, Checkbox } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
 import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, FileUp } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
+import { useAccount } from '../lib/accounts';
 import TradeDialog, { TradePayload } from './ui/TradeDialog';
 import ManageColumnsDialog from './ui/ManageColumnsDialog';
 import ImportTradesDialog, { ImportedTrade } from './ui/ImportTradesDialog';
@@ -91,7 +92,8 @@ function renderCell(trade: Trade, key: string): React.ReactNode {
 }
 
 export default function Journal() {
-  const { data: rawTrades, loading, refetch: refetchTrades } = useFetch<Trade[]>('/trades');
+  const { accounts, loading: accountsLoading, activeAccountId, activeAccount } = useAccount();
+  const { data: rawTrades, loading, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
   const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>('/columns');
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -129,8 +131,12 @@ export default function Journal() {
   }
 
   async function handleSave(payload: TradePayload) {
-    if (payload.id != null) await api.put(`/trades/${payload.id}`, payload);
-    else await api.post('/trades', payload);
+    // Always pin to the currently selected account — belt-and-suspenders
+    // alongside TradeDialog's own default, in case the account switched
+    // while the dialog was open.
+    const withAccount = { ...payload, account_id: activeAccountId ?? payload.account_id };
+    if (withAccount.id != null) await api.put(`/trades/${withAccount.id}`, withAccount);
+    else await api.post('/trades', withAccount);
     refetchTrades();
   }
 
@@ -177,7 +183,10 @@ export default function Journal() {
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <div>
           <h1 className="text-xl font-bold">Trade Journal</h1>
-          <p className="text-sm text-muted-foreground">{trades.length} trade{trades.length !== 1 ? 's' : ''}</p>
+          <p className="text-sm text-muted-foreground">
+            {trades.length} trade{trades.length !== 1 ? 's' : ''}
+            {activeAccount && <> &middot; <span className="font-medium text-foreground">{activeAccount.name}</span></>}
+          </p>
         </div>
         <div className="flex gap-2 flex-wrap">
           {selectedIds.size > 0 && (
@@ -188,14 +197,20 @@ export default function Journal() {
           <Button variant="outline" size="sm" onClick={() => setColDialogOpen(true)}>
             <Columns className="w-4 h-4 mr-1" /> Columns
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+          <Button variant="outline" size="sm" disabled={!activeAccountId} onClick={() => setImportOpen(true)}>
             <FileUp className="w-4 h-4 mr-1" /> Import Excel
           </Button>
-          <Button size="sm" onClick={() => { setEditTrade(null); setDialogOpen(true); }}>
+          <Button size="sm" disabled={!activeAccountId} onClick={() => { setEditTrade(null); setDialogOpen(true); }}>
             <Plus className="w-4 h-4 mr-1" /> Add Trade
           </Button>
         </div>
       </div>
+
+      {!accountsLoading && accounts.length === 0 && (
+        <div className="text-center py-12 text-muted-foreground border border-dashed border-border rounded-lg mb-4">
+          No accounts yet. Use the account switcher in the sidebar to create one before adding trades.
+        </div>
+      )}
 
       <div className="rounded-lg border border-border overflow-x-auto">
         <Table>
@@ -260,6 +275,7 @@ export default function Journal() {
         trade={editTrade}
         customColumns={customCols}
         lastEndCapital={lastEndCapital}
+        accountId={activeAccountId ?? 0}
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
       />
@@ -268,7 +284,7 @@ export default function Journal() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImport={async (rows: ImportedTrade[]) => {
-          await api.post('/trades/bulk-add', { trades: rows });
+          await api.post('/trades/bulk-add', { trades: rows, account_id: activeAccountId });
           refetchTrades();
         }}
       />
