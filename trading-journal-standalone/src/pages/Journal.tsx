@@ -20,13 +20,10 @@ const DEFAULT_COLS = [
   { key: 'structure_15m',         label: '15M Str',      vis: false },
   { key: 'wr_1m',                 label: '1M WR',        vis: false },
   { key: 'before_chart_1m',       label: '1M B/Chart',   vis: false },
-  { key: 'cisd_break',            label: 'CISD',         vis: true },
-  { key: 'inverse_candle_size',   label: 'Inv.C Size',   vis: true },
-  { key: 'total_inverse_candles', label: 'Tot.Inv.C',    vis: false },
-  { key: 'distance_from_asia',    label: 'Dist.Asia',    vis: true },
-  { key: 'liquidity_swept',       label: 'Liq.Swept',    vis: false },
-  { key: 'liquidity_swept_no',    label: 'Liq.Swept#',   vis: false },
-  { key: 'sl_pips',               label: 'SL Pips',      vis: false },
+  // CISD/inverse-candle/distance/liquidity/SL-pips columns moved to
+  // user-defined custom fields (see schema.sql migration) — they now show
+  // up automatically via `visibleCustom` below instead of being hardcoded
+  // here, so they don't appear twice.
   { key: 'position_size',         label: 'Pos %',        vis: false },
   { key: 'profit_loss',           label: 'P/L',          vis: true },
   { key: 'rr',                    label: 'RR',           vis: true },
