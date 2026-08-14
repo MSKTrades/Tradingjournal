@@ -84,11 +84,22 @@ CREATE TABLE IF NOT EXISTS custom_columns (
   sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
--- Trade rules you define for yourself ("Waited for CISD?", "Risk <= 1%?").
--- Global across accounts, same as `strategies` — one trader, one rule set.
--- Checked off per trade (see trades.checklist_results below) only when a
--- trade opts into using the checklist at all (trades.checklist_enabled) —
--- not every trade needs one, so it's never mandatory.
+-- Checklists: named, reusable rule sets you define for yourself (e.g.
+-- "London Reversal", "Breakout Setup"). Global across accounts, same as
+-- `strategies` — one trader, several rule sets, one per setup they trade.
+CREATE TABLE IF NOT EXISTS checklists (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  active      BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Individual rules ("Waited for CISD?", "Risk <= 1%?") belonging to one
+-- checklist. Checked off per trade (see trades.checklist_results below)
+-- only when a trade opts into using a checklist at all
+-- (trades.checklist_enabled) — not every trade needs one, so it's never
+-- mandatory.
 CREATE TABLE IF NOT EXISTS checklist_items (
   id          SERIAL PRIMARY KEY,
   text        TEXT NOT NULL,
@@ -96,6 +107,24 @@ CREATE TABLE IF NOT EXISTS checklist_items (
   active      BOOLEAN NOT NULL DEFAULT true,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Idempotent migration: checklist_items used to be one flat, ungrouped
+-- list (no checklist_id — from an earlier version of this feature that
+-- was never actually deployed, but this stays safe to run either way).
+-- Add the column now, and if any rows come up NULL (a prior flat-list
+-- install), fold them into one "General" checklist rather than orphaning
+-- or silently dropping rules you already typed in.
+ALTER TABLE checklist_items ADD COLUMN IF NOT EXISTS checklist_id INTEGER REFERENCES checklists(id) ON DELETE CASCADE;
+
+DO $$
+DECLARE
+  general_id INTEGER;
+BEGIN
+  IF EXISTS (SELECT 1 FROM checklist_items WHERE checklist_id IS NULL) THEN
+    INSERT INTO checklists (name) VALUES ('General') RETURNING id INTO general_id;
+    UPDATE checklist_items SET checklist_id = general_id WHERE checklist_id IS NULL;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_trades_placed_at ON trades (trade_placed_at);
 CREATE INDEX IF NOT EXISTS idx_trades_number    ON trades (trade_number);
@@ -116,7 +145,12 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp_price NUMERIC;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_price NUMERIC;
 
 -- Idempotent column additions for the trade rules checklist.
+-- checklist_id records WHICH checklist a trade was graded against (nullable
+-- — set only once the trader picks one on the trade screen);
+-- checklist_results stays keyed by checklist_item id, not checklist id, so
+-- it doesn't care which checklist that item belongs to.
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS checklist_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS checklist_id INTEGER REFERENCES checklists(id) ON DELETE SET NULL;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS checklist_results JSONB NOT NULL DEFAULT '{}'::jsonb;  -- { "<checklist_item id>": true|false }
 
 -- ============================================================================
