@@ -67,8 +67,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         date_closed=$24, time_closed=$25, closed_session=$26, trade_duration=$27,
         partial_1=$28, partial_2=$29, reached_1r2=$30, reached_1r3=$31, reached_1r4=$32, reached_1r5=$33,
         max_rr=$34, comments=$35, extra_data=$36::jsonb, screenshots=$37::jsonb, notes_blocks=$38::jsonb,
-        checklist_enabled=$39, checklist_results=$40::jsonb
-      WHERE id=$41`,
+        checklist_enabled=$39, checklist_id=$40, checklist_results=$41::jsonb
+      WHERE id=$42`,
       [
         newAccountId,
         p.trade_number,
@@ -81,7 +81,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.partial_1, p.partial_2,
         p.reached_1r2 ?? false, p.reached_1r3 ?? false, p.reached_1r4 ?? false, p.reached_1r5 ?? false,
         p.max_rr, comments, p.extra_data ?? {}, screenshots, p.notes_blocks ?? [],
-        p.checklist_enabled ?? false, p.checklist_results ?? {}, id,
+        p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, id,
       ]
     );
 
