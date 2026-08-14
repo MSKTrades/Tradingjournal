@@ -5,6 +5,17 @@ import { db, withApi, recalcAccountCapital } from '../_db.js';
 // they can never drift out of sync with what's actually in the editor —
 // `comments` powers the Journal table's text column / any future search,
 // `screenshots` is a flat list for possible future thumbnail use.
+// IMPORTANT: values bound to a `::jsonb`-cast parameter below must be passed
+// as raw JS objects/arrays, NOT pre-stringified with JSON.stringify(). The
+// `postgres` driver infers each placeholder's Postgres type from the query
+// text (it sees the `::jsonb` cast) and applies its own JSON serializer to
+// whatever value you give it — so a value that's already a JSON string gets
+// serialized a second time, and the column ends up holding a jsonb *string*
+// containing escaped JSON text instead of a real jsonb array/object
+// (`jsonb_typeof(...)` shows 'string' and `jsonb_array_length(...)` throws
+// "cannot get array length of a scalar"). Confirmed by reproducing against a
+// throwaway local Postgres instance with this exact INSERT. Passing the raw
+// value lets the driver serialize it exactly once.
 function deriveFromNotesBlocks(notesBlocks: any) {
   const blocks = Array.isArray(notesBlocks) ? notesBlocks : [];
   const comments = blocks.filter((b: any) => b?.type === 'text' && b.value)
@@ -94,7 +105,9 @@ async function addTrade(p: any) {
       p.date_closed, p.time_closed, p.closed_session, trade_duration,
       p.partial_1, p.partial_2,
       p.reached_1r2 ?? false, p.reached_1r3 ?? false, p.reached_1r4 ?? false, p.reached_1r5 ?? false,
-      p.max_rr, comments, JSON.stringify(p.extra_data ?? {}), JSON.stringify(screenshots), JSON.stringify(p.notes_blocks ?? []),
+      // Passed as raw JS values (not pre-stringified) on purpose — see the
+      // note by deriveFromNotesBlocks below for why.
+      p.max_rr, comments, p.extra_data ?? {}, screenshots, p.notes_blocks ?? [],
     ]
   );
   await recalcAccountCapital(sql, accountId);

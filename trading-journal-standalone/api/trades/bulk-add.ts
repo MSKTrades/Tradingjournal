@@ -103,7 +103,10 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
           dateClosed, timeClosed, closedSession, tradeDuration,
           p.partial_1, p.partial_2,
           parseBool(p.reached_1r2), parseBool(p.reached_1r3), parseBool(p.reached_1r4), parseBool(p.reached_1r5),
-          p.max_rr, p.comments, JSON.stringify(p.extra_data ?? {}),
+          // Raw value, not JSON.stringify()'d — see api/trades/index.ts for
+          // why pre-stringifying a value bound to a `::jsonb` cast
+          // double-encodes it.
+          p.max_rr, p.comments, p.extra_data ?? {},
         ]
       );
       inserted++;
