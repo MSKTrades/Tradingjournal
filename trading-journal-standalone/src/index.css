@@ -8,3 +8,25 @@ body {
   color: hsl(var(--foreground));
   font-family: var(--font-sans);
 }
+
+/* The <select> component itself uses bg-background (see lib/ui/form.tsx) so
+   the closed control is themed; native dropdown popups don't inherit that
+   the same way though, so <option> needs its own explicit color here —
+   Chromium and Firefox respect this, Safari on macOS still renders options
+   with the OS's native popup style regardless (a platform limitation). */
+select option {
+  background-color: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+}
+
+/* Hide the native up/down spinner on number inputs — decimals and the
+   numeric keyboard/validation still work via type="number", we just don't
+   want the stepper arrows cluttering compact fields like RR or pip sizes. */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
