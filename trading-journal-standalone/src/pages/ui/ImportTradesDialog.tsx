@@ -6,6 +6,7 @@ import { Select } from '../../lib/ui/form';
 import { Badge } from '../../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../lib/ui/table';
 import { Upload, CheckCircle, FileSpreadsheet } from 'lucide-react';
+import { CustomColumn } from '../data/types';
 
 export type ImportedTrade = {
   trade_number: number | null;
@@ -24,6 +25,9 @@ export type ImportedTrade = {
   position_size: number | null;
   profit_loss: string | null;
   rr: number | null;
+  entry_price: number | null;
+  tp_price: number | null;
+  sl_price: number | null;
   coin_token: string | null;
   trade_placed_at: string | null;
   trade_executed_at: string | null;
@@ -65,9 +69,12 @@ const TRADE_FIELDS = [
   { key: 'liquidity_swept_no',    label: 'Liquidity Swept No.' },
   { key: 'sl_pips',               label: 'SL Pips' },
   { key: 'position_size',         label: 'Position Size %' },
-  { key: 'start_capital',         label: 'Start Capital ($)' },
+  { key: 'start_capital',         label: 'Start Capital ($) — legacy, ignored' },
   { key: 'profit_loss',           label: 'Profit / Loss' },
   { key: 'rr',                    label: 'RR' },
+  { key: 'entry_price',           label: 'Entry Price' },
+  { key: 'tp_price',              label: 'TP Price' },
+  { key: 'sl_price',              label: 'SL Price' },
   { key: 'partial_1',             label: 'Partial 1' },
   { key: 'partial_2',             label: 'Partial 2' },
   { key: 'reached_1r2',           label: '1:2 Reached' },
@@ -105,6 +112,9 @@ const DETECT_RULES: [RegExp, string][] = [
   [/start.*cap|cap.*start|initial.*cap/i,   'start_capital'],
   [/profit.?loss|p.?[/\\]?l\b/i,           'profit_loss'],
   [/\brr\b|reward|risk.?reward/i,           'rr'],
+  [/entry.?price|price.?entry|^entry$/i,    'entry_price'],
+  [/tp.?price|take.?profit.?price|^tp$/i,   'tp_price'],
+  [/sl.?price|stop.?loss.?price|^sl$/i,     'sl_price'],
   [/partial.?1|part.?1/i,                  'partial_1'],
   [/partial.?2|part.?2/i,                  'partial_2'],
   [/^1.?[:/]2$|tp.?2$|1r2|hit.?2|2.?hit/i,  'reached_1r2'],
@@ -216,20 +226,36 @@ function parseStr(val: unknown): string | null {
   return s || null;
 }
 
-function rowToTrade(values: unknown[], mapping: Record<number, string>): ImportedTrade {
+// Custom-field values are typed per the column's data_type, so a value
+// mapped to a custom field is coerced the same way its built-in cousins are.
+function parseCustomValue(val: unknown, dataType: string | undefined): unknown {
+  if (val == null || val === '') return null;
+  if (dataType === 'number') return parseNum(val);
+  if (dataType === 'boolean') return parseBool(val);
+  return parseStr(val);
+}
+
+function rowToTrade(values: unknown[], mapping: Record<number, string>, customColumns: CustomColumn[]): ImportedTrade {
   const t: ImportedTrade = {
     trade_number: null, start_capital: null, structure_15m: null, wr_1m: null, before_chart_1m: null,
     direction: 'Long', liquidity_swept: null, distance_from_asia: null,
     liquidity_swept_no: null, cisd_break: null, total_inverse_candles: null,
     inverse_candle_size: null, sl_pips: null, position_size: null,
-    profit_loss: null, rr: null, coin_token: null, trade_placed_at: null,
+    profit_loss: null, rr: null, entry_price: null, tp_price: null, sl_price: null,
+    coin_token: null, trade_placed_at: null,
     trade_executed_at: null, session_in: null, date_closed: null, time_closed: null,
     closed_session: null, trade_duration: null, partial_1: null, partial_2: null,
     reached_1r2: false, reached_1r3: false, reached_1r4: false, reached_1r5: false,
     max_rr: null, comments: null, extra_data: {},
   };
+  const colByKey = new Map(customColumns.map(c => [c.col_key, c]));
   Object.entries(mapping).forEach(([idxStr, field]) => {
     const val = values[Number(idxStr)];
+    if (field.startsWith('custom:')) {
+      const colKey = field.slice('custom:'.length);
+      t.extra_data[colKey] = parseCustomValue(val, colByKey.get(colKey)?.data_type);
+      return;
+    }
     switch (field) {
       case 'trade_number':          t.trade_number          = parseNum(val); break;
       case 'start_capital':         t.start_capital         = parseNum(val); break;
@@ -254,6 +280,9 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>): Importe
       case 'position_size':         t.position_size         = parseNum(val); break;
       case 'profit_loss':           t.profit_loss           = parsePL(val); break;
       case 'rr':                    t.rr                    = parseNum(val); break;
+      case 'entry_price':           t.entry_price           = parseNum(val); break;
+      case 'tp_price':              t.tp_price               = parseNum(val); break;
+      case 'sl_price':              t.sl_price               = parseNum(val); break;
       case 'partial_1':             t.partial_1             = parseNum(val); break;
       case 'partial_2':             t.partial_2             = parseNum(val); break;
       case 'reached_1r2':           t.reached_1r2           = parseBool(val); break;
@@ -267,12 +296,18 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>): Importe
   return t;
 }
 
-type Props = { open: boolean; onClose: () => void; onImport: (trades: ImportedTrade[]) => Promise<void> };
+type Props = { open: boolean; onClose: () => void; onImport: (trades: ImportedTrade[]) => Promise<void>; customColumns: CustomColumn[] };
 type Step  = 'upload' | 'map' | 'preview';
 type SheetInfo = { name: string; rowCount: number };
 
-export default function ImportTradesDialog({ open, onClose, onImport }: Props) {
+export default function ImportTradesDialog({ open, onClose, onImport, customColumns }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  // Built-in fields plus one entry per user-defined custom field, so a
+  // spreadsheet column can be mapped straight into extra_data on import.
+  const fieldOptions = [
+    ...TRADE_FIELDS,
+    ...customColumns.map(c => ({ key: `custom:${c.col_key}`, label: `${c.name} (custom)` })),
+  ];
   const [step, setStep]     = useState<Step>('upload');
   const [sheets, setSheets] = useState<SheetInfo[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -339,7 +374,7 @@ export default function ImportTradesDialog({ open, onClose, onImport }: Props) {
         if (gi >= 0 && mapping[gi] && mapping[gi] !== 'skip') hMap[i] = mapping[gi];
       });
       sheet.rows.forEach(row => {
-        const t = rowToTrade(row, hMap);
+        const t = rowToTrade(row, hMap, customColumns);
         if (!t.trade_placed_at && !t.coin_token) return;
         const key = `${t.trade_number}|${t.trade_placed_at}|${t.coin_token}|${t.direction}`;
         if (!seen.has(key)) { seen.add(key); trades.push(t); }
@@ -403,7 +438,7 @@ export default function ImportTradesDialog({ open, onClose, onImport }: Props) {
                   <div key={i} className="flex items-center gap-2">
                     <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded w-44 shrink-0 truncate">{h}</span>
                     <Select value={mapping[i] ?? 'skip'} onChange={e => setMapping(p => ({ ...p, [i]: e.target.value }))} className="flex-1 h-7 text-xs">
-                      {TRADE_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+                      {fieldOptions.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
                     </Select>
                   </div>
                 ))}
