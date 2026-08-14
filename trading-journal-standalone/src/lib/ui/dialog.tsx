@@ -26,8 +26,8 @@ export function DialogHeader({ children }: { children: React.ReactNode }) {
   return <div className="mb-4 flex items-start justify-between">{children}</div>;
 }
 
-export function DialogTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-base font-semibold">{children}</h2>;
+export function DialogTitle({ className, children }: { className?: string; children: React.ReactNode }) {
+  return <h2 className={cn('text-base font-semibold', className)}>{children}</h2>;
 }
 
 export function DialogClose({ onClose }: { onClose: () => void }) {
