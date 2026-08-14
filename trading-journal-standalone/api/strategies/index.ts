@@ -72,4 +72,20 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       [
         p.name,
         JSON.stringify(p.conditions ?? []),
-        JSON.stringify(p.days
+        JSON.stringify(p.days ?? []),
+        p.time_start ?? null,
+        p.time_end ?? null,
+        p.tp1_rr,
+        p.tp2_rr ?? null,
+        p.split_percent ?? null,
+        p.sort_order ?? 0,
+        p.active ?? true,
+        id,
+      ]
+    );
+
+    res.status(200).json({ id });
+  } else {
+    res.status(405).json({ error: 'Method not allowed' });
+  }
+});
