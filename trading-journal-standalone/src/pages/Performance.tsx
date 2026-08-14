@@ -192,8 +192,6 @@ function ExpectancyCards({ stats }: { stats?: AdvancedStats }) {
 }
 
 function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
-  // Extract unique years from the 'YYYY-MM' period strings
-  const years = Array.from(new Set(monthly.map(m => m.period.split('-')[0]))).filter(Boolean).sort().reverse();
   // Robust helper to safely extract year and month from any period string format (YYYY-MM, YYYY-MM-DD, ISO, etc.)
   const parsePeriod = (period: string) => {
     if (!period) return null;
@@ -212,7 +210,8 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
     return null;
   };
 
-  if (years.length === 0) return <div className="p-8 text-center text-muted-foreground">No monthly data available for heatmap.</div>;
+  // Hooks must run unconditionally before any early return (Rules of Hooks) —
+  // this used to run after a conditional return and threw "Rendered fewer hooks than expected".
   const parsedMonthly = useMemo(() => {
     return monthly.map(m => ({
       ...m,
@@ -248,8 +247,6 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
               <tr key={yr}>
                 <td className="p-2 font-bold text-sm text-center border border-border rounded-md">{yr}</td>
                 {MONTH_NAMES.map((_, i) => {
-                  const moString = (i + 1).toString().padStart(2, '0');
-                  const match = monthly.find(m => m.period === `${yr}-${moString}`);
                   const match = parsedMonthly.find(m => m.parsed!.year === yr && m.parsed!.month === i);
                   if (!match) return <td key={i} className="p-2 bg-muted/10 rounded-md text-center text-muted-foreground text-xs font-mono">-</td>;
 
@@ -266,7 +263,6 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
                   {ytdTotal > 0 ? '+' : ''}{ytdTotal.toFixed(2)}%
                 </td>
               </tr>
-            )
             );
           })}
         </tbody>
@@ -320,7 +316,6 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
 
   return (
     <div className="bg-black text-white p-4 rounded-xl border border-border">
-      <div className="flex items-center gap-4 mb-4">
       <div className="flex items-center gap-4 mb-4 justify-between">
         <h2 className="text-xl font-bold flex items-center gap-2">
           <Button variant="ghost" size="icon" className="h-6 w-6 text-white hover:bg-zinc-800" onClick={handlePrev}><ChevronLeft className="h-4 w-4" /></Button>
@@ -356,8 +351,6 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
               {week.map((day, dIdx) => {
                 if (!day) return <div key={dIdx} className="bg-zinc-950 min-h-[80px] rounded-sm p-2 border border-zinc-900/50" />;
 
-                const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-                const dailyData = daily.find(d => d.period === dateStr);
                 const dailyData = findDailyData(year, month, day);
 
                 if (dailyData) {

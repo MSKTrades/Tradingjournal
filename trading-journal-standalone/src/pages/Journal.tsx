@@ -65,7 +65,7 @@ function renderCell(trade: Trade, key: string): React.ReactNode {
   const raw = trade[key as keyof Trade];
   const v: string | number | boolean | null | undefined =
     raw === null || raw === undefined || typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean'
-      ? raw : undefined;
+      ? (raw as string | number | boolean | null | undefined) : undefined;
   if (key.startsWith('reached_')) {
     return v ? <span className="text-green-500 font-bold">✓</span> : <span className="text-muted-foreground text-xs">—</span>;
   }
