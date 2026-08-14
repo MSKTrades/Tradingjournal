@@ -9,7 +9,7 @@ import { useAccount } from '../lib/accounts';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
 import ManageColumnsDialog from './ui/ManageColumnsDialog';
 import ImportTradesDialog, { ImportedTrade } from './ui/ImportTradesDialog';
-import { Trade, CustomColumn, ChecklistItem, fmtMoney, fmtPct, fmtNum, plColor } from './data/types';
+import { Trade, CustomColumn, Checklist, fmtMoney, fmtPct, fmtNum, plColor } from './data/types';
 import { cn } from '../lib/utils';
 
 const DEFAULT_COLS = [
@@ -162,7 +162,7 @@ export default function Journal() {
   const { accounts, loading: accountsLoading, activeAccountId, activeAccount } = useAccount();
   const { data: rawTrades, loading, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
   const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>('/columns');
-  const { data: rawChecklist, refetch: refetchChecklist } = useFetch<ChecklistItem[]>('/checklist');
+  const { data: rawChecklists } = useFetch<Checklist[]>('/checklist');
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [colDialogOpen, setColDialogOpen] = useState(false);
@@ -175,7 +175,7 @@ export default function Journal() {
 
   const trades: Trade[] = rawTrades ?? [];
   const customCols: CustomColumn[] = rawCols ?? [];
-  const checklistItems: ChecklistItem[] = rawChecklist ?? [];
+  const checklists: Checklist[] = rawChecklists ?? [];
   const nextTradeNumber = trades.length === 0 ? 1 : Math.max(0, ...trades.map(t => t.trade_number ?? 0)) + 1;
 
   // Custom columns don't live directly on the Trade object — their values
@@ -244,16 +244,6 @@ export default function Journal() {
     const col_key = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
     await api.post('/columns', { name, col_key, data_type: type });
     refetchCols();
-  }
-
-  async function handleAddChecklistItem(text: string) {
-    await api.post('/checklist', { text });
-    refetchChecklist();
-  }
-
-  async function handleDeleteChecklistItem(id: number) {
-    await api.del(`/checklist?id=${id}`);
-    refetchChecklist();
   }
 
   function SortIcon({ col }: { col: string }) {
@@ -368,13 +358,11 @@ export default function Journal() {
         open={dialogOpen}
         trade={editTrade}
         customColumns={customCols}
-        checklistItems={checklistItems}
+        checklists={checklists}
         nextTradeNumber={nextTradeNumber}
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
         onAddCustomColumn={handleAddCol}
-        onAddChecklistItem={handleAddChecklistItem}
-        onDeleteChecklistItem={handleDeleteChecklistItem}
       />
 
       <ImportTradesDialog
