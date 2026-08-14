@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, withApi } from './_db.js';
+import { db, withApi, recalcAccountCapital } from './_db.js';
 
 async function listAccounts() {
   const sql = db();
@@ -56,6 +56,9 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     );
 
     if (!rows[0]) { res.status(404).json({ error: 'Account not found' }); return; }
+    // starting_balance may have changed — every trade's capital chain in
+    // this account is derived from it, so recompute the whole chain.
+    await recalcAccountCapital(sql, id);
     res.status(200).json(rows[0]);
   } else if (req.method === 'DELETE') {
     const tradeCountRows = await sql.unsafe('SELECT COUNT(*)::int AS count FROM trades WHERE account_id = $1', [id]);
