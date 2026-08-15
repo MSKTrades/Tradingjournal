@@ -9,8 +9,9 @@ import { useAccount } from '../lib/accounts';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
 import ManageColumnsDialog from './ui/ManageColumnsDialog';
 import ImportTradesDialog, { ImportedTrade } from './ui/ImportTradesDialog';
-import { Trade, CustomColumn, Checklist, fmtMoney, fmtPct, fmtNum, plColor } from './data/types';
+import { Trade, CustomColumn, Checklist, Tag, fmtMoney, fmtPct, fmtNum, plColor } from './data/types';
 import { cn } from '../lib/utils';
+import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters } from './ui/PerformanceFilterBar';
 
 const DEFAULT_COLS = [
   { key: 'trade_number',          label: '#',            vis: true },
@@ -322,6 +323,9 @@ export default function Journal() {
   const { data: rawTrades, loading, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
   const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>('/columns');
   const { data: rawChecklists } = useFetch<Checklist[]>('/checklist');
+  const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
+  const allTags: Tag[] = rawTags ?? [];
+  const [filters, setFilters] = useState<PerfFilters>(emptyFilters);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [colDialogOpen, setColDialogOpen] = useState(false);
@@ -363,18 +367,27 @@ export default function Journal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trades, sort, customColKeys]);
 
-  // Re-sorting or switching accounts changes what page 1 even means, and
-  // shrinking the page size (or a bulk delete) can leave `page` pointing
-  // past the new last page - both are corrected here rather than in the
-  // render path, so every consumer of `page` below already sees a valid
-  // value.
-  useEffect(() => { setPage(1); }, [activeAccountId, sort.key, sort.dir, pageSize]);
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  // Same Assets/Side/Outcome/Tags/Day/Date-range filter bar as Performance,
+  // applied on top of sorting - `matchesFilters` is the one shared
+  // predicate both pages use, so "Side: Short" etc. can't drift between them.
+  const assetOptions = useMemo(
+    () => Array.from(new Set(trades.map(t => (t.coin_token ?? '').trim().toUpperCase()).filter(Boolean))).sort(),
+    [trades]
+  );
+  const filtered = useMemo(() => sorted.filter(t => matchesFilters(t, filters)), [sorted, filters]);
+
+  // Re-sorting, switching accounts, or changing filters changes what page 1
+  // even means, and shrinking the page size (or a bulk delete) can leave
+  // `page` pointing past the new last page - both are corrected here rather
+  // than in the render path, so every consumer of `page` below already sees
+  // a valid value.
+  useEffect(() => { setPage(1); }, [activeAccountId, sort.key, sort.dir, pageSize, filters]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   useEffect(() => { if (page !== currentPage) setPage(currentPage); }, [page, currentPage]);
   const pageTrades = useMemo(
-    () => sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize),
-    [sorted, currentPage, pageSize]
+    () => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [filtered, currentPage, pageSize]
   );
 
   function toggleSort(key: string) {
@@ -476,7 +489,9 @@ export default function Journal() {
         </div>
       )}
 
-      <JournalInsights trades={trades} />
+      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={allTags} />
+
+      <JournalInsights trades={filtered} />
 
       <TableScrollBar containerRef={tableScrollRef} />
 
@@ -513,10 +528,12 @@ export default function Journal() {
             {loading && (
               <TableRow><TableCell colSpan={99} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
             )}
-            {!loading && sorted.length === 0 && (
+            {!loading && filtered.length === 0 && (
               <TableRow>
                 <TableCell colSpan={99} className="text-center py-12 text-muted-foreground">
-                  No trades yet. Click <strong>Add Trade</strong> or <strong>Import Excel</strong> to begin.
+                  {trades.length === 0
+                    ? <>No trades yet. Click <strong>Add Trade</strong> or <strong>Import Excel</strong> to begin.</>
+                    : 'No trades match the current filters.'}
                 </TableCell>
               </TableRow>
             )}
@@ -557,7 +574,7 @@ export default function Journal() {
         page={currentPage}
         totalPages={totalPages}
         pageSize={pageSize}
-        totalRows={sorted.length}
+        totalRows={filtered.length}
         onPage={setPage}
         onPageSize={setPageSize}
       />

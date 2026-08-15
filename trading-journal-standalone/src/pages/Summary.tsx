@@ -113,14 +113,20 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
               <span className="font-medium text-foreground">{checklist.name}</span>
               {' '}&middot; {enabledCount} trade{enabledCount !== 1 ? 's' : ''} graded
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-              <Card>
+            {/* All four cards share one row on large screens (Overall Follow
+                Rate, the rule table, and the All/Not-Fully-Followed outcome
+                cards used to be two separate stacked rows) - a 12-column
+                grid so the rule table (which needs the most horizontal room
+                for its four columns) gets the lion's share while the three
+                stat cards stay compact alongside it. */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              <Card className="lg:col-span-2">
                 <CardContent className="pt-4 pb-3">
                   <p className="text-xs text-muted-foreground">Overall Follow Rate</p>
                   <p className="text-2xl font-bold">{overallPct === null ? '—' : `${overallPct}%`}</p>
                 </CardContent>
               </Card>
-              <Card className="sm:col-span-3">
+              <Card className="lg:col-span-6">
                 <CardContent className="pt-4 pb-3">
                   <Table>
                     <TableHeader>
@@ -144,15 +150,9 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
                   </Table>
                 </CardContent>
               </Card>
-            </div>
-
-            {(fullCompliance.count > 0 || notFullCompliance.count > 0) && (
-              <div className="mt-3">
-                <p className="text-xs text-muted-foreground mb-2">
-                  Result when every rule was followed, vs. when at least one wasn't
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Card className="border-green-400/30">
+              {(fullCompliance.count > 0 || notFullCompliance.count > 0) && (
+                <>
+                  <Card className="lg:col-span-2 border-green-400/30">
                     <CardContent className="pt-4 pb-3">
                       <p className="text-xs text-muted-foreground">All Rules Followed</p>
                       <p className="text-2xl font-bold">
@@ -172,7 +172,7 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
                       )}
                     </CardContent>
                   </Card>
-                  <Card className="border-red-400/30">
+                  <Card className="lg:col-span-2 border-red-400/30">
                     <CardContent className="pt-4 pb-3">
                       <p className="text-xs text-muted-foreground">Not Fully Followed</p>
                       <p className="text-2xl font-bold">
@@ -192,9 +192,9 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
                       )}
                     </CardContent>
                   </Card>
-                </div>
-              </div>
-            )}
+                </>
+              )}
+            </div>
           </div>
         );
       })}
@@ -511,7 +511,7 @@ function SessionsWidget() {
           <div className="flex justify-between text-[10px] font-mono text-muted-foreground mb-2 px-0.5">
             <span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span>
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="relative flex flex-col gap-1.5">
             {sessions.map(s => (
               <div key={s.name} className={`flex items-center gap-3 rounded-md -mx-1.5 px-1.5 py-1 ${s.active ? 'bg-green-500/5' : ''}`}>
                 <span className="w-[100px] text-xs font-medium shrink-0 flex items-center gap-1.5">
@@ -531,13 +531,27 @@ function SessionsWidget() {
                       style={{ left: `${seg.left}%`, width: `${seg.width}%` }}
                     />
                   ))}
-                  <div className="absolute top-0 bottom-0 w-px bg-red-500 z-10" style={{ left: `${nowPct}%` }} />
                 </div>
                 <span className="w-[110px] text-[11px] text-muted-foreground text-right shrink-0">
                   {s.active ? `closes in ${fmtCountdown(s.countdownMs)}` : `opens in ${fmtCountdown(s.countdownMs)}`}
                 </span>
               </div>
             ))}
+            {/* One straight "now" line spanning every session row, instead of
+                a separate short segment drawn inside each row's bar track.
+                The old version looked broken/dashed because each row's bar
+                had its own `overflow-hidden` clipping box and the rows were
+                separated by gaps/padding, so the line never actually
+                connected between rows. This is a single absolutely-positioned
+                line over the whole stack instead - the calc() mirrors the
+                fixed-width name (100px) + status pill (58px) columns and
+                their gaps (3 x 12px) on the left, and the gap + countdown
+                column (12px + 110px) on the right, so it lines up exactly
+                where each row's bar track starts/ends. */}
+            <div
+              className="pointer-events-none absolute top-0 bottom-0 w-px bg-red-500 z-10"
+              style={{ left: `calc(182px + (100% - 304px) * ${nowPct} / 100)` }}
+            />
           </div>
         </CardContent>
       </Card>
@@ -638,6 +652,53 @@ function MarketSentiment() {
   );
 }
 
+// 30 original lines, one per rotation - deliberately not attributed to any
+// real trader (misattributing a paraphrased/invented line to a real named
+// person is worse than just not naming anyone), and written around the
+// discipline/risk/process themes this app already cares about (checklists,
+// R-multiples, following rules) rather than generic hustle-culture lines.
+// Picked deterministically by day-of-year mod length, so it's stable for
+// the whole day and rotates through the full set roughly monthly.
+const MOTIVATION_QUOTES = [
+  'Your edge shows up over hundreds of trades, not one. Take the setup and let the sample size do its job.',
+  'Every rule in your checklist exists because a past trade taught it to you the hard way. Honor the lesson.',
+  'Risk management is the job. Being right is just a nice side effect.',
+  'A missed trade costs you nothing. A rule broken to chase one can cost you everything.',
+  'You don\'t need to be right more than you\'re wrong - you need your wins bigger than your losses.',
+  'The market doesn\'t know you\'re in a trade. Trade the chart, not your P/L.',
+  'Boredom is not a reason to enter. No setup is still a decision, and often the right one.',
+  'Journal the loss as carefully as the win. That\'s where the real edge gets built.',
+  'Discipline is choosing what you want most over what you want right now.',
+  'One good trade doesn\'t make you a genius. One bad trade doesn\'t make you a failure. Process, not outcome.',
+  'Cut losses fast, let winners breathe - it\'s simple to say and the hardest habit to keep.',
+  'If you wouldn\'t take the trade on paper, don\'t take it with real money.',
+  'Revenge trading is just the market renting out your emotions. Don\'t pay that bill.',
+  'Consistency compounds. A small edge, repeated without exception, beats a big edge you abandon under stress.',
+  'Your stop loss is a promise to your future self. Keep it.',
+  'The best traders aren\'t the ones who never lose - they\'re the ones who lose small and stay in the game.',
+  'Overtrading is rarely about opportunity. It\'s usually about impatience wearing a disguise.',
+  'Every session doesn\'t need a trade from you. It needs your attention - the trade comes when it comes.',
+  'Position size is how you turn "being wrong" from a disaster into a data point.',
+  'Confidence comes from preparation, not from the last winning trade.',
+  'The setup you skip because you were scared is still a trade - it just went to someone with more discipline.',
+  'You\'re not trading the pair. You\'re trading your ability to follow your own plan under pressure.',
+  'A green day built on broken rules is a red flag wearing a good mood.',
+  'Patience isn\'t doing nothing. It\'s doing the work while you wait for your setup.',
+  'The account that survives long enough to compound is the one that respected risk on the boring days too.',
+  'Your worst trades will teach you more than your best ones - if you\'re honest enough to look.',
+  'Small, repeatable wins beat one heroic trade you can\'t explain afterward.',
+  'Trading well is mostly about not trading badly. Subtraction before addition.',
+  'The market will still be here tomorrow. Your capital might not be if you force it today.',
+  'Rules aren\'t there to slow you down. They\'re there so a bad five minutes doesn\'t undo a good five months.',
+];
+
+function quoteOfDay(): string {
+  const start = new Date(new Date().getFullYear(), 0, 0);
+  const now = new Date();
+  const dayOfYear = Math.floor((now.getTime() - start.getTime()) / 86400000);
+  return MOTIVATION_QUOTES[dayOfYear % MOTIVATION_QUOTES.length] ?? MOTIVATION_QUOTES[0];
+}
+
 export default function Summary() {
   const navigate = useNavigate();
   const { activeAccountId, activeAccount } = useAccount();
@@ -656,8 +717,9 @@ export default function Summary() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-xl font-bold">Strategy Summary</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-xl font-bold">Welcome, Manjyot</h1>
+          <p className="text-sm text-muted-foreground italic">&ldquo;{quoteOfDay()}&rdquo;</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
             Each strategy independently filters &amp; scores your journal trades
             {activeAccount && <> &middot; <span className="font-medium text-foreground">{activeAccount.name}</span></>}
           </p>

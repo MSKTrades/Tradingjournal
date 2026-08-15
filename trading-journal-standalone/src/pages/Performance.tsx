@@ -12,7 +12,7 @@ import {
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import { fmtMoney, plColor, StrategyResult, Trade, Tag } from './data/types';
-import PerformanceFilterBar, { PerfFilters, emptyFilters } from './ui/PerformanceFilterBar';
+import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters } from './ui/PerformanceFilterBar';
 
 // --- TYPES ---
 type PeriodRow = {
@@ -520,22 +520,10 @@ export default function Performance() {
   // client-side already (By Hour, and the cumulative P/L chart below);
   // the older tabs keep using the strategy dropdown + server data, same as
   // before this round.
-  const filteredTrades: Trade[] = useMemo(() => {
-    return strategyFiltered.filter(t => {
-      if (filters.assets.length > 0 && !filters.assets.includes((t.coin_token ?? '').trim().toUpperCase())) return false;
-      if (filters.side.length > 0 && !filters.side.includes(t.direction)) return false;
-      if (filters.outcome.length > 0 && !filters.outcome.includes(t.profit_loss ?? '')) return false;
-      if (filters.tags.length > 0 && !(t.tags ?? []).some(tag => filters.tags.includes(tag))) return false;
-      if (filters.days.length > 0) {
-        if (!t.trade_placed_at) return false;
-        const d = new Date(t.trade_placed_at);
-        if (isNaN(d.getTime()) || !filters.days.includes(d.getUTCDay())) return false;
-      }
-      if (filters.dateFrom && (!t.trade_placed_at || t.trade_placed_at < filters.dateFrom)) return false;
-      if (filters.dateTo && (!t.trade_placed_at || t.trade_placed_at > filters.dateTo)) return false;
-      return true;
-    });
-  }, [strategyFiltered, filters]);
+  const filteredTrades: Trade[] = useMemo(
+    () => strategyFiltered.filter(t => matchesFilters(t, filters)),
+    [strategyFiltered, filters]
+  );
 
   const { rows: hourly, skipped: hourlySkipped } = useMemo(() => computeHourly(filteredTrades), [filteredTrades]);
 

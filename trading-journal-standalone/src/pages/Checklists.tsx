@@ -145,7 +145,7 @@ export default function Checklists() {
                   </div>
                 ) : (
                   <>
-                    <CardTitle className="text-sm font-semibold">{cl.name}</CardTitle>
+                    <CardTitle className="text-base font-bold">{cl.name}</CardTitle>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                         onClick={() => { setRenamingId(cl.id); setRenameValue(cl.name); }}>
@@ -165,9 +165,12 @@ export default function Checklists() {
                 <p className="text-xs text-muted-foreground italic">No rules yet</p>
               )}
 
-              {cl.items.map(item => (
+              {cl.items.map((item, idx) => (
                 <div key={item.id} className="flex items-center gap-2 group">
-                  <span className="text-sm flex-1">{item.text}</span>
+                  <span className="text-sm flex-1">
+                    <span className="font-semibold text-muted-foreground mr-1.5">Rule {idx + 1}:</span>
+                    {item.text}
+                  </span>
                   <button
                     type="button"
                     onClick={() => handleDeleteItem(item.id)}
