@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { fmtMoney, plColor, StrategyResult } from './data/types';
+import { fmtMoney, plColor, StrategyResult, Trade } from './data/types';
 
 // --- TYPES ---
 type PeriodRow = {
@@ -72,6 +72,60 @@ function fmtPeriod(p: string, isMonthly: boolean): string {
 
 function fmtPF(v: number | null): string {
   return v === null ? '∞' : v.toFixed(2);
+}
+
+function fmtHour12(h: number): string {
+  const period = h < 12 ? 'AM' : 'PM';
+  let hour12 = h % 12;
+  if (hour12 === 0) hour12 = 12;
+  return `${hour12} ${period}`;
+}
+
+function fmtHourLabel(h: number): string {
+  return `${fmtHour12(h)}–${fmtHour12((h + 1) % 24)}`;
+}
+
+// Buckets trades into 24 one-hour windows purely by parsing the raw
+// "HH:MM" string stored in trade_executed_at (a native HTML time-input
+// value) - deliberately NOT via `new Date(...)`. That field has no date
+// or timezone attached; it's just whatever wall-clock time the trader
+// typed in when logging the trade, so splitting the string directly is
+// already "local time" by construction and carries zero risk of the
+// UTC-midnight-parsing shift that bit the Sessions widget earlier. Trades
+// with no execution time logged are excluded (and counted separately)
+// rather than guessed into a bucket.
+function computeHourly(trades: Trade[]): { rows: PeriodRow[]; skipped: number } {
+  const buckets: Trade[][] = Array.from({ length: 24 }, () => []);
+  let skipped = 0;
+  for (const t of trades) {
+    const m = /^(\d{1,2}):(\d{2})/.exec(t.trade_executed_at ?? '');
+    if (!m) { skipped++; continue; }
+    const h = Number(m[1]);
+    if (h < 0 || h > 23) { skipped++; continue; }
+    buckets[h].push(t);
+  }
+  const rows: PeriodRow[] = buckets.map((group, h) => {
+    const wins = group.filter(t => t.profit_loss === 'Profit').length;
+    const losses = group.filter(t => t.profit_loss === 'Loss').length;
+    const decided = wins + losses;
+    const win_rate = decided > 0 ? Math.round((wins / decided) * 100) : 0;
+    const total_gain = group.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
+    const grossWin = group.reduce((s, t) => s + Math.max(0, Number(t.gain_loss ?? 0)), 0);
+    const grossLoss = Math.abs(group.reduce((s, t) => s + Math.min(0, Number(t.gain_loss ?? 0)), 0));
+    const profit_factor = grossLoss > 0 ? Math.round((grossWin / grossLoss) * 100) / 100 : (grossWin > 0 ? null : 0);
+    const rrVals = group.map(t => t.rr).filter((v): v is number => v != null);
+    const avg_rr = rrVals.length > 0 ? Math.round((rrVals.reduce((s, v) => s + v, 0) / rrVals.length) * 100) / 100 : null;
+    return {
+      period: fmtHourLabel(h),
+      total_trades: group.length,
+      wins, losses, win_rate,
+      total_gain: Math.round(total_gain * 100) / 100,
+      pct_return: 0,
+      start_capital: 0, end_capital: 0,
+      profit_factor, avg_rr,
+    };
+  });
+  return { rows, skipped };
 }
 
 function PerfBadge({ v }: { v: number }) {
@@ -419,7 +473,22 @@ export default function Performance() {
   const weekday: PeriodRow[] = data?.weekday ?? [];
   const daily: PeriodRow[] = data?.daily ?? [];
   const session: PeriodRow[] = data?.session ?? [];
-  const stats = data?.stats; 
+  const stats = data?.stats;
+
+  // By-Hour is computed client-side from the raw trade list rather than a
+  // new backend endpoint - the Vercel Hobby plan's serverless function
+  // count is already close to its cap, so any new breakdown that can be
+  // derived from data already being fetched elsewhere in the app goes
+  // client-side instead of adding another api/*.ts file.
+  const { data: rawTradesForHourly } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
+  const hourlySource: Trade[] = useMemo(() => {
+    const all = rawTradesForHourly ?? [];
+    if (strategyId === 'RAW') return all;
+    const strat = strategies.find(s => String(s.id) === strategyId);
+    const idSet = new Set((strat?.trades ?? []).map(t => t.id));
+    return all.filter(t => idSet.has(t.id));
+  }, [rawTradesForHourly, strategies, strategyId]);
+  const { rows: hourly, skipped: hourlySkipped } = useMemo(() => computeHourly(hourlySource), [hourlySource]);
 
   return (
     <div>
@@ -470,6 +539,7 @@ export default function Performance() {
               <TabsTrigger value="yearly">Yearly Chart</TabsTrigger>
               <TabsTrigger value="weekday">By Day of Week</TabsTrigger>
               <TabsTrigger value="session">By Session</TabsTrigger>
+              <TabsTrigger value="hour">By Hour</TabsTrigger>
             </TabsList>
 
             <TabsContent value="heatmap">
@@ -599,6 +669,67 @@ export default function Performance() {
                         </TableHeader>
                         <TableBody>
                           {session.map(r => (
+                            <TableRow key={r.period} className="text-xs">
+                              <TableCell className="font-semibold">{r.period}</TableCell>
+                              <TableCell className="text-center">{r.total_trades}</TableCell>
+                              <TableCell className="text-center">{r.win_rate}%</TableCell>
+                              <TableCell className="text-center">{r.avg_rr !== null ? `${r.avg_rr}R` : '—'}</TableCell>
+                              <TableCell className="text-center">{fmtPF(r.profit_factor)}</TableCell>
+                              <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table></div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="hour">
+              <Card>
+                <CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground mb-4">
+                    1-hour windows based on each trade's logged Execution Time — since that field stores
+                    the plain time you typed in with no timezone attached, it's already in your own local
+                    time with no conversion needed.
+                    {hourlySkipped > 0 && (
+                      <> &middot; {hourlySkipped} trade{hourlySkipped !== 1 ? 's' : ''} skipped (no Execution Time logged)</>
+                    )}
+                  </p>
+                  {hourlySource.length === 0 ? (
+                    <div className="p-8 text-center text-muted-foreground">
+                      No trades to break down by hour yet.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="h-64 mb-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={hourly} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                            <XAxis dataKey="period" tick={{ fontSize: 9 }} interval={1} angle={-40} textAnchor="end" height={50} />
+                            <YAxis tick={{ fontSize: 10 }} width={55} />
+                            <Tooltip contentStyle={{ fontSize: 11 }} />
+                            <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
+                            <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
+                              {hourly.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="overflow-x-auto border rounded-lg"><Table>
+                        <TableHeader>
+                          <TableRow className="text-xs">
+                            <TableHead>Hour</TableHead>
+                            <TableHead className="text-center">Trades</TableHead>
+                            <TableHead className="text-center">Win %</TableHead>
+                            <TableHead className="text-center">Avg R</TableHead>
+                            <TableHead className="text-center">Profit Factor</TableHead>
+                            <TableHead className="text-right">Gain / Loss $</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {hourly.filter(r => r.total_trades > 0).map(r => (
                             <TableRow key={r.period} className="text-xs">
                               <TableCell className="font-semibold">{r.period}</TableCell>
                               <TableCell className="text-center">{r.total_trades}</TableCell>

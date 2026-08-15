@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../lib/ui/card';
 import { Badge, Switch } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
@@ -609,50 +610,87 @@ function TradingViewTechnicalGauge({ symbol, tvSymbol, theme }: { symbol: string
   return <div className="tradingview-widget-container" ref={containerRef} />;
 }
 
-const DEFAULT_SENTIMENT_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'NZDUSD'];
-
-// A few commonly-traded commodities, always shown alongside whatever
-// currency pairs the account has traded - TradingView's generic "FX:"
-// symbol provider doesn't cover these, so each needs its own exchange
-// prefix. Gold (OANDA:XAUUSD) is confirmed working from a live screenshot
-// this round. Silver was originally OANDA:XAGUSD, which rendered "No data
-// here yet" live - swapped to TVC:SILVER (TradingView's own listing for
-// CFDs on Silver, confirmed to have real technical-analysis data on
-// tradingview.com). Oil was TVC:USOIL, which *also* rendered "No data"
-// live despite TradingView's own site showing indicator data for that
-// exact symbol - the free embeddable widget apparently supports a
-// narrower symbol set than the main site, and after two wrong guesses in
-// a row it's not worth a third blind one. Oil is dropped from the
-// default list for now; TradingView's own widget builder
-// (tradingview.com/widget/technical-analysis) shows a live preview as you
-// type a symbol, so pasting back whatever it confirms works there is the
-// fastest way to get it right.
+// A few commonly-traded commodities, shown as small supplementary cards
+// next to the screener (the screener's "market" field only accepts one
+// discrete market type - forex, crypto, stocks, etc - with no documented
+// way to mix commodities into a forex screener, so these stay as
+// individual widgets). TradingView's generic "FX:" symbol provider
+// doesn't cover these, so each needs its own exchange prefix. Gold
+// (OANDA:XAUUSD) and Silver (TVC:SILVER) are both confirmed working from
+// live screenshots earlier this session.
 const COMMODITIES: { symbol: string; tvSymbol: string }[] = [
   { symbol: 'XAUUSD', tvSymbol: 'OANDA:XAUUSD' }, // Gold - confirmed working
-  { symbol: 'XAGUSD', tvSymbol: 'TVC:SILVER' },   // Silver - best-effort retry
+  { symbol: 'XAGUSD', tvSymbol: 'TVC:SILVER' },   // Silver - confirmed working
 ];
 
-function tvSymbolFor(pair: string): string {
-  const commodity = COMMODITIES.find(c => c.symbol === pair);
-  return commodity ? commodity.tvSymbol : `FX:${pair}`;
+// Free, no-API-key TradingView "Screener" widget - a single embed that
+// lists many symbols in one compact, non-scrolling table (Symbol +
+// Technical Rating columns, plus whatever other columns TradingView's
+// default "overview" column set includes), instead of one
+// Technical-Analysis gauge widget per pair. This directly answers the
+// "don't want scrollable per-card widgets, want to fit more pairs at
+// once" feedback: it's ONE widget instance regardless of how many pairs
+// it lists, so there's no more one-scrollbar-per-card problem, and it can
+// show far more symbols in the same vertical space than 6-8 separate
+// cards could.
+//
+// Caveat (disclosed honestly, same as every other TradingView embed this
+// session): this sandbox's network can't load the live TradingView
+// script to screenshot the real rendering, so whether the Technical
+// Rating column actually renders as a colored bar (like the reference
+// screenshot) vs. plain text/arrow, and the exact row height/density, is
+// unconfirmed from here. TradingView's docs confirm this is a real
+// widget (embed-widget-screener.js) with a "market" field that takes one
+// discrete market (here: "forex") and a "defaultColumn" that controls
+// which metric columns show - "overview" was the closest documented
+// preset to a simple rating view. If the live render doesn't match what
+// you're after, the next screenshot will tell us exactly what to adjust
+// (defaultColumn, showToolbar, height, etc).
+function TradingViewScreener({ theme }: { theme: 'light' | 'dark' }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.innerHTML = '';
+
+    const widgetDiv = document.createElement('div');
+    widgetDiv.className = 'tradingview-widget-container__widget';
+    container.appendChild(widgetDiv);
+
+    const script = document.createElement('script');
+    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-screener.js';
+    script.async = true;
+    script.type = 'text/javascript';
+    script.text = JSON.stringify({
+      width: '100%',
+      height: 560,
+      defaultColumn: 'overview',
+      defaultScreen: 'general',
+      market: 'forex',
+      showToolbar: true,
+      locale: 'en',
+      colorTheme: theme,
+      isTransparent: true,
+    });
+    script.onerror = () => {
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '<p style="font-size:12px;color:var(--muted-foreground,#888);padding:12px">Sentiment screener unavailable (couldn\'t load TradingView script).</p>';
+      }
+    };
+    container.appendChild(script);
+  }, [theme]);
+
+  return <div className="tradingview-widget-container" ref={containerRef} />;
 }
 
 // Sentiment here means TradingView's free technical-indicator rating
-// (moving averages + oscillators rolled into Buy/Sell/Neutral), shown per
-// currency pair the account has actually traded (falling back to a few of
-// the most common majors if the account has no trades yet), plus a fixed
-// set of commodities so gold/silver/oil sentiment is always on hand even
-// if they've never been logged as a trade.
-function MarketSentiment({ trades }: { trades: Trade[] }) {
+// (moving averages + oscillators rolled into Buy/Sell/Neutral): one
+// compact Screener widget covering forex pairs (no more per-pair cards,
+// no more per-card scrollbar), plus small supplementary cards for the
+// commodities the screener can't include.
+function MarketSentiment() {
   const { theme } = useTheme();
-  const pairs = useMemo(() => {
-    const traded = Array.from(new Set(
-      trades.map(t => (t.coin_token ?? '').trim().toUpperCase()).filter(p => p.length >= 6)
-    ));
-    const base = (traded.length > 0 ? traded : DEFAULT_SENTIMENT_PAIRS).slice(0, 8);
-    const commodityCodes = COMMODITIES.map(c => c.symbol).filter(c => !base.includes(c));
-    return [...base, ...commodityCodes];
-  }, [trades]);
 
   return (
     <div className="mb-6">
@@ -663,12 +701,18 @@ function MarketSentiment({ trades }: { trades: Trade[] }) {
       <p className="text-xs text-muted-foreground mb-3">
         Technical indicator sentiment (moving averages &amp; oscillators) via TradingView &middot; not retail positioning data
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {pairs.map(p => (
-          <Card key={p}>
+      <Card className="mb-4">
+        <CardContent className="pt-3 pb-3">
+          <TradingViewScreener theme={theme} />
+        </CardContent>
+      </Card>
+      <p className="text-xs text-muted-foreground mb-2">Commodities</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {COMMODITIES.map(c => (
+          <Card key={c.symbol}>
             <CardContent className="pt-3 pb-3">
-              <p className="text-xs font-semibold mb-1 px-1">{p}</p>
-              <TradingViewTechnicalGauge symbol={p} tvSymbol={tvSymbolFor(p)} theme={theme} />
+              <p className="text-xs font-semibold mb-1 px-1">{c.symbol}</p>
+              <TradingViewTechnicalGauge symbol={c.symbol} tvSymbol={c.tvSymbol} theme={theme} />
             </CardContent>
           </Card>
         ))}
@@ -678,6 +722,7 @@ function MarketSentiment({ trades }: { trades: Trade[] }) {
 }
 
 export default function Summary() {
+  const navigate = useNavigate();
   const { activeAccountId, activeAccount } = useAccount();
   const { data, loading, refetch } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const results: StrategyResult[] = data ?? [];
@@ -764,8 +809,12 @@ export default function Summary() {
             </TableHeader>
             <TableBody>
               {[...results].sort((a, b) => b.total_r - a.total_r).map(r => (
-                <TableRow key={r.id}>
-                  <TableCell className="font-medium">{r.name}</TableCell>
+                <TableRow
+                  key={r.id}
+                  className="cursor-pointer"
+                  onClick={() => navigate(`/strategies/${r.id}`)}
+                >
+                  <TableCell className="font-medium text-primary hover:underline">{r.name}</TableCell>
                   <TableCell className="text-center">{r.total_trades}</TableCell>
                   <TableCell className="text-center text-green-600 dark:text-green-400">{r.wins}</TableCell>
                   <TableCell className="text-center text-red-500 dark:text-red-400">{r.losses}</TableCell>
@@ -788,7 +837,7 @@ export default function Summary() {
 
       <ChecklistCompliance trades={trades} checklists={checklists} />
 
-      <MarketSentiment trades={trades} />
+      <MarketSentiment />
 
       <NewsWidget />
 
