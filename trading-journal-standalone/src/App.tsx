@@ -8,6 +8,7 @@ import Performance from './pages/Performance';
 import Strategies from './pages/Strategies';
 import StrategyDetail from './pages/StrategyDetail';
 import Checklists from './pages/Checklists';
+import Backtest from './pages/Backtest';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
               <Route path="/strategies" element={<Strategies />} />
               <Route path="/strategies/:id" element={<StrategyDetail />} />
               <Route path="/checklists" element={<Checklists />} />
+              <Route path="/backtest" element={<Backtest />} />
             </Routes>
           </Layout>
         </BrowserRouter>
