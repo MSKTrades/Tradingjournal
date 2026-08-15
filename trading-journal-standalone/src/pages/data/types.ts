@@ -162,19 +162,26 @@ export type Headline = {
   source: string;
 };
 
-// Best-effort currency -> flag emoji for the news widgets. Deliberately
-// covers only currencies that actually show up on an economic calendar
-// (the majors + a handful of others FF sometimes lists) - an unknown code
-// just renders no flag rather than guessing.
-const CURRENCY_FLAGS: Record<string, string> = {
-  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵', AUD: '🇦🇺', CAD: '🇨🇦',
-  CHF: '🇨🇭', NZD: '🇳🇿', CNY: '🇨🇳', HKD: '🇭🇰', SGD: '🇸🇬', ZAR: '🇿🇦',
-  MXN: '🇲🇽', SEK: '🇸🇪', NOK: '🇳🇴', TRY: '🇹🇷', INR: '🇮🇳', BRL: '🇧🇷', KRW: '🇰🇷',
+// Best-effort currency -> ISO 3166-1 alpha-2 country code, for rendering an
+// actual flag <img> (see ui/CurrencyFlag.tsx). Deliberately covers only
+// currencies that actually show up on an economic calendar (the majors + a
+// handful of others FF sometimes lists) - an unknown code just renders no
+// flag rather than guessing.
+//
+// This used to return a Unicode flag emoji directly, but several platforms
+// - notably Windows, even fairly recent versions - don't render the
+// regional-indicator emoji pairs as flags at all; they fall back to
+// showing the raw two-letter code as plain text, which is exactly what was
+// happening. An <img> from a flag CDN renders identically everywhere.
+const CURRENCY_COUNTRY_CODES: Record<string, string> = {
+  USD: 'us', EUR: 'eu', GBP: 'gb', JPY: 'jp', AUD: 'au', CAD: 'ca',
+  CHF: 'ch', NZD: 'nz', CNY: 'cn', HKD: 'hk', SGD: 'sg', ZAR: 'za',
+  MXN: 'mx', SEK: 'se', NOK: 'no', TRY: 'tr', INR: 'in', BRL: 'br', KRW: 'kr',
 };
 
-export function currencyFlag(code: string | null | undefined): string {
-  if (!code) return '';
-  return CURRENCY_FLAGS[code.toUpperCase()] ?? '';
+export function currencyCountryCode(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return CURRENCY_COUNTRY_CODES[code.toUpperCase()] ?? null;
 }
 
 export const FIELD_LABELS: Record<string, string> = {
