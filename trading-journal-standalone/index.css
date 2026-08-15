@@ -1,0 +1,82 @@
+@import './theme.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Every Tailwind text-* utility is rem-based, so bumping the root size
+   scales the whole app's type proportionally (text-xs: 12px -> 13.5px,
+   text-sm: 14px -> 15.75px, text-base: 16px -> 18px, etc.) without having
+   to hunt down every text-xs/text-sm usage individually. Raised from the
+   16px default after feedback that the app reads small next to FX Replay's
+   larger type — 18px is a deliberate, clearly-perceptible bump (12.5%),
+   not a token nudge. */
+html {
+  font-size: 18px;
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+}
+
+/* The <select> component itself uses bg-background (see lib/ui/form.tsx) so
+   the closed control is themed; native dropdown popups don't inherit that
+   the same way though, so <option> needs its own explicit color here —
+   Chromium and Firefox respect this, Safari on macOS still renders options
+   with the OS's native popup style regardless (a platform limitation). */
+select option {
+  background-color: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+}
+
+/* Hide the native up/down spinner on number inputs — decimals and the
+   numeric keyboard/validation still work via type="number", we just don't
+   want the stepper arrows cluttering compact fields like RR or pip sizes. */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* A wide table (Journal, with custom columns added) can scroll horizontally
+   but on some platforms the native scrollbar is an invisible hover-only
+   overlay, so there's no visual cue more columns exist off-screen. This
+   forces a slim, always-visible track/thumb instead. */
+.scroll-visible-x {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.5) transparent;
+}
+.scroll-visible-x::-webkit-scrollbar {
+  height: 10px;
+}
+.scroll-visible-x::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.4);
+}
+.scroll-visible-x::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* Trade detail drawer: slides in from the right instead of the old
+   full-screen takeover, so the rest of the app stays visible (dimmed)
+   behind it — matches the FX Replay-style side panel. */
+@keyframes drawer-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes drawer-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.animate-drawer-backdrop {
+  animation: drawer-backdrop-in 180ms ease-out;
+}
+.animate-drawer-slide {
+  animation: drawer-slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
