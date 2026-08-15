@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent } from '../lib/ui/card';
 import { Badge, Switch } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
-import { TrendingUp, TrendingDown, Target, RefreshCw, ListChecks, Newspaper, Globe, ExternalLink } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, RefreshCw, ListChecks, Newspaper, Globe, ExternalLink, Clock3, Gauge } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
+import { useTheme } from '../lib/theme';
 import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney } from './data/types';
 
 function fmtPF(v: number | null) {
@@ -347,6 +348,209 @@ function NewsWidget() {
   );
 }
 
+// Commonly-cited approximate UTC windows for the four major forex sessions.
+// These are the round-hour conventions used across most retail trading
+// resources (e.g. 8am-5pm UTC for London) - they are NOT adjusted for
+// daylight-saving shifts in London/New York/Sydney, which move the "real"
+// local-time windows by an hour for part of the year. Good enough for an
+// at-a-glance view; not a substitute for an exchange's own session calendar.
+const SESSIONS_DEF: { name: string; start: number; end: number; color: string; dot: string }[] = [
+  { name: 'Sydney',   start: 22, end: 7,  color: 'bg-blue-500',   dot: 'bg-blue-500' },
+  { name: 'Tokyo',    start: 0,  end: 9,  color: 'bg-violet-500', dot: 'bg-violet-500' },
+  { name: 'London',   start: 8,  end: 17, color: 'bg-orange-500', dot: 'bg-orange-500' },
+  { name: 'New York', start: 13, end: 22, color: 'bg-green-500',  dot: 'bg-green-500' },
+];
+
+function useUtcNow() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+function isSessionActive(start: number, end: number, utcHourFrac: number): boolean {
+  return start < end
+    ? utcHourFrac >= start && utcHourFrac < end
+    : utcHourFrac >= start || utcHourFrac < end; // wraps midnight (Sydney)
+}
+
+// Next UTC clock-hour occurrence of `hour` that is strictly after `now`
+// (today if it hasn't happened yet, otherwise tomorrow).
+function nextOccurrence(hour: number, now: Date): Date {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour, 0, 0));
+  if (d.getTime() <= now.getTime()) d.setUTCDate(d.getUTCDate() + 1);
+  return d;
+}
+
+function fmtCountdown(ms: number): string {
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h === 0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+
+// Graphical strip of the four major sessions across the UTC day, with a
+// shared "now" marker and a per-session opens-in/closes-in countdown -
+// mirrors the session clocks most trading platforms show on their home
+// screen, so it's obvious at a glance whether London/NY overlap (the
+// highest-liquidity window) is currently active.
+function SessionsWidget() {
+  const now = useUtcNow();
+  const utcHourFrac = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+  const nowPct = (utcHourFrac / 24) * 100;
+
+  const sessions = SESSIONS_DEF.map(s => {
+    const active = isSessionActive(s.start, s.end, utcHourFrac);
+    const segments = s.start < s.end
+      ? [{ left: (s.start / 24) * 100, width: ((s.end - s.start) / 24) * 100 }]
+      : [
+          { left: (s.start / 24) * 100, width: ((24 - s.start) / 24) * 100 },
+          { left: 0, width: (s.end / 24) * 100 },
+        ];
+    const countdownMs = active
+      ? nextOccurrence(s.end, now).getTime() - now.getTime()
+      : nextOccurrence(s.start, now).getTime() - now.getTime();
+    return { ...s, active, segments, countdownMs };
+  });
+
+  const activeNames = sessions.filter(s => s.active).map(s => s.name);
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-1">
+        <Clock3 className="w-4 h-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Trading Sessions</h2>
+      </div>
+      <p className="text-xs text-muted-foreground mb-3">
+        {activeNames.length > 0 ? (
+          <>Active now: <span className="font-medium text-foreground">{activeNames.join(', ')}</span></>
+        ) : (
+          'No major session currently active'
+        )}
+        {' '}&middot; times shown in UTC
+      </p>
+      <Card>
+        <CardContent className="pt-4 pb-4">
+          <div className="flex justify-between text-[10px] font-mono text-muted-foreground mb-2 px-0.5">
+            <span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {sessions.map(s => (
+              <div key={s.name} className="flex items-center gap-3">
+                <span className="w-[92px] text-xs font-medium shrink-0 flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${s.dot} ${s.active ? '' : 'opacity-40'}`} />
+                  {s.name}
+                </span>
+                <div className="relative flex-1 h-3 rounded-full bg-muted/40 overflow-hidden">
+                  {s.segments.map((seg, i) => (
+                    <div
+                      key={i}
+                      className={`absolute top-0 bottom-0 ${s.color} ${s.active ? 'opacity-90' : 'opacity-30'}`}
+                      style={{ left: `${seg.left}%`, width: `${seg.width}%` }}
+                    />
+                  ))}
+                  <div className="absolute top-0 bottom-0 w-px bg-red-500 z-10" style={{ left: `${nowPct}%` }} />
+                </div>
+                <span className="w-[110px] text-[11px] text-muted-foreground text-right shrink-0">
+                  {s.active ? `closes in ${fmtCountdown(s.countdownMs)}` : `opens in ${fmtCountdown(s.countdownMs)}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Free, no-API-key TradingView "Technical Analysis" gauge - a script-only
+// embed (same idea as embedding a YouTube video), so this is client-side
+// only with no backend fetch of ours to verify. It summarizes standard
+// technical indicators (moving averages, oscillators) into a Buy/Sell/
+// Neutral read for the symbol - this is indicator-derived technical
+// sentiment, NOT retail positioning/COT-style sentiment data, which isn't
+// available for free or reliably. If the script fails to load (e.g. blocked
+// by a restrictive network), the widget area just stays empty rather than
+// breaking the page.
+function TradingViewTechnicalGauge({ symbol, theme }: { symbol: string; theme: 'light' | 'dark' }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.innerHTML = '';
+
+    const widgetDiv = document.createElement('div');
+    widgetDiv.className = 'tradingview-widget-container__widget';
+    container.appendChild(widgetDiv);
+
+    const script = document.createElement('script');
+    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js';
+    script.async = true;
+    script.type = 'text/javascript';
+    script.text = JSON.stringify({
+      interval: '1D',
+      width: '100%',
+      isTransparent: true,
+      height: 200,
+      symbol: `FX:${symbol}`,
+      showIntervalTabs: false,
+      displayMode: 'single',
+      locale: 'en',
+      colorTheme: theme,
+    });
+    script.onerror = () => {
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '<p style="font-size:12px;color:var(--muted-foreground,#888);padding:12px">Sentiment widget unavailable (couldn\'t load TradingView script).</p>';
+      }
+    };
+    container.appendChild(script);
+  }, [symbol, theme]);
+
+  return <div className="tradingview-widget-container" ref={containerRef} />;
+}
+
+const DEFAULT_SENTIMENT_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD'];
+
+// Sentiment here means TradingView's free technical-indicator gauge
+// (moving averages + oscillators rolled into Buy/Sell/Neutral), shown per
+// currency pair the account has actually traded - falls back to a few of
+// the most common majors if the account has no trades yet.
+function MarketSentiment({ trades }: { trades: Trade[] }) {
+  const { theme } = useTheme();
+  const pairs = useMemo(() => {
+    const distinct = Array.from(new Set(
+      trades.map(t => (t.coin_token ?? '').trim().toUpperCase()).filter(p => p.length >= 6)
+    ));
+    return (distinct.length > 0 ? distinct : DEFAULT_SENTIMENT_PAIRS).slice(0, 6);
+  }, [trades]);
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-1">
+        <Gauge className="w-4 h-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Market Sentiment</h2>
+      </div>
+      <p className="text-xs text-muted-foreground mb-3">
+        Technical indicator sentiment (moving averages &amp; oscillators) via TradingView &middot; not retail positioning data
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {pairs.map(p => (
+          <Card key={p}>
+            <CardContent className="pt-3 pb-3">
+              <p className="text-xs font-semibold mb-1 px-1">{p}</p>
+              <TradingViewTechnicalGauge symbol={p} theme={theme} />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Summary() {
   const { activeAccountId, activeAccount } = useAccount();
   const { data, loading, refetch } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
@@ -374,8 +578,6 @@ export default function Summary() {
           <RefreshCw className="w-4 h-4 mr-1" /> Refresh
         </Button>
       </div>
-
-      <NewsWidget />
 
       {totalTrades > 0 && (
         <div className="grid grid-cols-3 gap-4 mb-6">
@@ -408,8 +610,6 @@ export default function Summary() {
           </Card>
         </div>
       )}
-
-      <ChecklistCompliance trades={trades} checklists={checklists} />
 
       {loading && <div className="text-center py-20 text-muted-foreground">Calculating…</div>}
 
@@ -457,6 +657,14 @@ export default function Summary() {
           </Table>
         </div>
       )}
+
+      <ChecklistCompliance trades={trades} checklists={checklists} />
+
+      <SessionsWidget />
+
+      <MarketSentiment trades={trades} />
+
+      <NewsWidget />
 
     </div>
   );
