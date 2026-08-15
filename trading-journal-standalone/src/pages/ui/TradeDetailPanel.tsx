@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3 } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, Checklist, NewsEvent, SESSIONS, fmtMoney } from '../data/types';
+import { Trade, CustomColumn, Checklist, NewsEvent, Tag, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
 import { useAccount } from '../../lib/accounts';
-import { useFetch } from '../../lib/api';
+import { api, useFetch } from '../../lib/api';
 import { cn } from '../../lib/utils';
 import NotesEditor from './NotesEditor';
 import CurrencyFlag from './CurrencyFlag';
+import TagPicker from './TagPicker';
 
 // Splits a 6-letter pair like "GBPUSD" into ['GBP','USD'] to cross-reference
 // against the economic calendar's currency codes. Anything else (crypto
@@ -74,7 +75,7 @@ function empty(accountId: number, tradeNumber: number): TradePayload {
     trade_number: tradeNumber,
     start_capital: null, end_capital: null, gain_loss: null, gain_loss_pct: null,
     structure_15m: null, wr_1m: null, before_chart_1m: null,
-    direction: 'Long',
+    direction: 'Long', entry_type: null, tags: [],
     liquidity_swept: null, distance_from_asia: null, liquidity_swept_no: null,
     cisd_break: null, total_inverse_candles: null, inverse_candle_size: null,
     sl_pips: null, position_size: null,
@@ -92,7 +93,7 @@ function empty(accountId: number, tradeNumber: number): TradePayload {
 }
 
 function fromTrade(t: Trade): TradePayload {
-  return { ...t, notes_blocks: t.notes_blocks ?? [], screenshots: t.screenshots ?? [] };
+  return { ...t, notes_blocks: t.notes_blocks ?? [], screenshots: t.screenshots ?? [], tags: t.tags ?? [] };
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -172,6 +173,8 @@ export default function TradeDetailPanel({
   const [addingField, setAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState('text');
+  const { data: rawTags, refetch: refetchTags } = useFetch<Tag[]>('/columns?resource=tags');
+  const allTags: Tag[] = rawTags ?? [];
 
   useEffect(() => {
     if (open) {
@@ -237,6 +240,16 @@ export default function TradeDetailPanel({
     }
   }
 
+  // Fire-and-forget: the tag is already applied to this trade locally
+  // (TagPicker adds it to form.tags immediately), this just registers the
+  // name in the reusable list so it's suggested next time and shows up as
+  // a real filter option on the Performance page. The POST is idempotent
+  // server-side (an existing name-match just returns the existing row), so
+  // there's nothing to reconcile if it races with another save.
+  function handleCreateTag(name: string) {
+    api.post('/columns', { resource: 'tags', name }).then(() => refetchTags()).catch(() => {});
+  }
+
   async function handleAddField() {
     const trimmed = newFieldName.trim();
     if (!trimmed) return;
@@ -259,10 +272,13 @@ export default function TradeDetailPanel({
           in-progress edits without a confirmation prompt). */}
       <div className="absolute inset-0 bg-black/60 animate-drawer-backdrop" onClick={onClose} />
 
-      {/* Drawer — covers ~60% of the viewport (100% on small screens) rather
-          than a full-screen takeover, so the journal table stays visible
-          (dimmed) behind it, similar to FX Replay's trade panel. */}
-      <div className="relative h-full w-full sm:w-[70vw] sm:min-w-[760px] max-w-[1500px] bg-background border-l border-border shadow-2xl flex flex-col animate-drawer-slide">
+      {/* Drawer — covers most of the viewport width (100% on small screens)
+          rather than a full-screen takeover, so the journal table stays
+          visible (dimmed) behind it, similar to FX Replay's trade panel.
+          Widened from 70vw/760px to 88vw/980px - the left field column plus
+          notes/screenshots on the right felt cramped at the old width,
+          especially once Tags and Entry Type were added. */}
+      <div className="relative h-full w-full sm:w-[88vw] sm:min-w-[980px] max-w-[1800px] bg-background border-l border-border shadow-2xl flex flex-col animate-drawer-slide">
         {/* Top bar */}
         <div className="h-14 shrink-0 flex items-center justify-between px-5 border-b border-border">
           <div className="flex items-center gap-3 min-w-0">
@@ -284,6 +300,10 @@ export default function TradeDetailPanel({
         {/* Body: fields (left) · notes + screenshots (middle) · insights (right) */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
           <div className="w-[300px] shrink-0 overflow-y-auto border-r border-border px-5 py-5">
+            {/* Grouped FX Replay-style: identity fields (account/asset/side/
+                entry type/tags) first, then everything about going IN to the
+                trade, then SL/TP together, then everything about coming OUT
+                of it, then the result. */}
             <Section title="Trade Info">
               <div className="flex flex-col gap-1">
                 <Label className="text-xs">Account</Label>
@@ -293,17 +313,48 @@ export default function TradeDetailPanel({
               </div>
               <NumField label="Trade #" field="trade_number" step={1} min={1} />
               <div className="flex flex-col gap-1">
-                <Label className="text-xs">Direction</Label>
-                <Select value={form.direction} onChange={e => set('direction', e.target.value)}>
-                  <option value="Long">Long ▲</option>
-                  <option value="Short">Short ▼</option>
-                </Select>
-              </div>
-              <div className="flex flex-col gap-1">
                 <Label className="text-xs">Pair</Label>
                 <Input value={form.coin_token ?? ''} list="inst-list" placeholder="e.g. EURUSD"
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('coin_token', e.target.value || null)} />
                 <datalist id="inst-list">{INSTRUMENTS.map(i => <option key={i} value={i} />)}</datalist>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">Side</Label>
+                  <Select value={form.direction} onChange={e => set('direction', e.target.value)}>
+                    <option value="Long">Long ▲</option>
+                    <option value="Short">Short ▼</option>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">Entry Type</Label>
+                  <Select value={form.entry_type ?? ''} onChange={e => set('entry_type', e.target.value || null)}>
+                    <option value="">Select…</option>
+                    {ENTRY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </Select>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Tags</Label>
+                <TagPicker
+                  value={form.tags}
+                  allTags={allTags}
+                  onChange={(tags) => set('tags', tags)}
+                  onCreateTag={handleCreateTag}
+                />
+              </div>
+            </Section>
+
+            <Section title="Entry">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Date Placed</Label>
+                <Input type="date" value={form.trade_placed_at ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('trade_placed_at', e.target.value || null)} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Execution Time</Label>
+                <Input type="time" value={form.trade_executed_at ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('trade_executed_at', e.target.value || null)} />
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-xs">Session</Label>
@@ -312,22 +363,15 @@ export default function TradeDetailPanel({
                   {SESSIONS.map(s => <option key={s} value={s}>{s}</option>)}
                 </Select>
               </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Execution Time</Label>
-                <Input type="time" value={form.trade_executed_at ?? ''}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('trade_executed_at', e.target.value || null)} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Date Placed</Label>
-                <Input type="date" value={form.trade_placed_at ?? ''}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('trade_placed_at', e.target.value || null)} />
-              </div>
+              <NumField label="Entry Price" field="entry_price" step={0.00001} placeholder="e.g. 1.0842" />
             </Section>
 
-            <Section title="Entry & Exit">
-              <NumField label="Entry Price" field="entry_price" step={0.00001} placeholder="e.g. 1.0842" />
-              <NumField label="TP Price" field="tp_price" step={0.00001} placeholder="e.g. 1.0910" />
+            <Section title="Stop Loss / Take Profit">
               <NumField label="SL Price" field="sl_price" step={0.00001} placeholder="e.g. 1.0810" />
+              <NumField label="TP Price" field="tp_price" step={0.00001} placeholder="e.g. 1.0910" />
+            </Section>
+
+            <Section title="Exit">
               <div className="flex flex-col gap-1">
                 <Label className="text-xs">Date Closed</Label>
                 <Input type="date" value={form.date_closed ?? ''}

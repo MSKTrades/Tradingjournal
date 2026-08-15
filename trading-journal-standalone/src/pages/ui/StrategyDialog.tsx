@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../lib/ui/dialog';
 import { Button } from '../../lib/ui/button';
 import { Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trash2, Plus } from 'lucide-react';
-import { Strategy, Condition, CONDITION_FIELDS, OPS, WEEKDAYS } from '../data/types';
+import { Strategy, Condition, CustomColumn, CONDITION_FIELDS, CONDITION_FIELD_DUPLICATE_KEYS, OPS, WEEKDAYS } from '../data/types';
+import { useFetch } from '../../lib/api';
 
 type Props = {
   open: boolean;
@@ -61,6 +62,23 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   const [form, setForm] = useState<StrategyPayload>(emptyStrategy);
   const [saving, setSaving] = useState(false);
 
+  // Filter conditions can compare against ANY numeric field logged on a
+  // trade, not just the three original SMC-specific ones - so besides the
+  // fixed built-in fields (rr, entry price, etc.), pull in whatever custom
+  // fields the user has actually added (Journal > Manage Columns) and
+  // offer the numeric ones here too. The three legacy fields are skipped
+  // from this dynamic list since they're already covered by their own
+  // CONDITION_FIELDS entry above (same underlying data, kept under its
+  // original label so strategies saved before custom columns existed
+  // still show the field they were built with).
+  const { data: rawCols } = useFetch<CustomColumn[]>('/columns');
+  const allFields = useMemo(() => {
+    const custom = (rawCols ?? [])
+      .filter(c => c.data_type === 'number' && !CONDITION_FIELD_DUPLICATE_KEYS.has(c.col_key))
+      .map(c => ({ key: c.col_key, label: c.name }));
+    return [...CONDITION_FIELDS, ...custom];
+  }, [rawCols]);
+
   useEffect(() => {
     if (open) setForm(strategy ? toPayload(strategy) : emptyStrategy());
   }, [open, strategy]);
@@ -112,20 +130,28 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
               <Button variant="outline" size="sm" onClick={addCondition}><Plus className="w-3 h-3 mr-1" /> Add</Button>
             </div>
             {form.conditions.length === 0 && <p className="text-xs text-muted-foreground">No conditions — all trades qualify.</p>}
-            <div className="flex flex-col gap-2">
+            {/* Field name gets its own full-width row - crammed into a single
+                row alongside the op/value/delete controls, a select this long
+                (e.g. "Distance from Asia H/L") had almost no room left on
+                narrow (mobile) screens and rendered as an unreadably clipped
+                sliver. Stacking it above op/value/delete means it always has
+                the dialog's full width to show its label. */}
+            <div className="flex flex-col gap-3">
               {form.conditions.map((cond, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Select value={cond.field} onChange={e => updateCondition(i, { field: e.target.value })} className="flex-1 text-xs">
-                    {CONDITION_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+                <div key={i} className="flex flex-col gap-1.5 p-2 rounded-md border border-border/60">
+                  <Select value={cond.field} onChange={e => updateCondition(i, { field: e.target.value })} className="w-full text-xs">
+                    {allFields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
                   </Select>
-                  <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-16 text-xs">
-                    {OPS.map(op => <option key={op} value={op}>{op}</option>)}
-                  </Select>
-                  <Input type="number" step={0.01} className="w-20 text-xs" value={cond.value}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateCondition(i, { value: Number(e.target.value) })} />
-                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeCondition(i)}>
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-16 text-xs shrink-0">
+                      {OPS.map(op => <option key={op} value={op}>{op}</option>)}
+                    </Select>
+                    <Input type="number" step={0.01} className="flex-1 min-w-0 text-xs" value={cond.value}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateCondition(i, { value: Number(e.target.value) })} />
+                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeCondition(i)}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
