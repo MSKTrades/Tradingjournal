@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Button } from '../lib/ui/button';
 import { Badge, Checkbox } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
-import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, FileUp } from 'lucide-react';
+import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, FileUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
@@ -158,6 +158,88 @@ function JournalInsights({ trades }: { trades: Trade[] }) {
   );
 }
 
+// A styled ::-webkit-scrollbar / scrollbar-width:thin on the table's
+// overflow-x-auto container isn't enough on its own - modern Windows
+// Chrome/Edge (Fluent overlay scrollbars) and macOS's default "only show
+// while scrolling" setting both override page CSS and hide it entirely, so
+// the extra columns stayed just as undiscoverable as before. This is a
+// fully custom control instead - a track + thumb reflecting real scroll
+// position (via scroll/resize listeners) plus explicit left/right buttons -
+// so it's visible regardless of the OS's scrollbar settings. It only
+// renders once the table actually overflows, and hides itself again if a
+// column change brings it back within view.
+function useHorizontalScrollState(ref: React.RefObject<HTMLDivElement>) {
+  const [state, setState] = useState({ canScroll: false, canLeft: false, canRight: false, thumbPct: 0, thumbWidthPct: 100 });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const { scrollLeft, scrollWidth, clientWidth } = el;
+      const canScroll = scrollWidth > clientWidth + 2;
+      const thumbWidthPct = Math.min(100, (clientWidth / scrollWidth) * 100);
+      const maxScroll = scrollWidth - clientWidth;
+      const thumbPct = maxScroll > 0 ? (scrollLeft / maxScroll) * (100 - thumbWidthPct) : 0;
+      setState({
+        canScroll,
+        canLeft: scrollLeft > 2,
+        canRight: scrollLeft < maxScroll - 2,
+        thumbPct,
+        thumbWidthPct,
+      });
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener('resize', update);
+    return () => {
+      el.removeEventListener('scroll', update);
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [ref]);
+
+  return state;
+}
+
+function TableScrollBar({ containerRef }: { containerRef: React.RefObject<HTMLDivElement> }) {
+  const { canScroll, canLeft, canRight, thumbPct, thumbWidthPct } = useHorizontalScrollState(containerRef);
+  if (!canScroll) return null;
+
+  const nudge = (dir: number) => containerRef.current?.scrollBy({ left: dir * 240, behavior: 'smooth' });
+
+  return (
+    <div className="flex items-center gap-2 px-1 pb-2">
+      <button
+        type="button"
+        onClick={() => nudge(-1)}
+        disabled={!canLeft}
+        aria-label="Scroll table left"
+        className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:hover:bg-transparent shrink-0"
+      >
+        <ChevronLeft className="w-3.5 h-3.5" />
+      </button>
+      <div className="relative flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div
+          className="absolute top-0 bottom-0 rounded-full bg-muted-foreground/60"
+          style={{ left: `${thumbPct}%`, width: `${thumbWidthPct}%` }}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => nudge(1)}
+        disabled={!canRight}
+        aria-label="Scroll table right"
+        className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:hover:bg-transparent shrink-0"
+      >
+        <ChevronRight className="w-3.5 h-3.5" />
+      </button>
+      <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">scroll for more columns</span>
+    </div>
+  );
+}
+
 export default function Journal() {
   const { accounts, loading: accountsLoading, activeAccountId, activeAccount } = useAccount();
   const { data: rawTrades, loading, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
@@ -172,6 +254,7 @@ export default function Journal() {
   const [sort, setSort] = useState<SortState>({ key: 'trade_placed_at', dir: 'desc' });
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const tableScrollRef = useRef<HTMLDivElement>(null);
 
   const trades: Trade[] = rawTrades ?? [];
   const customCols: CustomColumn[] = rawCols ?? [];
@@ -290,8 +373,10 @@ export default function Journal() {
 
       <JournalInsights trades={trades} />
 
-      <div className="rounded-lg border border-border overflow-x-auto scroll-visible-x">
-        <Table>
+      <TableScrollBar containerRef={tableScrollRef} />
+
+      <div className="rounded-lg border border-border overflow-hidden">
+        <Table scrollRef={tableScrollRef}>
           <TableHeader>
             <TableRow className="text-xs">
               <TableHead className="w-8 px-2">

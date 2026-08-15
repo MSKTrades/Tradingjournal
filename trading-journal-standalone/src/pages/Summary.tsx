@@ -7,7 +7,8 @@ import { Button } from '../lib/ui/button';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import { useTheme } from '../lib/theme';
-import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney, currencyFlag } from './data/types';
+import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney } from './data/types';
+import CurrencyFlag from './ui/CurrencyFlag';
 
 function fmtPF(v: number | null) {
   return v === null ? '∞' : v.toFixed(2);
@@ -289,7 +290,7 @@ function NewsWidget() {
                       {new Date(e.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
                     </span>
                     <span className="text-xs font-semibold text-muted-foreground w-14 shrink-0 flex items-center gap-1">
-                      <span>{currencyFlag(e.country)}</span>{e.country}
+                      <CurrencyFlag code={e.country} />{e.country}
                     </span>
                     <NewsImpactBadge impact={e.impact} />
                     <span className="flex-1 truncate">{e.title}</span>
@@ -386,6 +387,22 @@ function isSessionActive(start: number, end: number, utcHourFrac: number): boole
     : utcHourFrac >= start || utcHourFrac < end; // wraps midnight (Sydney)
 }
 
+// The whole forex market - not just one session - is closed for the
+// weekend from Friday 22:00 UTC (New York close) until Sunday 22:00 UTC
+// (Sydney's weekly open). A per-session, hour-of-day-only check has no way
+// to know this - it would happily report Sydney/Tokyo as "OPEN" every
+// Saturday just because the clock hour matches their daily window, which
+// is exactly the bug: real brokers (FXBook included) show the whole market
+// closed on Sat/Sun regardless of what the hour is.
+function isForexWeekendClosed(d: Date): boolean {
+  const day = d.getUTCDay(); // 0=Sun .. 6=Sat
+  const hour = d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
+  if (day === 6) return true;                 // all of Saturday
+  if (day === 5 && hour >= 22) return true;    // Friday from 22:00 UTC
+  if (day === 0 && hour < 22) return true;     // Sunday before 22:00 UTC
+  return false;
+}
+
 // Next UTC clock-hour occurrence of `hour` that is strictly after `now`
 // (today if it hasn't happened yet, otherwise tomorrow). This is the real
 // instant the session opens/closes, independent of how it's displayed.
@@ -395,10 +412,26 @@ function nextOccurrence(hour: number, now: Date): Date {
   return d;
 }
 
+// Same as nextOccurrence, but keeps stepping a day at a time past the
+// weekend closure - so e.g. asking "when does Tokyo next open" on a
+// Saturday correctly lands on Monday 00:00 UTC, not Sunday 00:00 UTC
+// (which nextOccurrence alone would return, and which is still closed).
+function nextSessionOpenInstant(hour: number, now: Date): Date {
+  let candidate = nextOccurrence(hour, now);
+  let guard = 0;
+  while (isForexWeekendClosed(candidate) && guard < 8) {
+    candidate = nextOccurrence(hour, candidate);
+    guard++;
+  }
+  return candidate;
+}
+
 function fmtCountdown(ms: number): string {
   const totalMin = Math.max(0, Math.round(ms / 60000));
-  const h = Math.floor(totalMin / 60);
+  const d = Math.floor(totalMin / 1440);
+  const h = Math.floor((totalMin % 1440) / 60);
   const m = totalMin % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
   if (h === 0) return `${m}m`;
   return `${h}h ${m}m`;
 }
@@ -424,8 +457,10 @@ function SessionsWidget() {
   const nowPct = (localHourFrac / 24) * 100;
   const tzLabel = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+  const weekendClosed = isForexWeekendClosed(now);
+
   const sessions = SESSIONS_DEF.map(s => {
-    const active = isSessionActive(s.start, s.end, utcHourFrac);
+    const active = !weekendClosed && isSessionActive(s.start, s.end, utcHourFrac);
     const localStart = mod24(s.start + offsetHours);
     const localEnd = mod24(s.end + offsetHours);
     const segments = localStart < localEnd
@@ -436,11 +471,14 @@ function SessionsWidget() {
         ];
     const countdownMs = active
       ? nextOccurrence(s.end, now).getTime() - now.getTime()
-      : nextOccurrence(s.start, now).getTime() - now.getTime();
+      : nextSessionOpenInstant(s.start, now).getTime() - now.getTime();
     return { ...s, active, segments, countdownMs };
   });
 
   const activeNames = sessions.filter(s => s.active).map(s => s.name);
+  // The market-wide weekly reopen is exactly Sydney's own weekly open
+  // (Sunday 22:00 UTC), so this converges to the same instant either way.
+  const weeklyReopen = nextSessionOpenInstant(22, now);
 
   return (
     <div className="mb-6">
@@ -454,7 +492,13 @@ function SessionsWidget() {
         </span>
       </div>
       <p className="text-xs text-muted-foreground mb-3">
-        {activeNames.length > 0 ? (
+        {weekendClosed ? (
+          <>
+            <span className="font-medium text-foreground">Forex market closed for the weekend</span>
+            {' '}&middot; reopens {weeklyReopen.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}
+            {' '}(in {fmtCountdown(weeklyReopen.getTime() - now.getTime())})
+          </>
+        ) : activeNames.length > 0 ? (
           <>Active now: <span className="font-medium text-foreground">{activeNames.join(', ')}</span></>
         ) : (
           'No major session currently active'
@@ -510,11 +554,18 @@ function SessionsWidget() {
 // by a restrictive network), the widget area just stays empty rather than
 // breaking the page.
 //
-// displayMode 'multiple' renders the bar-style Oscillators/Moving Averages/
-// Summary rating rows instead of the round gauge - that layout needs more
-// vertical room than the gauge did, so height is raised to match; the
-// round-gauge version was clipping its own footer and showing an internal
-// scrollbar at the old height.
+// height 220 (rather than the taller 'multiple'/bar layout tried earlier)
+// keeps this to one compact gauge per row so more pairs fit on screen at
+// once, closer to a scannable list. Note on the "why not a red/green
+// percentage bar per pair" look requested: that specific visual (seen on
+// sites like FXSSI's Current Ratio or IFC Markets' sentiment widget) is
+// built from each provider's own live long/short positioning data, which
+// isn't something we have a verified free/keyless embed for - guessing at
+// an iframe URL risks shipping a widget that silently renders blank, and
+// fabricating the percentages ourselves would mean showing fake numbers
+// next to a live trading journal, which is worse than not showing them.
+// This sticks with TradingView's real, already-verified-working technical
+// rating instead.
 function TradingViewTechnicalGauge({ symbol, tvSymbol, theme }: { symbol: string; tvSymbol: string; theme: 'light' | 'dark' }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -535,10 +586,10 @@ function TradingViewTechnicalGauge({ symbol, tvSymbol, theme }: { symbol: string
       interval: '1D',
       width: '100%',
       isTransparent: true,
-      height: 450,
+      height: 220,
       symbol: tvSymbol,
       showIntervalTabs: false,
-      displayMode: 'multiple',
+      displayMode: 'single',
       locale: 'en',
       colorTheme: theme,
     });
@@ -596,7 +647,7 @@ function MarketSentiment({ trades }: { trades: Trade[] }) {
       <p className="text-xs text-muted-foreground mb-3">
         Technical indicator sentiment (moving averages &amp; oscillators) via TradingView &middot; not retail positioning data
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {pairs.map(p => (
           <Card key={p}>
             <CardContent className="pt-3 pb-3">
