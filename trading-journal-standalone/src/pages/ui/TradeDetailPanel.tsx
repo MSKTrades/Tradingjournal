@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3 } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, Checklist, NewsEvent, SESSIONS, fmtMoney } from '../data/types';
+import { Trade, CustomColumn, Checklist, NewsEvent, SESSIONS, fmtMoney, currencyFlag } from '../data/types';
 import { useAccount } from '../../lib/accounts';
 import { useFetch } from '../../lib/api';
 import { cn } from '../../lib/utils';
@@ -167,6 +167,7 @@ export default function TradeDetailPanel({
   const [form, setForm] = useState<TradePayload>(() => empty(activeAccountId ?? 0, nextTradeNumber));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showNewsPopover, setShowNewsPopover] = useState(false);
   const [addingField, setAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState('text');
@@ -534,11 +535,54 @@ export default function TradeDetailPanel({
                 <Newspaper className="w-4 h-4 text-muted-foreground shrink-0" />
                 <span className="text-xs text-muted-foreground">News Day</span>
                 {newsCheck.status === 'news-day' && (
+                  // A native title="" tooltip here has a slow OS-level hover
+                  // delay and no room for anything but plain text, which
+                  // read as "nothing happens" - this is a real hover
+                  // popover instead, shown/hidden on mouse enter/leave, with
+                  // each event's flag, impact, local time, and forecast/
+                  // previous/actual figures.
                   <span
-                    className="text-sm font-medium text-yellow-600 dark:text-yellow-400 cursor-help"
-                    title={newsCheck.matches.map(e => `${e.country} — ${e.title}`).join('\n')}
+                    className="relative"
+                    onMouseEnter={() => setShowNewsPopover(true)}
+                    onMouseLeave={() => setShowNewsPopover(false)}
                   >
-                    {newsCheck.matches.length} event{newsCheck.matches.length !== 1 ? 's' : ''} (hover for details)
+                    <span className="text-sm font-medium text-yellow-600 dark:text-yellow-400 cursor-help underline decoration-dotted underline-offset-4">
+                      {newsCheck.matches.length} event{newsCheck.matches.length !== 1 ? 's' : ''} (hover for details)
+                    </span>
+                    {showNewsPopover && (
+                      <div className="absolute z-50 top-full left-0 mt-2 w-80 max-w-[90vw] rounded-lg border border-border bg-popover text-popover-foreground shadow-xl p-3">
+                        <p className="text-xs font-semibold text-muted-foreground mb-2">High/medium-impact events on this date</p>
+                        <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
+                          {newsCheck.matches.map((e, i) => (
+                            <div key={i} className="text-xs border-b border-border last:border-0 pb-2 last:pb-0">
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span>{currencyFlag(e.country)}</span>
+                                <span className="font-semibold">{e.country}</span>
+                                <span className={cn(
+                                  'px-1.5 py-0.5 rounded-full text-[10px] font-medium',
+                                  e.impact.toLowerCase() === 'high'
+                                    ? 'bg-red-500/20 text-red-600 dark:text-red-400'
+                                    : 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400'
+                                )}>
+                                  {e.impact}
+                                </span>
+                                <span className="text-muted-foreground ml-auto">
+                                  {new Date(e.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                              <p className="font-medium">{e.title}</p>
+                              {(e.forecast || e.previous || e.actual) && (
+                                <div className="flex flex-wrap gap-x-3 text-muted-foreground mt-0.5">
+                                  {e.actual && <span>Actual: {e.actual}</span>}
+                                  {e.forecast && <span>Forecast: {e.forecast}</span>}
+                                  {e.previous && <span>Previous: {e.previous}</span>}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </span>
                 )}
                 {newsCheck.status === 'clear' && <span className="text-sm font-medium text-green-600 dark:text-green-400">Clear</span>}
