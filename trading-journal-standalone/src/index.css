@@ -42,6 +42,27 @@ input[type='number'] {
   -moz-appearance: textfield;
 }
 
+/* A wide table (Journal, with custom columns added) can scroll horizontally
+   but on some platforms the native scrollbar is an invisible hover-only
+   overlay, so there's no visual cue more columns exist off-screen. This
+   forces a slim, always-visible track/thumb instead. */
+.scroll-visible-x {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.5) transparent;
+}
+.scroll-visible-x::-webkit-scrollbar {
+  height: 10px;
+}
+.scroll-visible-x::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.4);
+}
+.scroll-visible-x::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
 /* Trade detail drawer: slides in from the right instead of the old
    full-screen takeover, so the rest of the app stays visible (dimmed)
    behind it — matches the FX Replay-style side panel. */
