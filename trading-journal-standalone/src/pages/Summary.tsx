@@ -701,7 +701,7 @@ function quoteOfDay(): string {
 
 export default function Summary() {
   const navigate = useNavigate();
-  const { activeAccountId, activeAccount } = useAccount();
+  const { activeAccountId } = useAccount();
   const { data, loading, refetch } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const results: StrategyResult[] = data ?? [];
   const { data: rawTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
@@ -715,14 +715,12 @@ export default function Summary() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-xl font-bold">Welcome, Manjyot</h1>
-          <p className="text-sm text-muted-foreground italic">&ldquo;{quoteOfDay()}&rdquo;</p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Each strategy independently filters &amp; scores your journal trades
-            {activeAccount && <> &middot; <span className="font-medium text-foreground">{activeAccount.name}</span></>}
-          </p>
+          <div className="mt-3 mb-1 inline-block rounded-md border border-border bg-card px-3 py-1.5">
+            <p className="text-sm text-foreground/90 italic">&ldquo;{quoteOfDay()}&rdquo;</p>
+          </div>
         </div>
         <Button variant="outline" size="sm" onClick={refetch}>
           <RefreshCw className="w-4 h-4 mr-1" /> Refresh

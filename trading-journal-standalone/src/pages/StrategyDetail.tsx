@@ -55,6 +55,26 @@ export default function StrategyDetail() {
     [allTrades, matchedIds]
   );
 
+  // Group the already-sorted (newest-first) matched trades by calendar
+  // month so the table can show a small "August 2026"-style heading with
+  // that month's total Gain/Loss before its rows, without touching the
+  // row rendering itself. Map preserves insertion order, so months come
+  // out newest-first and trades stay newest-first within each month.
+  const monthGroups = useMemo(() => {
+    const groups = new Map<string, { label: string; trades: Trade[]; total: number }>();
+    for (const t of matchedTrades) {
+      const d = t.trade_placed_at ? new Date(t.trade_placed_at) : null;
+      const valid = d && !isNaN(d.getTime());
+      const key = valid ? `${d!.getFullYear()}-${String(d!.getMonth() + 1).padStart(2, '0')}` : 'unknown';
+      const label = valid ? d!.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'Unknown Date';
+      if (!groups.has(key)) groups.set(key, { label, trades: [], total: 0 });
+      const g = groups.get(key)!;
+      g.trades.push(t);
+      g.total += Number(t.gain_loss ?? 0);
+    }
+    return Array.from(groups.values());
+  }, [matchedTrades]);
+
   // Cumulative R across the strategy's own scored trades (strategy.trades
   // carries the R the strategy's TP rules actually produced for each
   // trade), in date order - oldest first, so the line reads left-to-right
@@ -231,24 +251,36 @@ export default function StrategyDetail() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {matchedTrades.map(t => (
-                    <TableRow
-                      key={t.id}
-                      className="text-xs cursor-pointer"
-                      onClick={() => { setEditTrade(t); setDialogOpen(true); }}
-                    >
-                      <TableCell>{t.trade_placed_at ?? '—'}</TableCell>
-                      <TableCell className="font-medium">{t.coin_token ?? '—'}</TableCell>
-                      <TableCell>{t.direction}</TableCell>
-                      <TableCell className="text-center">
-                        {t.profit_loss === 'Profit' && <Badge className="bg-green-500/20 text-green-700 dark:text-green-300 border-green-400/30 text-xs">Win</Badge>}
-                        {t.profit_loss === 'Loss' && <Badge className="bg-red-500/20 text-red-700 dark:text-red-300 border-red-400/30 text-xs">Loss</Badge>}
-                        {!t.profit_loss && <Badge variant="secondary" className="text-xs">—</Badge>}
-                      </TableCell>
-                      <TableCell className={`text-right font-mono ${Number(t.gain_loss ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-                        {fmtMoney(t.gain_loss)}
-                      </TableCell>
-                    </TableRow>
+                  {monthGroups.map(group => (
+                    <>
+                      <TableRow key={`month-${group.label}`} className="hover:bg-transparent">
+                        <TableCell colSpan={4} className="text-xs font-semibold text-muted-foreground bg-muted/40 py-1.5">
+                          {group.label}
+                        </TableCell>
+                        <TableCell className={`text-right text-xs font-semibold bg-muted/40 py-1.5 font-mono ${group.total >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                          {fmtMoney(group.total)}
+                        </TableCell>
+                      </TableRow>
+                      {group.trades.map(t => (
+                        <TableRow
+                          key={t.id}
+                          className="text-xs cursor-pointer"
+                          onClick={() => { setEditTrade(t); setDialogOpen(true); }}
+                        >
+                          <TableCell>{t.trade_placed_at ?? '—'}</TableCell>
+                          <TableCell className="font-medium">{t.coin_token ?? '—'}</TableCell>
+                          <TableCell>{t.direction}</TableCell>
+                          <TableCell className="text-center">
+                            {t.profit_loss === 'Profit' && <Badge className="bg-green-500/20 text-green-700 dark:text-green-300 border-green-400/30 text-xs">Win</Badge>}
+                            {t.profit_loss === 'Loss' && <Badge className="bg-red-500/20 text-red-700 dark:text-red-300 border-red-400/30 text-xs">Loss</Badge>}
+                            {!t.profit_loss && <Badge variant="secondary" className="text-xs">—</Badge>}
+                          </TableCell>
+                          <TableCell className={`text-right font-mono ${Number(t.gain_loss ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                            {fmtMoney(t.gain_loss)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </>
                   ))}
                 </TableBody>
               </Table>
