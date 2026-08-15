@@ -24,6 +24,10 @@ export type Trade = {
   direction: string;
   entry_type: string | null; // 'Market' | 'Limit' | 'Stop' | null
   tags: string[];
+  // Keyed by tag_groups.name -> selected tag_group_options.name(s) for that
+  // group, e.g. { "Confidence Level": ["High"] }. Separate from the flat
+  // `tags` list above - see the schema.sql note on tag_groups for why.
+  tag_selections: Record<string, string[]>;
   liquidity_swept: string | null;
   distance_from_asia: number | null;
   liquidity_swept_no: number | null;
@@ -109,6 +113,26 @@ export type Tag = {
   name: string;
   color: string;
   sort_order: number;
+};
+
+// One selectable value within a TagGroup (e.g. "High" under "Confidence
+// Level"). See the schema.sql note on tag_groups/tag_group_options for the
+// full rationale.
+export type TagGroupOption = {
+  id: number;
+  group_id: number;
+  name: string;
+  color: string;
+  sort_order: number;
+};
+
+// A user-defined tag category ("Confidence Level", "SL Levels", ...) with
+// its own set of selectable sub-tags - FX Replay's "tag groups" pattern.
+export type TagGroup = {
+  id: number;
+  name: string;
+  sort_order: number;
+  options: TagGroupOption[];
 };
 
 export const ENTRY_TYPES = ['Market', 'Limit', 'Stop'];
