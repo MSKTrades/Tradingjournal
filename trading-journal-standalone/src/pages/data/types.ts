@@ -162,6 +162,21 @@ export type Headline = {
   source: string;
 };
 
+// Best-effort currency -> flag emoji for the news widgets. Deliberately
+// covers only currencies that actually show up on an economic calendar
+// (the majors + a handful of others FF sometimes lists) - an unknown code
+// just renders no flag rather than guessing.
+const CURRENCY_FLAGS: Record<string, string> = {
+  USD: '🇺🇸', EUR: '🇪🇺', GBP: '🇬🇧', JPY: '🇯🇵', AUD: '🇦🇺', CAD: '🇨🇦',
+  CHF: '🇨🇭', NZD: '🇳🇿', CNY: '🇨🇳', HKD: '🇭🇰', SGD: '🇸🇬', ZAR: '🇿🇦',
+  MXN: '🇲🇽', SEK: '🇸🇪', NOK: '🇳🇴', TRY: '🇹🇷', INR: '🇮🇳', BRL: '🇧🇷', KRW: '🇰🇷',
+};
+
+export function currencyFlag(code: string | null | undefined): string {
+  if (!code) return '';
+  return CURRENCY_FLAGS[code.toUpperCase()] ?? '';
+}
+
 export const FIELD_LABELS: Record<string, string> = {
   cisd_break: 'CISD Break',
   inverse_candles: 'Inv. Candle Size',
