@@ -377,3 +377,36 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_trades_tags ON trades USING GIN (tags);
+
+-- Tag GROUPS (categories) with per-group options, e.g. group "Confidence
+-- Level" with options High/Medium/Low/Very Low - FX Replay calls these
+-- "tag groups"/subtags. Deliberately a separate feature from the flat
+-- `tags` table above rather than folded into it: a flat tag is a free-form
+-- label ("A+ Setup"), while a tag-GROUP selection is "pick one (or a few)
+-- named value(s) FROM this specific category" - trying to encode that as
+-- flat name strings (e.g. "Confidence Level: High") would make filtering
+-- by "any Confidence Level" or renaming a whole category painful. Options
+-- cascade-delete with their group; a trade's selections are stored by
+-- group/option NAME (see trades.tag_selections below), same by-name-not-id
+-- tradeoff already accepted for the flat tags table and custom_columns.
+CREATE TABLE IF NOT EXISTS tag_groups (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL UNIQUE,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS tag_group_options (
+  id          SERIAL PRIMARY KEY,
+  group_id    INTEGER NOT NULL REFERENCES tag_groups(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  color       TEXT NOT NULL DEFAULT '#f59e0b',
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(group_id, name)
+);
+
+-- Per-trade selections: { "Confidence Level": ["High"], "SL Levels": ["5M"] }
+-- keyed by tag_groups.name, values are arrays of tag_group_options.name (so
+-- more than one option per group is allowed, same as the flat tags list).
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS tag_selections JSONB NOT NULL DEFAULT '{}'::jsonb;
