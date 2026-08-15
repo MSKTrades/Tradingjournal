@@ -7,7 +7,7 @@ import { Button } from '../lib/ui/button';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import { useTheme } from '../lib/theme';
-import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney } from './data/types';
+import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney, currencyFlag } from './data/types';
 
 function fmtPF(v: number | null) {
   return v === null ? '∞' : v.toFixed(2);
@@ -200,7 +200,7 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
   );
 }
 
-function NewsImpactBadge({ impact }: { impact: string }) {
+export function NewsImpactBadge({ impact }: { impact: string }) {
   const cls = 'text-xs shrink-0';
   const lower = impact.toLowerCase();
   if (lower === 'high') return <Badge className={`bg-red-500/20 text-red-700 dark:text-red-300 border-red-400/30 ${cls}`}>High</Badge>;
@@ -283,19 +283,23 @@ function NewsWidget() {
           {!loading && !data?.eventsError && visibleEvents.length > 0 && (
             <div className="flex flex-col divide-y divide-border max-h-[320px] overflow-y-auto">
               {visibleEvents.map((e, i) => (
-                <div key={i} className="flex items-center gap-3 py-2 text-sm">
-                  <span className="font-mono text-xs text-muted-foreground w-14 shrink-0">
-                    {new Date(e.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  <span className="text-xs font-semibold text-muted-foreground w-10 shrink-0">{e.country}</span>
-                  <NewsImpactBadge impact={e.impact} />
-                  <span className="flex-1 truncate">{e.title}</span>
-                  {(e.forecast || e.previous || e.actual) && (
-                    <span className="text-xs text-muted-foreground shrink-0 hidden xl:inline">
-                      {e.actual && <>A: {e.actual} </>}
-                      {e.forecast && <>F: {e.forecast} </>}
-                      {e.previous && <>P: {e.previous}</>}
+                <div key={i} className="flex flex-col gap-0.5 py-2 text-sm">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-xs text-muted-foreground w-14 shrink-0">
+                      {new Date(e.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
                     </span>
+                    <span className="text-xs font-semibold text-muted-foreground w-14 shrink-0 flex items-center gap-1">
+                      <span>{currencyFlag(e.country)}</span>{e.country}
+                    </span>
+                    <NewsImpactBadge impact={e.impact} />
+                    <span className="flex-1 truncate">{e.title}</span>
+                  </div>
+                  {(e.forecast || e.previous || e.actual) && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground pl-[7.25rem]">
+                      {e.actual && <span>Actual: <span className="text-foreground font-medium">{e.actual}</span></span>}
+                      {e.forecast && <span>Forecast: {e.forecast}</span>}
+                      {e.previous && <span>Previous: {e.previous}</span>}
+                    </div>
                   )}
                 </div>
               ))}
@@ -348,12 +352,14 @@ function NewsWidget() {
   );
 }
 
-// Commonly-cited approximate UTC windows for the four major forex sessions.
+// Commonly-cited approximate UTC anchors for the four major forex sessions.
 // These are the round-hour conventions used across most retail trading
 // resources (e.g. 8am-5pm UTC for London) - they are NOT adjusted for
 // daylight-saving shifts in London/New York/Sydney, which move the "real"
-// local-time windows by an hour for part of the year. Good enough for an
-// at-a-glance view; not a substitute for an exchange's own session calendar.
+// local-time windows by an hour for part of the year. The countdown math
+// below always works off these true UTC instants (so it stays correct
+// regardless of the viewer's clock); only the timeline bar's pixel layout
+// and labels are re-expressed in the viewer's local time for display.
 const SESSIONS_DEF: { name: string; start: number; end: number; color: string; dot: string }[] = [
   { name: 'Sydney',   start: 22, end: 7,  color: 'bg-blue-500',   dot: 'bg-blue-500' },
   { name: 'Tokyo',    start: 0,  end: 9,  color: 'bg-violet-500', dot: 'bg-violet-500' },
@@ -361,13 +367,17 @@ const SESSIONS_DEF: { name: string; start: number; end: number; color: string; d
   { name: 'New York', start: 13, end: 22, color: 'bg-green-500',  dot: 'bg-green-500' },
 ];
 
-function useUtcNow() {
+function useLiveNow() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
   return now;
+}
+
+function mod24(h: number): number {
+  return ((h % 24) + 24) % 24;
 }
 
 function isSessionActive(start: number, end: number, utcHourFrac: number): boolean {
@@ -377,7 +387,8 @@ function isSessionActive(start: number, end: number, utcHourFrac: number): boole
 }
 
 // Next UTC clock-hour occurrence of `hour` that is strictly after `now`
-// (today if it hasn't happened yet, otherwise tomorrow).
+// (today if it hasn't happened yet, otherwise tomorrow). This is the real
+// instant the session opens/closes, independent of how it's displayed.
 function nextOccurrence(hour: number, now: Date): Date {
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour, 0, 0));
   if (d.getTime() <= now.getTime()) d.setUTCDate(d.getUTCDate() + 1);
@@ -392,23 +403,36 @@ function fmtCountdown(ms: number): string {
   return `${h}h ${m}m`;
 }
 
-// Graphical strip of the four major sessions across the UTC day, with a
-// shared "now" marker and a per-session opens-in/closes-in countdown -
+// Graphical strip of the four major sessions across the day (in the
+// viewer's own local time), with a shared "now" marker, an explicit
+// OPEN/CLOSED status pill per session (so current status doesn't depend on
+// reading the countdown text), and a live opens-in/closes-in countdown -
 // mirrors the session clocks most trading platforms show on their home
 // screen, so it's obvious at a glance whether London/NY overlap (the
 // highest-liquidity window) is currently active.
 function SessionsWidget() {
-  const now = useUtcNow();
+  const now = useLiveNow();
+
+  // Real UTC instant - drives the countdown math and the active/inactive
+  // determination, so those stay correct no matter how they're displayed.
   const utcHourFrac = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
-  const nowPct = (utcHourFrac / 24) * 100;
+  // Same instant, expressed as the viewer's local wall-clock hour - drives
+  // everything the bar actually draws (segment positions, tick labels,
+  // the "now" line).
+  const localHourFrac = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+  const offsetHours = -now.getTimezoneOffset() / 60;
+  const nowPct = (localHourFrac / 24) * 100;
+  const tzLabel = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const sessions = SESSIONS_DEF.map(s => {
     const active = isSessionActive(s.start, s.end, utcHourFrac);
-    const segments = s.start < s.end
-      ? [{ left: (s.start / 24) * 100, width: ((s.end - s.start) / 24) * 100 }]
+    const localStart = mod24(s.start + offsetHours);
+    const localEnd = mod24(s.end + offsetHours);
+    const segments = localStart < localEnd
+      ? [{ left: (localStart / 24) * 100, width: ((localEnd - localStart) / 24) * 100 }]
       : [
-          { left: (s.start / 24) * 100, width: ((24 - s.start) / 24) * 100 },
-          { left: 0, width: (s.end / 24) * 100 },
+          { left: (localStart / 24) * 100, width: ((24 - localStart) / 24) * 100 },
+          { left: 0, width: (localEnd / 24) * 100 },
         ];
     const countdownMs = active
       ? nextOccurrence(s.end, now).getTime() - now.getTime()
@@ -420,9 +444,14 @@ function SessionsWidget() {
 
   return (
     <div className="mb-6">
-      <div className="flex items-center gap-2 mb-1">
-        <Clock3 className="w-4 h-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">Trading Sessions</h2>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <Clock3 className="w-4 h-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Trading Sessions</h2>
+        </div>
+        <span className="font-mono text-xs text-muted-foreground">
+          {now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        </span>
       </div>
       <p className="text-xs text-muted-foreground mb-3">
         {activeNames.length > 0 ? (
@@ -430,19 +459,24 @@ function SessionsWidget() {
         ) : (
           'No major session currently active'
         )}
-        {' '}&middot; times shown in UTC
+        {' '}&middot; times shown in your local time ({tzLabel})
       </p>
       <Card>
         <CardContent className="pt-4 pb-4">
           <div className="flex justify-between text-[10px] font-mono text-muted-foreground mb-2 px-0.5">
             <span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span>
           </div>
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-1.5">
             {sessions.map(s => (
-              <div key={s.name} className="flex items-center gap-3">
-                <span className="w-[92px] text-xs font-medium shrink-0 flex items-center gap-1.5">
+              <div key={s.name} className={`flex items-center gap-3 rounded-md -mx-1.5 px-1.5 py-1 ${s.active ? 'bg-green-500/5' : ''}`}>
+                <span className="w-[100px] text-xs font-medium shrink-0 flex items-center gap-1.5">
                   <span className={`w-2 h-2 rounded-full ${s.dot} ${s.active ? '' : 'opacity-40'}`} />
                   {s.name}
+                </span>
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 w-[58px] text-center ${
+                  s.active ? 'bg-green-500/20 text-green-700 dark:text-green-400' : 'bg-muted text-muted-foreground'
+                }`}>
+                  {s.active ? 'OPEN' : 'CLOSED'}
                 </span>
                 <div className="relative flex-1 h-3 rounded-full bg-muted/40 overflow-hidden">
                   {s.segments.map((seg, i) => (
@@ -466,7 +500,7 @@ function SessionsWidget() {
   );
 }
 
-// Free, no-API-key TradingView "Technical Analysis" gauge - a script-only
+// Free, no-API-key TradingView "Technical Analysis" widget - a script-only
 // embed (same idea as embedding a YouTube video), so this is client-side
 // only with no backend fetch of ours to verify. It summarizes standard
 // technical indicators (moving averages, oscillators) into a Buy/Sell/
@@ -475,7 +509,13 @@ function SessionsWidget() {
 // available for free or reliably. If the script fails to load (e.g. blocked
 // by a restrictive network), the widget area just stays empty rather than
 // breaking the page.
-function TradingViewTechnicalGauge({ symbol, theme }: { symbol: string; theme: 'light' | 'dark' }) {
+//
+// displayMode 'multiple' renders the bar-style Oscillators/Moving Averages/
+// Summary rating rows instead of the round gauge - that layout needs more
+// vertical room than the gauge did, so height is raised to match; the
+// round-gauge version was clipping its own footer and showing an internal
+// scrollbar at the old height.
+function TradingViewTechnicalGauge({ symbol, tvSymbol, theme }: { symbol: string; tvSymbol: string; theme: 'light' | 'dark' }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -495,10 +535,10 @@ function TradingViewTechnicalGauge({ symbol, theme }: { symbol: string; theme: '
       interval: '1D',
       width: '100%',
       isTransparent: true,
-      height: 200,
-      symbol: `FX:${symbol}`,
+      height: 450,
+      symbol: tvSymbol,
       showIntervalTabs: false,
-      displayMode: 'single',
+      displayMode: 'multiple',
       locale: 'en',
       colorTheme: theme,
     });
@@ -508,24 +548,43 @@ function TradingViewTechnicalGauge({ symbol, theme }: { symbol: string; theme: '
       }
     };
     container.appendChild(script);
-  }, [symbol, theme]);
+  }, [symbol, tvSymbol, theme]);
 
   return <div className="tradingview-widget-container" ref={containerRef} />;
 }
 
-const DEFAULT_SENTIMENT_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD'];
+const DEFAULT_SENTIMENT_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'NZDUSD'];
 
-// Sentiment here means TradingView's free technical-indicator gauge
+// A few commonly-traded commodities, always shown alongside whatever
+// currency pairs the account has traded - TradingView's generic "FX:"
+// symbol provider doesn't cover these, so each needs its own exchange
+// prefix (OANDA for metals, TVC for crude).
+const COMMODITIES: { symbol: string; tvSymbol: string }[] = [
+  { symbol: 'XAUUSD', tvSymbol: 'OANDA:XAUUSD' }, // Gold
+  { symbol: 'XAGUSD', tvSymbol: 'OANDA:XAGUSD' }, // Silver
+  { symbol: 'USOIL',  tvSymbol: 'TVC:USOIL' },    // WTI Crude Oil
+];
+
+function tvSymbolFor(pair: string): string {
+  const commodity = COMMODITIES.find(c => c.symbol === pair);
+  return commodity ? commodity.tvSymbol : `FX:${pair}`;
+}
+
+// Sentiment here means TradingView's free technical-indicator rating
 // (moving averages + oscillators rolled into Buy/Sell/Neutral), shown per
-// currency pair the account has actually traded - falls back to a few of
-// the most common majors if the account has no trades yet.
+// currency pair the account has actually traded (falling back to a few of
+// the most common majors if the account has no trades yet), plus a fixed
+// set of commodities so gold/silver/oil sentiment is always on hand even
+// if they've never been logged as a trade.
 function MarketSentiment({ trades }: { trades: Trade[] }) {
   const { theme } = useTheme();
   const pairs = useMemo(() => {
-    const distinct = Array.from(new Set(
+    const traded = Array.from(new Set(
       trades.map(t => (t.coin_token ?? '').trim().toUpperCase()).filter(p => p.length >= 6)
     ));
-    return (distinct.length > 0 ? distinct : DEFAULT_SENTIMENT_PAIRS).slice(0, 6);
+    const base = (traded.length > 0 ? traded : DEFAULT_SENTIMENT_PAIRS).slice(0, 8);
+    const commodityCodes = COMMODITIES.map(c => c.symbol).filter(c => !base.includes(c));
+    return [...base, ...commodityCodes];
   }, [trades]);
 
   return (
@@ -542,7 +601,7 @@ function MarketSentiment({ trades }: { trades: Trade[] }) {
           <Card key={p}>
             <CardContent className="pt-3 pb-3">
               <p className="text-xs font-semibold mb-1 px-1">{p}</p>
-              <TradingViewTechnicalGauge symbol={p} theme={theme} />
+              <TradingViewTechnicalGauge symbol={p} tvSymbol={tvSymbolFor(p)} theme={theme} />
             </CardContent>
           </Card>
         ))}
@@ -578,6 +637,8 @@ export default function Summary() {
           <RefreshCw className="w-4 h-4 mr-1" /> Refresh
         </Button>
       </div>
+
+      <SessionsWidget />
 
       {totalTrades > 0 && (
         <div className="grid grid-cols-3 gap-4 mb-6">
@@ -659,8 +720,6 @@ export default function Summary() {
       )}
 
       <ChecklistCompliance trades={trades} checklists={checklists} />
-
-      <SessionsWidget />
 
       <MarketSentiment trades={trades} />
 

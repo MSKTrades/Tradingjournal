@@ -290,7 +290,7 @@ export default function Journal() {
 
       <JournalInsights trades={trades} />
 
-      <div className="rounded-lg border border-border overflow-x-auto">
+      <div className="rounded-lg border border-border overflow-x-auto scroll-visible-x">
         <Table>
           <TableHeader>
             <TableRow className="text-xs">
