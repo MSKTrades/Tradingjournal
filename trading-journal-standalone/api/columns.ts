@@ -1,13 +1,20 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db, withApi } from './_db.js';
 
-// Also handles the reusable Tags list (?resource=tags) through this same
-// function — kept here rather than a new api/tags.ts file because the
-// Vercel Hobby plan caps serverless functions at 12 and this project is
-// already at 11. Tags and custom columns are both small "define a
-// reusable named thing" tables, so the same GET/POST/DELETE shape fits
-// both; `resource` (query param on GET/DELETE, body field on POST)
-// defaults to `columns` since that's the original/more common caller.
+// Also handles the reusable Tags list (?resource=tags) and Tag Groups
+// (?resource=tag_groups / tag_group_options) through this same function —
+// kept here rather than new api/tags.ts or api/tag-groups.ts files because
+// the Vercel Hobby plan caps serverless functions at 12 and this project is
+// already at 11. Tags, tag groups, and custom columns are all small
+// "define a reusable named thing" tables, so the same GET/POST/DELETE shape
+// fits all of them; `resource` (query param on GET/DELETE, body field on
+// POST) defaults to `columns` since that's the original/more common caller.
+async function getTagGroups(sql: ReturnType<typeof db>) {
+  const groups = await sql.unsafe('SELECT * FROM tag_groups ORDER BY sort_order ASC, id ASC');
+  const options = await sql.unsafe('SELECT * FROM tag_group_options ORDER BY sort_order ASC, id ASC');
+  return groups.map((g: any) => ({ ...g, options: options.filter((o: any) => o.group_id === g.id) }));
+}
+
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
 
@@ -15,6 +22,10 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     if (req.query.resource === 'tags') {
       const rows = await sql.unsafe('SELECT * FROM tags ORDER BY sort_order ASC, id ASC');
       res.status(200).json(rows);
+      return;
+    }
+    if (req.query.resource === 'tag_groups') {
+      res.status(200).json(await getTagGroups(sql));
       return;
     }
     const rows = await sql.unsafe('SELECT * FROM custom_columns ORDER BY sort_order ASC, id ASC');
@@ -39,6 +50,38 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(rows[0]);
       return;
     }
+    if (p.resource === 'tag_groups') {
+      const name = String(p.name ?? '').trim();
+      if (!name) { res.status(400).json({ error: 'name is required' }); return; }
+      const existing = await sql.unsafe('SELECT * FROM tag_groups WHERE lower(name) = lower($1)', [name]);
+      if (existing.length > 0) { res.status(200).json({ ...existing[0], options: [] }); return; }
+      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM tag_groups');
+      const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
+      const rows = await sql.unsafe(
+        `INSERT INTO tag_groups (name, sort_order) VALUES ($1, $2) RETURNING *`,
+        [name, nextOrder]
+      );
+      res.status(200).json({ ...rows[0], options: [] });
+      return;
+    }
+    if (p.resource === 'tag_group_options') {
+      const groupId = Number(p.group_id);
+      const name = String(p.name ?? '').trim();
+      if (!groupId || isNaN(groupId) || !name) { res.status(400).json({ error: 'group_id and name are required' }); return; }
+      const existing = await sql.unsafe(
+        'SELECT * FROM tag_group_options WHERE group_id = $1 AND lower(name) = lower($2)',
+        [groupId, name]
+      );
+      if (existing.length > 0) { res.status(200).json(existing[0]); return; }
+      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM tag_group_options WHERE group_id = $1', [groupId]);
+      const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
+      const rows = await sql.unsafe(
+        `INSERT INTO tag_group_options (group_id, name, color, sort_order) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [groupId, name, p.color ?? '#f59e0b', nextOrder]
+      );
+      res.status(200).json(rows[0]);
+      return;
+    }
     const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM custom_columns');
     const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
     const rows = await sql.unsafe(
@@ -51,6 +94,16 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
     if (req.query.resource === 'tags') {
       await sql.unsafe('DELETE FROM tags WHERE id = $1', [id]);
+      res.status(200).json({ deleted: 1 });
+      return;
+    }
+    if (req.query.resource === 'tag_groups') {
+      await sql.unsafe('DELETE FROM tag_groups WHERE id = $1', [id]); // cascades to tag_group_options
+      res.status(200).json({ deleted: 1 });
+      return;
+    }
+    if (req.query.resource === 'tag_group_options') {
+      await sql.unsafe('DELETE FROM tag_group_options WHERE id = $1', [id]);
       res.status(200).json({ deleted: 1 });
       return;
     }
