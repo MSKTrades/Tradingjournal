@@ -22,6 +22,8 @@ export type Trade = {
   wr_1m: string | null;
   before_chart_1m: string | null;
   direction: string;
+  entry_type: string | null; // 'Market' | 'Limit' | 'Stop' | null
+  tags: string[];
   liquidity_swept: string | null;
   distance_from_asia: number | null;
   liquidity_swept_no: number | null;
@@ -96,6 +98,20 @@ export type CustomColumn = {
   visible: boolean;
   sort_order: number;
 };
+
+// A reusable, user-defined tag (e.g. "A+ Setup", "Revenge Trade",
+// "News Event"). Trades reference tags by NAME (see Trade.tags), not by
+// this id — this table exists so the tag picker can suggest what you've
+// already created instead of you retyping it, and so each tag can carry
+// its own color.
+export type Tag = {
+  id: number;
+  name: string;
+  color: string;
+  sort_order: number;
+};
+
+export const ENTRY_TYPES = ['Market', 'Limit', 'Stop'];
 
 // A user-defined trade rule ("Did I wait for the CISD?", "Risk <= 1%?"),
 // belonging to one Checklist.
@@ -188,13 +204,45 @@ export const FIELD_LABELS: Record<string, string> = {
   cisd_break: 'CISD Break',
   inverse_candles: 'Inv. Candle Size',
   gap_from_asia_h: 'Distance from Asia H/L',
+  rr: 'Risk:Reward (R)',
+  entry_price: 'Entry Price',
+  tp_price: 'TP Price',
+  sl_price: 'SL Price',
+  max_rr: 'Max R Reached',
+  gain_loss: 'Gain/Loss ($)',
+  gain_loss_pct: 'Gain/Loss (%)',
+  position_size: 'Position Size (%)',
+  partial_1: 'Partial 1 (%)',
+  partial_2: 'Partial 2 (%)',
 };
 
+// The built-in numeric fields every trade always has, regardless of which
+// custom fields the user has added. These read straight off the trades
+// table server-side (see getFieldValue in api/summary/index.ts).
 export const CONDITION_FIELDS = [
   { key: 'cisd_break',      label: 'CISD Break (candles)' },
   { key: 'inverse_candles', label: 'Inverse Candle Size' },
   { key: 'gap_from_asia_h', label: 'Distance from Asia H/L' },
+  { key: 'rr',              label: 'Risk:Reward (R)' },
+  { key: 'max_rr',          label: 'Max R Reached' },
+  { key: 'entry_price',     label: 'Entry Price' },
+  { key: 'tp_price',        label: 'TP Price' },
+  { key: 'sl_price',        label: 'SL Price' },
+  { key: 'gain_loss',       label: 'Gain/Loss ($)' },
+  { key: 'gain_loss_pct',   label: 'Gain/Loss (%)' },
+  { key: 'position_size',   label: 'Position Size (%)' },
+  { key: 'partial_1',       label: 'Partial 1 (%)' },
+  { key: 'partial_2',       label: 'Partial 2 (%)' },
 ];
+
+// col_keys already covered by the three legacy CONDITION_FIELDS entries
+// above (cisd_break/inverse_candles/gap_from_asia_h predate the "SMC
+// fields became custom columns" migration and keep their original
+// display names for strategies saved before that migration) - any custom
+// column with one of these underlying keys is skipped when merging the
+// user's live custom fields into the strategy-condition picker, so it
+// doesn't show up twice under two different labels for the same data.
+export const CONDITION_FIELD_DUPLICATE_KEYS = new Set(['cisd_break', 'inverse_candle_size', 'distance_from_asia']);
 
 export const OPS = ['<', '<=', '>', '>=', '=', '!='];
 
