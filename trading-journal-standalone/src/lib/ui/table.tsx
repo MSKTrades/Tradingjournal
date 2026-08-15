@@ -1,9 +1,18 @@
 import React from 'react';
 import { cn } from '../utils';
 
-export function Table({ className, ...props }: React.TableHTMLAttributes<HTMLTableElement>) {
+// The actual horizontally-scrollable element is THIS wrapper div, not
+// whatever container a call site wraps around <Table> - a wide table
+// (custom columns, lots of numeric fields) scrolls inside here on its own.
+// scroll-visible-x (see index.css) forces a slim always-visible scrollbar,
+// since the native one is an invisible overlay on several platforms
+// (Windows' newer Fluent overlay scrollbars in particular ignore a page's
+// own ::-webkit-scrollbar styling entirely once the OS is in overlay
+// mode). scrollRef lets a page also drive its own custom scroll controls
+// (buttons, a progress thumb) against this same element.
+export function Table({ className, scrollRef, ...props }: React.TableHTMLAttributes<HTMLTableElement> & { scrollRef?: React.Ref<HTMLDivElement> }) {
   return (
-    <div className="w-full overflow-auto">
+    <div ref={scrollRef} className="w-full overflow-auto scroll-visible-x">
       <table className={cn('w-full caption-bottom text-sm', className)} {...props} />
     </div>
   );
