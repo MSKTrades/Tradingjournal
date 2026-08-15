@@ -3,6 +3,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Every Tailwind text-* utility is rem-based, so bumping the root size
+   scales the whole app's type proportionally (text-xs: 12px -> 13.5px,
+   text-sm: 14px -> 15.75px, text-base: 16px -> 18px, etc.) without having
+   to hunt down every text-xs/text-sm usage individually. Raised from the
+   16px default after feedback that the app reads small next to FX Replay's
+   larger type — 18px is a deliberate, clearly-perceptible bump (12.5%),
+   not a token nudge. */
+html {
+  font-size: 18px;
+}
+
 body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
