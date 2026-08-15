@@ -15,6 +15,16 @@ type Trade = {
   reached_1r5: boolean;
   max_rr: number | null;
   profit_loss: string | null;
+  rr: number | null;
+  entry_price: number | null;
+  tp_price: number | null;
+  sl_price: number | null;
+  gain_loss: number | null;
+  gain_loss_pct: number | null;
+  position_size: number | null;
+  partial_1: number | null;
+  partial_2: number | null;
+  extra_data: Record<string, unknown> | null;
 };
 
 type Condition = { field: string; op: string; value: number };
@@ -199,11 +209,44 @@ function matchesTime(
   return true;
 }
 
+// Built-in numeric fields that are still real columns on the trades table
+// (as opposed to the CISD/SMC-specific fields, which moved into
+// extra_data as ordinary custom columns - see the schema.sql migration
+// "move SMC-specific fields... into ordinary user-defined custom fields").
+const RAW_NUMERIC_FIELDS: Record<string, keyof Trade> = {
+  rr: 'rr',
+  max_rr: 'max_rr',
+  entry_price: 'entry_price',
+  tp_price: 'tp_price',
+  sl_price: 'sl_price',
+  gain_loss: 'gain_loss',
+  gain_loss_pct: 'gain_loss_pct',
+  position_size: 'position_size',
+  partial_1: 'partial_1',
+  partial_2: 'partial_2',
+};
+
+// The three original condition fields predate custom columns and kept
+// their own short internal names (baked into every strategy saved before
+// that migration) - these map to the real extra_data key the value now
+// actually lives under. Any other field name is assumed to already BE a
+// real custom_columns.col_key (true for both the other migrated built-ins,
+// like sl_pips/liquidity_swept_no, and anything the user has added since).
+const LEGACY_EXTRA_DATA_ALIASES: Record<string, string> = {
+  cisd_break: 'cisd_break',
+  inverse_candles: 'inverse_candle_size',
+  gap_from_asia_h: 'distance_from_asia',
+};
+
 function getFieldValue(trade: Trade, field: string): number | null {
-  if (field === 'cisd_break') return trade.cisd_break != null ? Number(trade.cisd_break) : null;
-  if (field === 'inverse_candles') return trade.inverse_candle_size != null ? Number(trade.inverse_candle_size) : null;
-  if (field === 'gap_from_asia_h') return trade.distance_from_asia != null ? Number(trade.distance_from_asia) : null;
-  return null;
+  const rawKey = RAW_NUMERIC_FIELDS[field];
+  if (rawKey) {
+    const v = trade[rawKey];
+    return v != null ? Number(v as any) : null;
+  }
+  const extraKey = LEGACY_EXTRA_DATA_ALIASES[field] ?? field;
+  const v = trade.extra_data?.[extraKey];
+  return v != null && v !== '' && !isNaN(Number(v)) ? Number(v) : null;
 }
 
 function evalCondition(val: number | null, op: string, threshold: number): boolean {
@@ -279,7 +322,9 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       sql.unsafe(`
         SELECT id, trade_placed_at, trade_executed_at, coin_token, cisd_break,
                inverse_candle_size, distance_from_asia,
-               reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, profit_loss
+               reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, profit_loss,
+               rr, entry_price, tp_price, sl_price, gain_loss, gain_loss_pct,
+               position_size, partial_1, partial_2, extra_data
         FROM trades
         WHERE account_id = $1
       `, [accountId]),
