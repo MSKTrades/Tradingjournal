@@ -29,11 +29,33 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       body,
       request: req as any,
       token: BLOB_TOKEN,
-      onBeforeGenerateToken: async () => ({
-        allowedContentTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
-        addRandomSuffix: true,
-        maximumSizeInBytes: 10 * 1024 * 1024, // 10MB per screenshot
-      }),
+      // Two very different callers share this one token endpoint (kept to
+      // one file rather than a second api/upload-candles.ts, same
+      // function-budget reasoning as api/columns.ts): trade screenshots
+      // (small images, default/no clientPayload) and chart-replay candle
+      // datasets (a parsed JSON array that can run tens of MB for months of
+      // 1-minute data, tagged with clientPayload '{"kind":"candles"}' by the
+      // Backtest page's uploader). Branch on that payload so screenshots
+      // keep their tight 10MB image-only limit while candle uploads get a
+      // larger JSON-only allowance, instead of loosening the screenshot path
+      // to accommodate both.
+      onBeforeGenerateToken: async (_pathname, clientPayload) => {
+        let kind: string | undefined;
+        try { kind = clientPayload ? JSON.parse(clientPayload).kind : undefined; } catch { /* ignore malformed payload */ }
+
+        if (kind === 'candles') {
+          return {
+            allowedContentTypes: ['application/json', 'text/plain'],
+            addRandomSuffix: true,
+            maximumSizeInBytes: 75 * 1024 * 1024, // 75MB — comfortably covers months of 1m candles
+          };
+        }
+        return {
+          allowedContentTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          addRandomSuffix: true,
+          maximumSizeInBytes: 10 * 1024 * 1024, // 10MB per screenshot
+        };
+      },
       onUploadCompleted: async () => {
         // No server-side bookkeeping needed here — the client appends the
         // returned blob URL onto the trade's `screenshots` field itself and
