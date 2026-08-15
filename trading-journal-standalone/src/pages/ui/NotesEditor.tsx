@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
-import { ImagePlus, Loader2, Trash2, X, ZoomIn } from 'lucide-react';
-import { Button } from '../../lib/ui/button';
+import { Loader2, Trash2, X, ZoomIn } from 'lucide-react';
 import { NoteBlock } from '../data/types';
 
 type Props = {
@@ -56,14 +55,15 @@ function AutoTextarea({ value, onChange, onPasteImage, placeholder, focused }: {
 
 // Notion-style content stream: type freely, paste a screenshot (Ctrl+V) right
 // where the cursor is and it drops in as an inline image block with a fresh
-// text block after it so typing continues naturally, or use "Add Screenshot"
-// to append one at the end via a file picker.
+// text block after it so typing continues naturally. There used to also be
+// an "Add Screenshot" file-picker button here, but paste already covers the
+// same job with less UI to scan past, so it was dropped in favor of just
+// the placeholder text telling you paste works.
 export default function NotesEditor({ blocks, onChange }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [focusIndex, setFocusIndex] = useState<number | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Invariant: always end with a text block so there's somewhere to type
   // after the last image.
@@ -122,22 +122,16 @@ export default function NotesEditor({ blocks, onChange }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center gap-2 mb-2">
         <p className="text-sm font-semibold">Notes</p>
-        <Button
-          variant="outline" size="sm" disabled={uploading}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {uploading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <ImagePlus className="w-3.5 h-3.5 mr-1" />}
-          {uploading ? 'Uploading…' : 'Add Screenshot'}
-        </Button>
-        <input
-          ref={fileInputRef} type="file" accept="image/*" className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) insertImageAfter(normalized.length - 1, f); e.target.value = ''; }}
-        />
+        {uploading && (
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Loader2 className="w-3 h-3 animate-spin" /> Uploading screenshot…
+          </span>
+        )}
       </div>
 
-      <div className="rounded-xl border border-border p-4 min-h-[200px] flex flex-col gap-2">
+      <div className="rounded-xl border border-border p-4 min-h-[200px] flex flex-col gap-3">
         {normalized.map((block, i) => block.type === 'text' ? (
           <AutoTextarea
             key={i}
@@ -148,7 +142,11 @@ export default function NotesEditor({ blocks, onChange }: Props) {
             onPasteImage={(file) => insertImageAfter(i, file)}
           />
         ) : (
-          <div key={i} className="relative group inline-block max-w-md rounded-lg overflow-hidden border border-border">
+          // No max-width cap (previously max-w-md, ~448px) — screenshots
+          // are usually chart/platform captures where more pixels legible
+          // is strictly better, and the drawer itself is wide enough now
+          // to give them real room instead of shrinking them down.
+          <div key={i} className="relative group w-full rounded-lg overflow-hidden border border-border">
             <img
               src={block.url} alt="Trade screenshot" className="w-full h-auto block cursor-zoom-in"
               onClick={() => setLightbox(block.url)}

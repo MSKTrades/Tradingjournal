@@ -1,11 +1,52 @@
-import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3 } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, Checklist, SESSIONS, fmtMoney } from '../data/types';
+import { Trade, CustomColumn, Checklist, NewsEvent, SESSIONS, fmtMoney } from '../data/types';
 import { useAccount } from '../../lib/accounts';
+import { useFetch } from '../../lib/api';
 import { cn } from '../../lib/utils';
 import NotesEditor from './NotesEditor';
+
+// Splits a 6-letter pair like "GBPUSD" into ['GBP','USD'] to cross-reference
+// against the economic calendar's currency codes. Anything else (crypto
+// tickers, unusual lengths) is left alone — it just won't match any
+// calendar entry, which is the correct outcome for a pair that isn't a
+// currency pair.
+function pairCurrencies(pair: string | null): string[] {
+  if (!pair) return [];
+  const clean = pair.toUpperCase().replace(/[^A-Z]/g, '');
+  if (clean.length !== 6) return [];
+  return [clean.slice(0, 3), clean.slice(3, 6)];
+}
+
+type NewsDayStatus = 'unknown' | 'no-data' | 'clear' | 'news-day';
+
+// The economic-calendar feed only ever covers "this week" (see
+// api/summary/index.ts) — there's no historical archive behind it. So for
+// a trade placed outside that window, the honest answer is "no data",
+// never "no news" (which would be a guess dressed up as a fact).
+function checkNewsDay(pair: string | null, dateStr: string | null, events: NewsEvent[]):
+  { status: NewsDayStatus; matches: NewsEvent[] } {
+  if (!dateStr) return { status: 'unknown', matches: [] };
+  const currencies = pairCurrencies(pair);
+  if (currencies.length === 0) return { status: 'unknown', matches: [] };
+  if (events.length === 0) return { status: 'no-data', matches: [] };
+
+  const targetDay = new Date(dateStr).toDateString();
+  const coversDate = events.some(e => new Date(e.date).toDateString() === targetDay);
+  if (!coversDate) return { status: 'no-data', matches: [] };
+
+  const matches = events.filter(e => {
+    const d = new Date(e.date);
+    if (d.toDateString() !== targetDay) return false;
+    const impact = e.impact.toLowerCase();
+    if (impact !== 'high' && impact !== 'medium') return false;
+    return currencies.includes(e.country.toUpperCase());
+  });
+
+  return { status: matches.length > 0 ? 'news-day' : 'clear', matches };
+}
 
 export type TradePayload = Omit<Trade, 'id' | 'overall_gain' | 'overall_pct' | 'created_at'> & { id?: number };
 
@@ -139,6 +180,17 @@ export default function TradeDetailPanel({
 
   const activeChecklist = checklists.find(c => c.id === form.checklist_id) ?? null;
 
+  const { data: newsData } = useFetch<{ events: NewsEvent[] }>('/summary?resource=news');
+  const newsCheck = useMemo(
+    () => checkNewsDay(form.coin_token, form.trade_placed_at, newsData?.events ?? []),
+    [form.coin_token, form.trade_placed_at, newsData]
+  );
+  const checklistSummary = useMemo(() => {
+    if (!form.checklist_enabled || !activeChecklist || activeChecklist.items.length === 0) return null;
+    const followed = activeChecklist.items.filter(i => form.checklist_results[String(i.id)] === true).length;
+    return { followed, total: activeChecklist.items.length };
+  }, [form.checklist_enabled, form.checklist_results, activeChecklist]);
+
   function set<K extends keyof TradePayload>(k: K, v: TradePayload[K]) {
     setForm(p => ({ ...p, [k]: v }));
   }
@@ -208,7 +260,7 @@ export default function TradeDetailPanel({
       {/* Drawer — covers ~60% of the viewport (100% on small screens) rather
           than a full-screen takeover, so the journal table stays visible
           (dimmed) behind it, similar to FX Replay's trade panel. */}
-      <div className="relative h-full w-full sm:w-[60vw] sm:min-w-[680px] max-w-[1100px] bg-background border-l border-border shadow-2xl flex flex-col animate-drawer-slide">
+      <div className="relative h-full w-full sm:w-[70vw] sm:min-w-[760px] max-w-[1500px] bg-background border-l border-border shadow-2xl flex flex-col animate-drawer-slide">
         {/* Top bar */}
         <div className="h-14 shrink-0 flex items-center justify-between px-5 border-b border-border">
           <div className="flex items-center gap-3 min-w-0">
@@ -465,6 +517,44 @@ export default function TradeDetailPanel({
               see every trade at once, so that's where trends about "every
               trade" belong, rather than tucked inside one trade's editor. */}
           <div className="flex-1 min-w-0 overflow-y-auto px-6 py-6">
+            <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 mb-4 flex flex-wrap gap-x-8 gap-y-2">
+              <div className="flex items-center gap-2">
+                <ListChecks className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="text-xs text-muted-foreground">Checklist</span>
+                <span className="text-sm font-medium">
+                  {!form.checklist_enabled ? '—'
+                    : !checklistSummary ? 'No rules'
+                    : checklistSummary.followed === checklistSummary.total
+                      ? `All ${checklistSummary.total} followed`
+                      : `${checklistSummary.followed}/${checklistSummary.total} followed`}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Newspaper className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="text-xs text-muted-foreground">News Day</span>
+                {newsCheck.status === 'news-day' && (
+                  <span
+                    className="text-sm font-medium text-yellow-600 dark:text-yellow-400 cursor-help"
+                    title={newsCheck.matches.map(e => `${e.country} — ${e.title}`).join('\n')}
+                  >
+                    {newsCheck.matches.length} event{newsCheck.matches.length !== 1 ? 's' : ''} (hover for details)
+                  </span>
+                )}
+                {newsCheck.status === 'clear' && <span className="text-sm font-medium text-green-600 dark:text-green-400">Clear</span>}
+                {newsCheck.status === 'no-data' && <span className="text-sm font-medium text-muted-foreground">No calendar data for this date</span>}
+                {newsCheck.status === 'unknown' && <span className="text-sm font-medium text-muted-foreground">—</span>}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Clock3 className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="text-xs text-muted-foreground">Duration</span>
+                <span className="text-sm font-medium">
+                  {form.date_closed ? (form.trade_duration ?? '—') : 'Trade still open'}
+                </span>
+              </div>
+            </div>
+
             <NotesEditor blocks={form.notes_blocks} onChange={(blocks) => set('notes_blocks', blocks)} />
           </div>
         </div>
