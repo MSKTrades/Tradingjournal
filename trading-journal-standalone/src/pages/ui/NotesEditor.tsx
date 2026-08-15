@@ -131,7 +131,13 @@ export default function NotesEditor({ blocks, onChange }: Props) {
         )}
       </div>
 
-      <div className="rounded-xl border border-border p-4 min-h-[200px] flex flex-col gap-3">
+      {/* No border/card wrapper here on purpose (used to be a bordered
+          rounded-xl box with a min-h-[200px] floor) - per feedback, a small
+          separate box read as cramped next to the drawer's extra width;
+          this now just flows as part of the page, and the taller min-height
+          lets it actually use the vertical room the wider drawer gives it
+          instead of leaving empty space below a short box. */}
+      <div className="flex flex-col gap-3 min-h-[55vh]">
         {normalized.map((block, i) => block.type === 'text' ? (
           <AutoTextarea
             key={i}

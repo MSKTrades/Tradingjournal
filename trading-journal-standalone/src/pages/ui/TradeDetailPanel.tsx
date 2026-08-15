@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3 } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, Checklist, NewsEvent, Tag, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
+import { Trade, CustomColumn, Checklist, NewsEvent, Tag, TagGroup, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
 import { useAccount } from '../../lib/accounts';
 import { api, useFetch } from '../../lib/api';
 import { cn } from '../../lib/utils';
 import NotesEditor from './NotesEditor';
 import CurrencyFlag from './CurrencyFlag';
 import TagPicker from './TagPicker';
+import TagGroupsPicker from './TagGroupsPicker';
 
 // Splits a 6-letter pair like "GBPUSD" into ['GBP','USD'] to cross-reference
 // against the economic calendar's currency codes. Anything else (crypto
@@ -75,7 +76,7 @@ function empty(accountId: number, tradeNumber: number): TradePayload {
     trade_number: tradeNumber,
     start_capital: null, end_capital: null, gain_loss: null, gain_loss_pct: null,
     structure_15m: null, wr_1m: null, before_chart_1m: null,
-    direction: 'Long', entry_type: null, tags: [],
+    direction: 'Long', entry_type: null, tags: [], tag_selections: {},
     liquidity_swept: null, distance_from_asia: null, liquidity_swept_no: null,
     cisd_break: null, total_inverse_candles: null, inverse_candle_size: null,
     sl_pips: null, position_size: null,
@@ -93,7 +94,7 @@ function empty(accountId: number, tradeNumber: number): TradePayload {
 }
 
 function fromTrade(t: Trade): TradePayload {
-  return { ...t, notes_blocks: t.notes_blocks ?? [], screenshots: t.screenshots ?? [], tags: t.tags ?? [] };
+  return { ...t, notes_blocks: t.notes_blocks ?? [], screenshots: t.screenshots ?? [], tags: t.tags ?? [], tag_selections: t.tag_selections ?? {} };
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -175,6 +176,8 @@ export default function TradeDetailPanel({
   const [newFieldType, setNewFieldType] = useState('text');
   const { data: rawTags, refetch: refetchTags } = useFetch<Tag[]>('/columns?resource=tags');
   const allTags: Tag[] = rawTags ?? [];
+  const { data: rawTagGroups, refetch: refetchTagGroups } = useFetch<TagGroup[]>('/columns?resource=tag_groups');
+  const tagGroups: TagGroup[] = rawTagGroups ?? [];
 
   useEffect(() => {
     if (open) {
@@ -250,6 +253,17 @@ export default function TradeDetailPanel({
     api.post('/columns', { resource: 'tags', name }).then(() => refetchTags()).catch(() => {});
   }
 
+  // Same fire-and-forget idempotent pattern as handleCreateTag: the group/
+  // option is already applied to this trade locally (TagGroupsPicker
+  // updates form.tag_selections immediately), this just registers it in
+  // the reusable list so it's there next time and for other trades.
+  function handleCreateTagGroup(name: string) {
+    api.post('/columns', { resource: 'tag_groups', name }).then(() => refetchTagGroups()).catch(() => {});
+  }
+  function handleCreateTagGroupOption(groupId: number, groupName: string, optionName: string) {
+    api.post('/columns', { resource: 'tag_group_options', group_id: groupId, name: optionName }).then(() => refetchTagGroups()).catch(() => {});
+  }
+
   async function handleAddField() {
     const trimmed = newFieldName.trim();
     if (!trimmed) return;
@@ -297,9 +311,15 @@ export default function TradeDetailPanel({
           </div>
         </div>
 
-        {/* Body: fields (left) · notes + screenshots (middle) · insights (right) */}
+        {/* Body: fields (left) · notes + screenshots (right). The left
+            column used to stay a fixed 300px even after the drawer itself
+            was widened from 70vw to 88vw - every extra pixel went to the
+            right (Notes/screenshots) panel, so the form fields never
+            actually got the room the wider drawer implied. Now scales with
+            the drawer (32%) between a floor and ceiling instead of a bare
+            fixed width. */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          <div className="w-[300px] shrink-0 overflow-y-auto border-r border-border px-5 py-5">
+          <div className="w-[32%] min-w-[360px] max-w-[460px] shrink-0 overflow-y-auto border-r border-border px-5 py-5">
             {/* Grouped FX Replay-style: identity fields (account/asset/side/
                 entry type/tags) first, then everything about going IN to the
                 trade, then SL/TP together, then everything about coming OUT
@@ -333,15 +353,6 @@ export default function TradeDetailPanel({
                     {ENTRY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                   </Select>
                 </div>
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Tags</Label>
-                <TagPicker
-                  value={form.tags}
-                  allTags={allTags}
-                  onChange={(tags) => set('tags', tags)}
-                  onCreateTag={handleCreateTag}
-                />
               </div>
             </Section>
 
@@ -531,14 +542,17 @@ export default function TradeDetailPanel({
                     {activeChecklist && (
                       activeChecklist.items.length > 0 ? (
                         <div className="flex flex-col gap-2 mt-1">
-                          {activeChecklist.items.map(item => (
+                          {activeChecklist.items.map((item, idx) => (
                             <div key={item.id} className="flex items-center gap-2">
                               <Checkbox
                                 checked={!!form.checklist_results[String(item.id)]}
                                 onCheckedChange={() => setChecklistResult(item.id, !form.checklist_results[String(item.id)])}
                                 aria-label={item.text}
                               />
-                              <span className="text-xs flex-1">{item.text}</span>
+                              <span className="text-xs flex-1">
+                                <span className="font-semibold text-muted-foreground mr-1">Rule {idx + 1}:</span>
+                                {item.text}
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -556,6 +570,26 @@ export default function TradeDetailPanel({
                 )
               )}
             </CollapsibleSection>
+
+            {/* Tags moved to the very bottom of the form, per feedback -
+                both the free-form flat tags and the new FX Replay-style
+                grouped sub-tags live together here rather than tags being
+                one of the first things you fill in. */}
+            <Section title="Tags">
+              <TagPicker
+                value={form.tags}
+                allTags={allTags}
+                onChange={(tags) => set('tags', tags)}
+                onCreateTag={handleCreateTag}
+              />
+              <TagGroupsPicker
+                groups={tagGroups}
+                selections={form.tag_selections}
+                onChange={(next) => set('tag_selections', next)}
+                onCreateGroup={handleCreateTagGroup}
+                onCreateOption={handleCreateTagGroupOption}
+              />
+            </Section>
           </div>
 
           {/* Right: notes + screenshots. Insights (win rate / profit factor /
