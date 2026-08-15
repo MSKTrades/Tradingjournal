@@ -352,3 +352,28 @@ WHERE liquidity_swept_no IS NOT NULL AND NOT (extra_data ? 'liquidity_swept_no')
 
 UPDATE trades SET extra_data = extra_data || jsonb_build_object('sl_pips', sl_pips)
 WHERE sl_pips IS NOT NULL AND NOT (extra_data ? 'sl_pips');
+
+-- Idempotent column addition for the Entry Type field (Market / Limit / Stop).
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_type TEXT;
+
+-- Idempotent column addition for custom, user-defined tags on trades.
+-- Stored as a plain JSONB array of tag NAME strings directly on the trade
+-- (like screenshots/notes_blocks) rather than a normalized join table -
+-- simpler to filter on (a single `tags ?| array[...]` / `@>` check, no
+-- join) and consistent with how this app already stores small per-trade
+-- lists. The canonical/reusable tag list (so the picker can suggest
+-- existing tags instead of you retyping them, and so each tag can carry a
+-- color) lives in its own `tags` table below; renaming a tag there does
+-- NOT retroactively rename it on trades that already used the old name,
+-- same tradeoff already accepted for custom_columns.col_key.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+CREATE TABLE IF NOT EXISTS tags (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL UNIQUE,
+  color       TEXT NOT NULL DEFAULT '#f59e0b',
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_trades_tags ON trades USING GIN (tags);
