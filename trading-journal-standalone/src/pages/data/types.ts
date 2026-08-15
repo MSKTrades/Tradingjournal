@@ -302,3 +302,47 @@ export function plColor(v: number | null | undefined): string {
   if (v == null) return 'text-muted-foreground';
   return Number(v) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
 }
+
+// --- Chart Replay / Backtesting -------------------------------------------
+
+export const REPLAY_TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'] as const;
+export type ReplayTimeframe = typeof REPLAY_TIMEFRAMES[number];
+
+export type ChartDataset = {
+  id: number;
+  pair: string;
+  timeframe: string;
+  blob_url: string;
+  candle_count: number;
+  start_time: string | null;
+  end_time: string | null;
+  uploaded_at: string;
+};
+
+// One OHLC bar, normalized from whatever CSV format was uploaded. `time` is
+// unix seconds (UTC) - the unit lightweight-charts expects for its
+// UTCTimestamp type.
+export type Candle = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+};
+
+export type BacktestTrade = {
+  id: number;
+  dataset_id: number;
+  direction: string;           // 'Long' | 'Short'
+  entry_price: number;
+  sl_price: number | null;
+  tp_price: number | null;
+  entry_time: string;          // ISO timestamp of the replay candle it was placed on
+  exit_time: string | null;
+  exit_price: number | null;
+  result: string | null;       // 'Profit' | 'Loss' | null while open
+  rr: number | null;
+  notes: string | null;
+  created_at: string;
+};
