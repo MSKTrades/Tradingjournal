@@ -59,20 +59,20 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       `UPDATE trades SET
         account_id=$1,
         trade_number=$2,
-        structure_15m=$3, wr_1m=$4, before_chart_1m=$5, direction=$6,
-        liquidity_swept=$7, distance_from_asia=$8, liquidity_swept_no=$9,
-        cisd_break=$10, total_inverse_candles=$11, inverse_candle_size=$12, sl_pips=$13, position_size=$14,
-        profit_loss=$15, rr=$16, entry_price=$17, tp_price=$18, sl_price=$19,
-        coin_token=$20, trade_placed_at=$21, trade_executed_at=$22, session_in=$23,
-        date_closed=$24, time_closed=$25, closed_session=$26, trade_duration=$27,
-        partial_1=$28, partial_2=$29, reached_1r2=$30, reached_1r3=$31, reached_1r4=$32, reached_1r5=$33,
-        max_rr=$34, comments=$35, extra_data=$36::jsonb, screenshots=$37::jsonb, notes_blocks=$38::jsonb,
-        checklist_enabled=$39, checklist_id=$40, checklist_results=$41::jsonb
-      WHERE id=$42`,
+        structure_15m=$3, wr_1m=$4, before_chart_1m=$5, direction=$6, entry_type=$7,
+        liquidity_swept=$8, distance_from_asia=$9, liquidity_swept_no=$10,
+        cisd_break=$11, total_inverse_candles=$12, inverse_candle_size=$13, sl_pips=$14, position_size=$15,
+        profit_loss=$16, rr=$17, entry_price=$18, tp_price=$19, sl_price=$20,
+        coin_token=$21, trade_placed_at=$22, trade_executed_at=$23, session_in=$24,
+        date_closed=$25, time_closed=$26, closed_session=$27, trade_duration=$28,
+        partial_1=$29, partial_2=$30, reached_1r2=$31, reached_1r3=$32, reached_1r4=$33, reached_1r5=$34,
+        max_rr=$35, comments=$36, extra_data=$37::jsonb, screenshots=$38::jsonb, notes_blocks=$39::jsonb,
+        checklist_enabled=$40, checklist_id=$41, checklist_results=$42::jsonb, tags=$43::jsonb
+      WHERE id=$44`,
       [
         newAccountId,
         p.trade_number,
-        p.structure_15m, p.wr_1m, p.before_chart_1m, p.direction,
+        p.structure_15m, p.wr_1m, p.before_chart_1m, p.direction, p.entry_type ?? null,
         p.liquidity_swept, p.distance_from_asia, p.liquidity_swept_no,
         p.cisd_break, p.total_inverse_candles, p.inverse_candle_size, p.sl_pips, p.position_size,
         p.profit_loss, p.rr, p.entry_price, p.tp_price, p.sl_price,
@@ -81,7 +81,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.partial_1, p.partial_2,
         p.reached_1r2 ?? false, p.reached_1r3 ?? false, p.reached_1r4 ?? false, p.reached_1r5 ?? false,
         p.max_rr, comments, p.extra_data ?? {}, screenshots, p.notes_blocks ?? [],
-        p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, id,
+        p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, p.tags ?? [], id,
       ]
     );
 

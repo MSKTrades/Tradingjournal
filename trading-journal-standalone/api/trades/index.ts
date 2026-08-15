@@ -81,23 +81,23 @@ async function addTrade(p: any) {
     `INSERT INTO trades (
       account_id,
       trade_number,
-      structure_15m, wr_1m, before_chart_1m, direction,
+      structure_15m, wr_1m, before_chart_1m, direction, entry_type,
       liquidity_swept, distance_from_asia, liquidity_swept_no,
       cisd_break, total_inverse_candles, inverse_candle_size, sl_pips, position_size,
       profit_loss, rr, entry_price, tp_price, sl_price,
       coin_token, trade_placed_at, trade_executed_at, session_in,
       date_closed, time_closed, closed_session, trade_duration,
       partial_1, partial_2, reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr,
-      comments, extra_data, screenshots, notes_blocks, checklist_enabled, checklist_id, checklist_results
+      comments, extra_data, screenshots, notes_blocks, checklist_enabled, checklist_id, checklist_results, tags
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-      $20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,
-      $35,$36::jsonb,$37::jsonb,$38::jsonb,$39,$40,$41::jsonb
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+      $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,
+      $36,$37::jsonb,$38::jsonb,$39::jsonb,$40,$41,$42::jsonb,$43::jsonb
     ) RETURNING id`,
     [
       accountId,
       p.trade_number,
-      p.structure_15m, p.wr_1m, p.before_chart_1m, p.direction,
+      p.structure_15m, p.wr_1m, p.before_chart_1m, p.direction, p.entry_type ?? null,
       p.liquidity_swept, p.distance_from_asia, p.liquidity_swept_no,
       p.cisd_break, p.total_inverse_candles, p.inverse_candle_size, p.sl_pips, p.position_size,
       p.profit_loss, p.rr, p.entry_price, p.tp_price, p.sl_price,
@@ -108,7 +108,7 @@ async function addTrade(p: any) {
       // Passed as raw JS values (not pre-stringified) on purpose — see the
       // note by deriveFromNotesBlocks below for why.
       p.max_rr, comments, p.extra_data ?? {}, screenshots, p.notes_blocks ?? [],
-      p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {},
+      p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, p.tags ?? [],
     ]
   );
   await recalcAccountCapital(sql, accountId);
