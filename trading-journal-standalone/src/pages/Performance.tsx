@@ -7,11 +7,12 @@ import { RefreshCw, TrendingUp, TrendingDown, Calendar, BarChart2, ChevronLeft, 
 import { Button } from '../lib/ui/button';
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine,
+  ResponsiveContainer, ReferenceLine, LineChart, Line,
 } from 'recharts';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { fmtMoney, plColor, StrategyResult, Trade } from './data/types';
+import { fmtMoney, plColor, StrategyResult, Trade, Tag } from './data/types';
+import PerformanceFilterBar, { PerfFilters, emptyFilters } from './ui/PerformanceFilterBar';
 
 // --- TYPES ---
 type PeriodRow = {
@@ -113,7 +114,14 @@ function computeHourly(trades: Trade[]): { rows: PeriodRow[]; skipped: number } 
     const grossWin = group.reduce((s, t) => s + Math.max(0, Number(t.gain_loss ?? 0)), 0);
     const grossLoss = Math.abs(group.reduce((s, t) => s + Math.min(0, Number(t.gain_loss ?? 0)), 0));
     const profit_factor = grossLoss > 0 ? Math.round((grossWin / grossLoss) * 100) / 100 : (grossWin > 0 ? null : 0);
-    const rrVals = group.map(t => t.rr).filter((v): v is number => v != null);
+    // Number(v) here isn't a no-op - Postgres NUMERIC columns (rr included)
+    // come back from the `postgres` driver as STRINGS, not JS numbers (it
+    // avoids silent float-precision loss on the driver's part). Without this,
+    // `s + v` was doing STRING CONCATENATION ("0" + "2" + "-1" -> "02-1"),
+    // and Number()-ing that garbled result at the very end produced exactly
+    // the nonsense values reported (NaNR, 555.05R, 111R) - this is the same
+    // class of bug as gain_loss above, which already guards with Number().
+    const rrVals = group.map(t => t.rr).filter(v => v != null).map(v => Number(v));
     const avg_rr = rrVals.length > 0 ? Math.round((rrVals.reduce((s, v) => s + v, 0) / rrVals.length) * 100) / 100 : null;
     return {
       period: fmtHourLabel(h),
@@ -475,20 +483,75 @@ export default function Performance() {
   const session: PeriodRow[] = data?.session ?? [];
   const stats = data?.stats;
 
-  // By-Hour is computed client-side from the raw trade list rather than a
-  // new backend endpoint - the Vercel Hobby plan's serverless function
-  // count is already close to its cap, so any new breakdown that can be
-  // derived from data already being fetched elsewhere in the app goes
-  // client-side instead of adding another api/*.ts file.
+  // By-Hour (and the cumulative P/L line chart below) are computed
+  // client-side from the raw trade list rather than a new backend endpoint
+  // - the Vercel Hobby plan's serverless function count is already close to
+  // its cap, so any new view that can be derived from data already being
+  // fetched elsewhere in the app goes client-side instead of adding another
+  // api/*.ts file.
   const { data: rawTradesForHourly } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
-  const hourlySource: Trade[] = useMemo(() => {
+  const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
+  const allTags: Tag[] = rawTags ?? [];
+
+  const [filters, setFilters] = useState<PerfFilters>(emptyFilters);
+
+  const strategyFiltered: Trade[] = useMemo(() => {
     const all = rawTradesForHourly ?? [];
     if (strategyId === 'RAW') return all;
     const strat = strategies.find(s => String(s.id) === strategyId);
     const idSet = new Set((strat?.trades ?? []).map(t => t.id));
     return all.filter(t => idSet.has(t.id));
   }, [rawTradesForHourly, strategies, strategyId]);
-  const { rows: hourly, skipped: hourlySkipped } = useMemo(() => computeHourly(hourlySource), [hourlySource]);
+
+  const assetOptions = useMemo(
+    () => Array.from(new Set(strategyFiltered.map(t => (t.coin_token ?? '').trim().toUpperCase()).filter(Boolean))).sort(),
+    [strategyFiltered]
+  );
+
+  // The Assets/Side/Outcome/Tags/Day/Date-Range filter bar above the tabs -
+  // applied here (client-side, on top of whatever the strategy dropdown
+  // already narrowed to) rather than threaded into the server's
+  // /trades/performance endpoint. That endpoint's monthly/yearly/weekday/
+  // session/heatmap/calendar aggregation (including the Expectancy &
+  // Winners/Losers stats) is real, already-correct logic this app depends
+  // on elsewhere - re-deriving all of that client-side for six more filter
+  // dimensions risked subtly diverging from what the strategy engine
+  // reports. So for now the new filter bar drives the two views built
+  // client-side already (By Hour, and the cumulative P/L chart below);
+  // the older tabs keep using the strategy dropdown + server data, same as
+  // before this round.
+  const filteredTrades: Trade[] = useMemo(() => {
+    return strategyFiltered.filter(t => {
+      if (filters.assets.length > 0 && !filters.assets.includes((t.coin_token ?? '').trim().toUpperCase())) return false;
+      if (filters.side.length > 0 && !filters.side.includes(t.direction)) return false;
+      if (filters.outcome.length > 0 && !filters.outcome.includes(t.profit_loss ?? '')) return false;
+      if (filters.tags.length > 0 && !(t.tags ?? []).some(tag => filters.tags.includes(tag))) return false;
+      if (filters.days.length > 0) {
+        if (!t.trade_placed_at) return false;
+        const d = new Date(t.trade_placed_at);
+        if (isNaN(d.getTime()) || !filters.days.includes(d.getUTCDay())) return false;
+      }
+      if (filters.dateFrom && (!t.trade_placed_at || t.trade_placed_at < filters.dateFrom)) return false;
+      if (filters.dateTo && (!t.trade_placed_at || t.trade_placed_at > filters.dateTo)) return false;
+      return true;
+    });
+  }, [strategyFiltered, filters]);
+
+  const { rows: hourly, skipped: hourlySkipped } = useMemo(() => computeHourly(filteredTrades), [filteredTrades]);
+
+  // Cumulative P/L line: filtered trades in date order, running total of
+  // gain_loss (Number()'d for the same reason as computeHourly above - the
+  // `postgres` driver returns NUMERIC columns as strings).
+  const equityLine = useMemo(() => {
+    const sorted = [...filteredTrades]
+      .filter(t => t.trade_placed_at)
+      .sort((a, b) => new Date(a.trade_placed_at ?? 0).getTime() - new Date(b.trade_placed_at ?? 0).getTime());
+    let cum = 0;
+    return sorted.map((t, i) => {
+      cum += Number(t.gain_loss ?? 0);
+      return { idx: i + 1, date: t.trade_placed_at, cum: Math.round(cum * 100) / 100 };
+    });
+  }, [filteredTrades]);
 
   return (
     <div>
@@ -516,6 +579,8 @@ export default function Performance() {
         </div>
       </div>
 
+      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={allTags} />
+
       {loading && <div className="text-center py-16 text-muted-foreground">Loading…</div>}
 
       {!loading && monthly.length === 0 && (
@@ -530,6 +595,32 @@ export default function Performance() {
 
           {/* NEW: Expectancy and Winners/Losers sections */}
           <ExpectancyCards stats={stats} />
+
+          {/* Cumulative P/L across whatever the filter bar + strategy
+              dropdown currently narrow down to - a single running total,
+              not bucketed by any calendar period, so it sits above the
+              period-bucketed tabs below rather than as one of them. */}
+          <Card className="mb-6">
+            <CardContent className="pt-4">
+              <p className="text-sm font-semibold mb-3">Cumulative P/L</p>
+              {equityLine.length < 2 ? (
+                <div className="p-8 text-center text-muted-foreground text-sm">Not enough trades in the current filter to plot a curve.</div>
+              ) : (
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={equityLine} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="idx" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} width={55} tickFormatter={(v) => `$${v >= 1000 || v <= -1000 ? `${(v / 1000).toFixed(1)}k` : v}`} />
+                      <Tooltip contentStyle={{ fontSize: 11 }} labelFormatter={(v) => `Trade #${v}`} formatter={(v: number) => [fmtMoney(v), 'Cumulative P/L']} />
+                      <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
+                      <Line type="monotone" dataKey="cum" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           <Tabs defaultValue="heatmap" className="w-full">
             <TabsList className="mb-4">
@@ -697,7 +788,7 @@ export default function Performance() {
                       <> &middot; {hourlySkipped} trade{hourlySkipped !== 1 ? 's' : ''} skipped (no Execution Time logged)</>
                     )}
                   </p>
-                  {hourlySource.length === 0 ? (
+                  {filteredTrades.length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground">
                       No trades to break down by hour yet.
                     </div>

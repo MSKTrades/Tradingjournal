@@ -545,84 +545,6 @@ function SessionsWidget() {
   );
 }
 
-// Free, no-API-key TradingView "Technical Analysis" widget - a script-only
-// embed (same idea as embedding a YouTube video), so this is client-side
-// only with no backend fetch of ours to verify. It summarizes standard
-// technical indicators (moving averages, oscillators) into a Buy/Sell/
-// Neutral read for the symbol - this is indicator-derived technical
-// sentiment, NOT retail positioning/COT-style sentiment data, which isn't
-// available for free or reliably. If the script fails to load (e.g. blocked
-// by a restrictive network), the widget area just stays empty rather than
-// breaking the page.
-//
-// displayMode 'multiple' is the bar-style layout (separate Oscillators /
-// Moving Averages / Summary rows, each a red-to-green bar) rather than the
-// round gauge - back to this per feedback that the gauge read as "a meter,
-// not a bar". height is raised well past TradingView's own ~450px default
-// for this mode, since the gauge version was already clipping its footer
-// and showing an internal scrollbar at a shorter height, and this layout
-// has more content to fit than the gauge did.
-//
-// Note on the "why not a red/green percentage bar per pair" look from an
-// earlier round's reference screenshot (FXSSI/IFC-style): that visual is
-// built from each provider's own live long/short positioning data, which
-// isn't something there's a verified free/keyless embed for here -
-// guessing at an iframe URL risks shipping a widget that silently renders
-// blank, and fabricating the percentages ourselves would mean showing
-// fake numbers next to a live trading journal, which is worse than not
-// showing them. This sticks with TradingView's real technical rating
-// instead, just in its bar layout rather than the gauge.
-function TradingViewTechnicalGauge({ symbol, tvSymbol, theme }: { symbol: string; tvSymbol: string; theme: 'light' | 'dark' }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    container.innerHTML = '';
-
-    const widgetDiv = document.createElement('div');
-    widgetDiv.className = 'tradingview-widget-container__widget';
-    container.appendChild(widgetDiv);
-
-    const script = document.createElement('script');
-    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js';
-    script.async = true;
-    script.type = 'text/javascript';
-    script.text = JSON.stringify({
-      interval: '1D',
-      width: '100%',
-      isTransparent: true,
-      height: 500,
-      symbol: tvSymbol,
-      showIntervalTabs: false,
-      displayMode: 'multiple',
-      locale: 'en',
-      colorTheme: theme,
-    });
-    script.onerror = () => {
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '<p style="font-size:12px;color:var(--muted-foreground,#888);padding:12px">Sentiment widget unavailable (couldn\'t load TradingView script).</p>';
-      }
-    };
-    container.appendChild(script);
-  }, [symbol, tvSymbol, theme]);
-
-  return <div className="tradingview-widget-container" ref={containerRef} />;
-}
-
-// A few commonly-traded commodities, shown as small supplementary cards
-// next to the screener (the screener's "market" field only accepts one
-// discrete market type - forex, crypto, stocks, etc - with no documented
-// way to mix commodities into a forex screener, so these stay as
-// individual widgets). TradingView's generic "FX:" symbol provider
-// doesn't cover these, so each needs its own exchange prefix. Gold
-// (OANDA:XAUUSD) and Silver (TVC:SILVER) are both confirmed working from
-// live screenshots earlier this session.
-const COMMODITIES: { symbol: string; tvSymbol: string }[] = [
-  { symbol: 'XAUUSD', tvSymbol: 'OANDA:XAUUSD' }, // Gold - confirmed working
-  { symbol: 'XAGUSD', tvSymbol: 'TVC:SILVER' },   // Silver - confirmed working
-];
-
 // Free, no-API-key TradingView "Screener" widget - a single embed that
 // lists many symbols in one compact, non-scrolling table (Symbol +
 // Technical Rating columns, plus whatever other columns TradingView's
@@ -664,7 +586,13 @@ function TradingViewScreener({ theme }: { theme: 'light' | 'dark' }) {
     script.type = 'text/javascript';
     script.text = JSON.stringify({
       width: '100%',
-      height: 560,
+      // ~6 rows' worth of height (toolbar + column header + 6 data rows)
+      // rather than tall enough to show all 49 matches at once - the
+      // widget's own row list scrolls internally past that, so this still
+      // reaches every pair, it just doesn't take over the whole page to do
+      // it. Was 560 (showed all matches unscrolled, per feedback this made
+      // the whole section "too big").
+      height: 340,
       defaultColumn: 'overview',
       defaultScreen: 'general',
       market: 'forex',
@@ -701,22 +629,11 @@ function MarketSentiment() {
       <p className="text-xs text-muted-foreground mb-3">
         Technical indicator sentiment (moving averages &amp; oscillators) via TradingView &middot; not retail positioning data
       </p>
-      <Card className="mb-4">
+      <Card>
         <CardContent className="pt-3 pb-3">
           <TradingViewScreener theme={theme} />
         </CardContent>
       </Card>
-      <p className="text-xs text-muted-foreground mb-2">Commodities</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {COMMODITIES.map(c => (
-          <Card key={c.symbol}>
-            <CardContent className="pt-3 pb-3">
-              <p className="text-xs font-semibold mb-1 px-1">{c.symbol}</p>
-              <TradingViewTechnicalGauge symbol={c.symbol} tvSymbol={c.tvSymbol} theme={theme} />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
     </div>
   );
 }
