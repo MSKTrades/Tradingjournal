@@ -81,6 +81,14 @@ function parseCombinedDateTime(raw: string): number | null {
     return Math.round(Date.UTC(+y, +mo - 1, +d, +h, +mi, +(se ?? 0)) / 1000);
   }
 
+  // HistData.com "Generic ASCII" compact format: "20260601 000000"
+  // (yyyymmdd, a space, hhmmss - no punctuation inside either half).
+  m = s.match(/^(\d{4})(\d{2})(\d{2})[ T](\d{2})(\d{2})(\d{2})$/);
+  if (m) {
+    const [, y, mo, d, h, mi, se] = m;
+    return Math.round(Date.UTC(+y, +mo - 1, +d, +h, +mi, +se) / 1000);
+  }
+
   return null;
 }
 
