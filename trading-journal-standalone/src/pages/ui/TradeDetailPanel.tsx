@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3 } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, Checklist, NewsEvent, SESSIONS, fmtMoney, currencyFlag } from '../data/types';
+import { Trade, CustomColumn, Checklist, NewsEvent, SESSIONS, fmtMoney } from '../data/types';
 import { useAccount } from '../../lib/accounts';
 import { useFetch } from '../../lib/api';
 import { cn } from '../../lib/utils';
 import NotesEditor from './NotesEditor';
+import CurrencyFlag from './CurrencyFlag';
 
 // Splits a 6-letter pair like "GBPUSD" into ['GBP','USD'] to cross-reference
 // against the economic calendar's currency codes. Anything else (crypto
@@ -556,7 +557,7 @@ export default function TradeDetailPanel({
                           {newsCheck.matches.map((e, i) => (
                             <div key={i} className="text-xs border-b border-border last:border-0 pb-2 last:pb-0">
                               <div className="flex items-center gap-1.5 mb-0.5">
-                                <span>{currencyFlag(e.country)}</span>
+                                <CurrencyFlag code={e.country} />
                                 <span className="font-semibold">{e.country}</span>
                                 <span className={cn(
                                   'px-1.5 py-0.5 rounded-full text-[10px] font-medium',
