@@ -410,3 +410,55 @@ CREATE TABLE IF NOT EXISTS tag_group_options (
 -- keyed by tag_groups.name, values are arrays of tag_group_options.name (so
 -- more than one option per group is allowed, same as the flat tags list).
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS tag_selections JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- ============================================================================
+-- Chart Replay / Backtesting. Deliberately separate from `trades` /
+-- `accounts` — this is you rehearsing against historical candles, not real
+-- (or even paper) money, so it gets its own tables rather than being bolted
+-- onto the live journal's capital-chain logic.
+--
+-- The actual OHLC candle data does NOT live in Postgres — you upload a CSV
+-- export (MT4/MT5, TradingView, Dukascopy, HistData, ...) straight to Vercel
+-- Blob storage from the browser (same client-direct-upload path already used
+-- for trade screenshots), and this table is just the registry: which
+-- pair/timeframe combinations you've uploaded, where the parsed candle JSON
+-- lives in Blob, and some quick metadata (candle count, date range) for the
+-- dataset picker. Keeping candles out of Postgres avoids blowing up a Neon
+-- free-tier database with what can easily be hundreds of thousands of rows
+-- for a few months of 1-minute data.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS chart_datasets (
+  id            SERIAL PRIMARY KEY,
+  pair          TEXT NOT NULL,
+  timeframe     TEXT NOT NULL,          -- '1m' | '5m' | '15m' | '1h' | '4h' | '1d'
+  blob_url      TEXT NOT NULL,          -- Vercel Blob URL for the parsed candle JSON
+  candle_count  INTEGER NOT NULL DEFAULT 0,
+  start_time    TIMESTAMPTZ,            -- first candle's timestamp
+  end_time      TIMESTAMPTZ,            -- last candle's timestamp
+  uploaded_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(pair, timeframe)                -- re-uploading the same pair/timeframe replaces it (upsert)
+);
+
+-- One row per practice trade you place while stepping/playing through a
+-- chart_datasets replay. entry_time/exit_time are candle timestamps *within
+-- the replay*, not wall-clock time. result stays NULL while the trade is
+-- still open in the replay (i.e. the replay hasn't reached a candle whose
+-- high/low touches sl_price or tp_price yet, and you haven't closed it by
+-- hand either).
+CREATE TABLE IF NOT EXISTS backtest_trades (
+  id            SERIAL PRIMARY KEY,
+  dataset_id    INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
+  direction     TEXT NOT NULL DEFAULT 'Long',   -- 'Long' | 'Short'
+  entry_price   NUMERIC NOT NULL,
+  sl_price      NUMERIC,
+  tp_price      NUMERIC,
+  entry_time    TIMESTAMPTZ NOT NULL,
+  exit_time     TIMESTAMPTZ,
+  exit_price    NUMERIC,
+  result        TEXT,                            -- 'Profit' | 'Loss' | null while open
+  rr            NUMERIC,                          -- R-multiple actually achieved on close
+  notes         TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_trades_dataset ON backtest_trades (dataset_id);
