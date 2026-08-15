@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3 } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, Checklist, NewsEvent, Tag, TagGroup, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
+import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
 import { useAccount } from '../../lib/accounts';
 import { api, useFetch } from '../../lib/api';
 import { cn } from '../../lib/utils';
 import NotesEditor from './NotesEditor';
 import CurrencyFlag from './CurrencyFlag';
-import TagPicker from './TagPicker';
 import TagGroupsPicker from './TagGroupsPicker';
 
 // Splits a 6-letter pair like "GBPUSD" into ['GBP','USD'] to cross-reference
@@ -174,8 +173,6 @@ export default function TradeDetailPanel({
   const [addingField, setAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState('text');
-  const { data: rawTags, refetch: refetchTags } = useFetch<Tag[]>('/columns?resource=tags');
-  const allTags: Tag[] = rawTags ?? [];
   const { data: rawTagGroups, refetch: refetchTagGroups } = useFetch<TagGroup[]>('/columns?resource=tag_groups');
   const tagGroups: TagGroup[] = rawTagGroups ?? [];
 
@@ -243,17 +240,7 @@ export default function TradeDetailPanel({
     }
   }
 
-  // Fire-and-forget: the tag is already applied to this trade locally
-  // (TagPicker adds it to form.tags immediately), this just registers the
-  // name in the reusable list so it's suggested next time and shows up as
-  // a real filter option on the Performance page. The POST is idempotent
-  // server-side (an existing name-match just returns the existing row), so
-  // there's nothing to reconcile if it races with another save.
-  function handleCreateTag(name: string) {
-    api.post('/columns', { resource: 'tags', name }).then(() => refetchTags()).catch(() => {});
-  }
-
-  // Same fire-and-forget idempotent pattern as handleCreateTag: the group/
+  // Same fire-and-forget idempotent pattern used for tag groups below: the
   // option is already applied to this trade locally (TagGroupsPicker
   // updates form.tag_selections immediately), this just registers it in
   // the reusable list so it's there next time and for other trades.
@@ -292,7 +279,7 @@ export default function TradeDetailPanel({
           Widened from 70vw/760px to 88vw/980px - the left field column plus
           notes/screenshots on the right felt cramped at the old width,
           especially once Tags and Entry Type were added. */}
-      <div className="relative h-full w-full sm:w-[88vw] sm:min-w-[980px] max-w-[1800px] bg-background border-l border-border shadow-2xl flex flex-col animate-drawer-slide">
+      <div className="relative h-full w-full sm:w-[75vw] sm:min-w-[900px] max-w-[1600px] bg-background border-l border-border shadow-2xl flex flex-col animate-drawer-slide">
         {/* Top bar */}
         <div className="h-14 shrink-0 flex items-center justify-between px-5 border-b border-border">
           <div className="flex items-center gap-3 min-w-0">
@@ -319,7 +306,11 @@ export default function TradeDetailPanel({
             the drawer (32%) between a floor and ceiling instead of a bare
             fixed width. */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          <div className="w-[32%] min-w-[360px] max-w-[460px] shrink-0 overflow-y-auto border-r border-border px-5 py-5">
+          {/* Fixed pixel width (not a % of the drawer) so this column keeps
+              its own size even as the overall drawer is narrowed - shrinking
+              the drawer should give more of that space back to the page
+              behind it, not cramp the form itself. */}
+          <div className="w-[420px] shrink-0 overflow-y-auto border-r border-border px-5 py-5">
             {/* Grouped FX Replay-style: identity fields (account/asset/side/
                 entry type/tags) first, then everything about going IN to the
                 trade, then SL/TP together, then everything about coming OUT
@@ -572,16 +563,10 @@ export default function TradeDetailPanel({
             </CollapsibleSection>
 
             {/* Tags moved to the very bottom of the form, per feedback -
-                both the free-form flat tags and the new FX Replay-style
-                grouped sub-tags live together here rather than tags being
-                one of the first things you fill in. */}
+                the flat free-form tags picker was removed in favor of the
+                FX Replay-style grouped sub-tags below, which now cover the
+                same "label a trade" need with more structure. */}
             <Section title="Tags">
-              <TagPicker
-                value={form.tags}
-                allTags={allTags}
-                onChange={(tags) => set('tags', tags)}
-                onCreateTag={handleCreateTag}
-              />
               <TagGroupsPicker
                 groups={tagGroups}
                 selections={form.tag_selections}

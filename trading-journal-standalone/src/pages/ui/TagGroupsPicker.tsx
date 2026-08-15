@@ -130,7 +130,7 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
         const selected = selections[group.name] ?? [];
         return (
           <div key={group.id} className="flex items-start justify-between gap-3 py-1 border-b border-border/50 last:border-0">
-            <span className="text-xs font-medium text-muted-foreground w-32 shrink-0 pt-0.5 truncate" title={group.name}>{group.name}</span>
+            <span className="text-xs font-bold text-foreground w-32 shrink-0 pt-0.5 truncate" title={group.name}>{group.name}</span>
             <div className="flex-1 flex flex-wrap items-center gap-1.5">
               {selected.map(name => {
                 const color = colorFor(group, name);
