@@ -554,18 +554,23 @@ function SessionsWidget() {
 // by a restrictive network), the widget area just stays empty rather than
 // breaking the page.
 //
-// height 220 (rather than the taller 'multiple'/bar layout tried earlier)
-// keeps this to one compact gauge per row so more pairs fit on screen at
-// once, closer to a scannable list. Note on the "why not a red/green
-// percentage bar per pair" look requested: that specific visual (seen on
-// sites like FXSSI's Current Ratio or IFC Markets' sentiment widget) is
+// displayMode 'multiple' is the bar-style layout (separate Oscillators /
+// Moving Averages / Summary rows, each a red-to-green bar) rather than the
+// round gauge - back to this per feedback that the gauge read as "a meter,
+// not a bar". height is raised well past TradingView's own ~450px default
+// for this mode, since the gauge version was already clipping its footer
+// and showing an internal scrollbar at a shorter height, and this layout
+// has more content to fit than the gauge did.
+//
+// Note on the "why not a red/green percentage bar per pair" look from an
+// earlier round's reference screenshot (FXSSI/IFC-style): that visual is
 // built from each provider's own live long/short positioning data, which
-// isn't something we have a verified free/keyless embed for - guessing at
-// an iframe URL risks shipping a widget that silently renders blank, and
-// fabricating the percentages ourselves would mean showing fake numbers
-// next to a live trading journal, which is worse than not showing them.
-// This sticks with TradingView's real, already-verified-working technical
-// rating instead.
+// isn't something there's a verified free/keyless embed for here -
+// guessing at an iframe URL risks shipping a widget that silently renders
+// blank, and fabricating the percentages ourselves would mean showing
+// fake numbers next to a live trading journal, which is worse than not
+// showing them. This sticks with TradingView's real technical rating
+// instead, just in its bar layout rather than the gauge.
 function TradingViewTechnicalGauge({ symbol, tvSymbol, theme }: { symbol: string; tvSymbol: string; theme: 'light' | 'dark' }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -586,10 +591,10 @@ function TradingViewTechnicalGauge({ symbol, tvSymbol, theme }: { symbol: string
       interval: '1D',
       width: '100%',
       isTransparent: true,
-      height: 220,
+      height: 500,
       symbol: tvSymbol,
       showIntervalTabs: false,
-      displayMode: 'single',
+      displayMode: 'multiple',
       locale: 'en',
       colorTheme: theme,
     });
@@ -609,11 +614,22 @@ const DEFAULT_SENTIMENT_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD
 // A few commonly-traded commodities, always shown alongside whatever
 // currency pairs the account has traded - TradingView's generic "FX:"
 // symbol provider doesn't cover these, so each needs its own exchange
-// prefix (OANDA for metals, TVC for crude).
+// prefix. Gold (OANDA:XAUUSD) is confirmed working from a live screenshot
+// this round. Silver was originally OANDA:XAGUSD, which rendered "No data
+// here yet" live - swapped to TVC:SILVER (TradingView's own listing for
+// CFDs on Silver, confirmed to have real technical-analysis data on
+// tradingview.com). Oil was TVC:USOIL, which *also* rendered "No data"
+// live despite TradingView's own site showing indicator data for that
+// exact symbol - the free embeddable widget apparently supports a
+// narrower symbol set than the main site, and after two wrong guesses in
+// a row it's not worth a third blind one. Oil is dropped from the
+// default list for now; TradingView's own widget builder
+// (tradingview.com/widget/technical-analysis) shows a live preview as you
+// type a symbol, so pasting back whatever it confirms works there is the
+// fastest way to get it right.
 const COMMODITIES: { symbol: string; tvSymbol: string }[] = [
-  { symbol: 'XAUUSD', tvSymbol: 'OANDA:XAUUSD' }, // Gold
-  { symbol: 'XAGUSD', tvSymbol: 'OANDA:XAGUSD' }, // Silver
-  { symbol: 'USOIL',  tvSymbol: 'TVC:USOIL' },    // WTI Crude Oil
+  { symbol: 'XAUUSD', tvSymbol: 'OANDA:XAUUSD' }, // Gold - confirmed working
+  { symbol: 'XAGUSD', tvSymbol: 'TVC:SILVER' },   // Silver - best-effort retry
 ];
 
 function tvSymbolFor(pair: string): string {

@@ -3,7 +3,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Button } from '../lib/ui/button';
 import { Badge, Checkbox } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
-import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, FileUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, FileUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
@@ -240,6 +240,83 @@ function TableScrollBar({ containerRef }: { containerRef: React.RefObject<HTMLDi
   );
 }
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+// Windows the page-number buttons down to a fixed set (first, last, a
+// couple around the current page, "…" for the gaps) rather than printing
+// every page - matters once an account has a few hundred trades.
+function pageNumbers(current: number, total: number): (number | '...')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: (number | '...')[] = [1];
+  if (current > 3) pages.push('...');
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (current < total - 2) pages.push('...');
+  pages.push(total);
+  return pages;
+}
+
+function JournalPagination({
+  page, totalPages, pageSize, totalRows, onPage, onPageSize,
+}: {
+  page: number; totalPages: number; pageSize: number; totalRows: number;
+  onPage: (p: number) => void; onPageSize: (n: number) => void;
+}) {
+  if (totalRows === 0) return null;
+  const first = (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, totalRows);
+
+  const navBtn = 'w-7 h-7 rounded flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:hover:bg-transparent shrink-0';
+
+  return (
+    <div className="flex items-center justify-between gap-3 flex-wrap mt-3 px-1">
+      <p className="text-xs text-muted-foreground">
+        Showing {first}–{last} of {totalRows} trades
+      </p>
+      <div className="flex items-center gap-0.5">
+        <button type="button" className={navBtn} disabled={page === 1} onClick={() => onPage(1)} aria-label="First page">
+          <ChevronsLeft className="w-3.5 h-3.5" />
+        </button>
+        <button type="button" className={navBtn} disabled={page === 1} onClick={() => onPage(page - 1)} aria-label="Previous page">
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+        {pageNumbers(page, totalPages).map((p, i) => p === '...' ? (
+          <span key={`ellipsis-${i}`} className="w-7 text-center text-xs text-muted-foreground">&hellip;</span>
+        ) : (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onPage(p)}
+            className={cn(
+              'w-7 h-7 rounded text-xs font-medium shrink-0',
+              p === page ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+            )}
+          >
+            {p}
+          </button>
+        ))}
+        <button type="button" className={navBtn} disabled={page === totalPages} onClick={() => onPage(page + 1)} aria-label="Next page">
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+        <button type="button" className={navBtn} disabled={page === totalPages} onClick={() => onPage(totalPages)} aria-label="Last page">
+          <ChevronsRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Rows per page</span>
+        <select
+          value={pageSize}
+          onChange={(e) => onPageSize(Number(e.target.value))}
+          className="text-xs bg-transparent border border-border rounded px-2 py-1 text-foreground"
+        >
+          {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 export default function Journal() {
   const { accounts, loading: accountsLoading, activeAccountId, activeAccount } = useAccount();
   const { data: rawTrades, loading, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
@@ -255,6 +332,11 @@ export default function Journal() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const tableScrollRef = useRef<HTMLDivElement>(null);
+  // 25 sits in the "20-30 per page" range asked for - large enough that
+  // most accounts rarely need to page through, small enough that the
+  // sticky header actually has something to stay pinned above.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const trades: Trade[] = rawTrades ?? [];
   const customCols: CustomColumn[] = rawCols ?? [];
@@ -280,6 +362,20 @@ export default function Journal() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trades, sort, customColKeys]);
+
+  // Re-sorting or switching accounts changes what page 1 even means, and
+  // shrinking the page size (or a bulk delete) can leave `page` pointing
+  // past the new last page - both are corrected here rather than in the
+  // render path, so every consumer of `page` below already sees a valid
+  // value.
+  useEffect(() => { setPage(1); }, [activeAccountId, sort.key, sort.dir, pageSize]);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  useEffect(() => { if (page !== currentPage) setPage(currentPage); }, [page, currentPage]);
+  const pageTrades = useMemo(
+    () => sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [sorted, currentPage, pageSize]
+  );
 
   function toggleSort(key: string) {
     setSort(p => p.key !== key ? { key, dir: 'asc' } : p.dir === 'asc' ? { key, dir: 'desc' } : p.dir === 'desc' ? { key, dir: null } : { key, dir: 'asc' });
@@ -319,8 +415,17 @@ export default function Journal() {
     setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
+  // Scoped to the current page, not every trade behind pagination - matches
+  // the usual paginated-table convention, and avoids a "select all" that
+  // silently includes hundreds of rows the user can't currently see.
   function toggleSelectAll() {
-    setSelectedIds(selectedIds.size === sorted.length && sorted.length > 0 ? new Set() : new Set(sorted.map(t => t.id)));
+    const pageIds = pageTrades.map(t => t.id);
+    const allSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.has(id));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      pageIds.forEach(id => allSelected ? next.delete(id) : next.add(id));
+      return next;
+    });
   }
 
   async function handleAddCol(name: string, type: string) {
@@ -375,24 +480,33 @@ export default function Journal() {
 
       <TableScrollBar containerRef={tableScrollRef} />
 
-      <div className="rounded-lg border border-border overflow-hidden">
-        <Table scrollRef={tableScrollRef}>
+      {/* No overflow-hidden here (even though it'd tidy the rounded corners
+          against the inner scrollable table) - an overflow!=visible
+          ancestor becomes the reference frame position:sticky measures
+          against, and since THIS div never scrolls on its own (the window
+          does), that silently breaks the sticky column header below. */}
+      <div className="rounded-lg border border-border">
+        <Table scrollRef={tableScrollRef} containerClassName="max-h-[65vh]">
           <TableHeader>
             <TableRow className="text-xs">
-              <TableHead className="w-8 px-2">
-                <Checkbox checked={sorted.length > 0 && selectedIds.size === sorted.length} onCheckedChange={toggleSelectAll} aria-label="Select all" />
+              <TableHead className="w-8 px-2 bg-background">
+                <Checkbox
+                  checked={pageTrades.length > 0 && pageTrades.every(t => selectedIds.has(t.id))}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Select all on this page"
+                />
               </TableHead>
               {visibleCols.map(c => (
-                <TableHead key={c.key} className="cursor-pointer select-none whitespace-nowrap px-2 py-2" onClick={() => toggleSort(c.key)}>
+                <TableHead key={c.key} className="cursor-pointer select-none whitespace-nowrap px-2 py-2 bg-background" onClick={() => toggleSort(c.key)}>
                   <span className="inline-flex items-center gap-1">{c.label} <SortIcon col={c.key} /></span>
                 </TableHead>
               ))}
               {visibleCustom.map(c => (
-                <TableHead key={c.col_key} className="cursor-pointer select-none whitespace-nowrap px-2 py-2 text-xs" onClick={() => toggleSort(c.col_key)}>
+                <TableHead key={c.col_key} className="cursor-pointer select-none whitespace-nowrap px-2 py-2 text-xs bg-background" onClick={() => toggleSort(c.col_key)}>
                   <span className="inline-flex items-center gap-1">{c.name} <SortIcon col={c.col_key} /></span>
                 </TableHead>
               ))}
-              <TableHead className="w-16 px-2">Act</TableHead>
+              <TableHead className="w-16 px-2 bg-background">Act</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -406,7 +520,7 @@ export default function Journal() {
                 </TableCell>
               </TableRow>
             )}
-            {sorted.map(trade => (
+            {pageTrades.map(trade => (
               <TableRow
                 key={trade.id}
                 className={cn('hover:bg-muted/30 text-xs cursor-pointer', selectedIds.has(trade.id) && 'bg-primary/5')}
@@ -438,6 +552,15 @@ export default function Journal() {
           </TableBody>
         </Table>
       </div>
+
+      <JournalPagination
+        page={currentPage}
+        totalPages={totalPages}
+        pageSize={pageSize}
+        totalRows={sorted.length}
+        onPage={setPage}
+        onPageSize={setPageSize}
+      />
 
       <TradeDetailPanel
         open={dialogOpen}
