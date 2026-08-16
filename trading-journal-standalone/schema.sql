@@ -462,3 +462,26 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
 );
 
 CREATE INDEX IF NOT EXISTS idx_backtest_trades_dataset ON backtest_trades (dataset_id);
+
+-- Quality/mistake tags on practice trades (e.g. "A+ Setup", "Off-Plan",
+-- "FOMO"), same idea as trades.tags on the real Journal. Deliberately
+-- shares that same `tags` table/vocabulary rather than a second tag list -
+-- one pool of tag names across real and practice trades means the same
+-- "Off-Plan" you use in the Journal shows up here too, instead of you
+-- having to redefine it.
+ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- ============================================================================
+-- Auth. One row per person who can sign in. Deliberately minimal - this is a
+-- single-user-per-login product (you and your own journal), not a
+-- multi-tenant system with per-user data partitioning, so `users` isn't
+-- referenced by `accounts`/`trades`/etc. It just gates who can reach the app
+-- at all. password_hash is a bcrypt hash, never a plaintext password.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS users (
+  id             SERIAL PRIMARY KEY,
+  email          TEXT NOT NULL UNIQUE,
+  password_hash  TEXT NOT NULL,
+  name           TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
