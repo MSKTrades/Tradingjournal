@@ -11,8 +11,8 @@ async function createAccount(p: any) {
   const name = String(p?.name ?? '').trim();
   if (!name) throw new Error('Account name is required');
   const rows = await sql.unsafe(
-    `INSERT INTO accounts (name, type, starting_balance, active, sort_order)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO accounts (name, type, starting_balance, active, sort_order, daily_loss_limit_pct, max_drawdown_limit_pct)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
     [
       name,
@@ -20,6 +20,8 @@ async function createAccount(p: any) {
       p.starting_balance ?? null,
       p.active ?? true,
       p.sort_order ?? 0,
+      p.daily_loss_limit_pct ?? null,
+      p.max_drawdown_limit_pct ?? null,
     ]
   );
   return rows[0];
@@ -49,10 +51,14 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
 
     const rows = await sql.unsafe(
       `UPDATE accounts SET
-        name = $1, type = $2, starting_balance = $3, active = $4, sort_order = $5
-       WHERE id = $6
+        name = $1, type = $2, starting_balance = $3, active = $4, sort_order = $5,
+        daily_loss_limit_pct = $6, max_drawdown_limit_pct = $7
+       WHERE id = $8
        RETURNING *`,
-      [name, p.type ?? null, p.starting_balance ?? null, p.active ?? true, p.sort_order ?? 0, id]
+      [
+        name, p.type ?? null, p.starting_balance ?? null, p.active ?? true, p.sort_order ?? 0,
+        p.daily_loss_limit_pct ?? null, p.max_drawdown_limit_pct ?? null, id,
+      ]
     );
 
     if (!rows[0]) { res.status(404).json({ error: 'Account not found' }); return; }
