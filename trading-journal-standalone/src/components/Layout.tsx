@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTheme } from '../lib/theme';
+import { useAuth } from '../lib/auth';
 import Logo from './Logo';
 import AccountSwitcher from './AccountSwitcher';
 
@@ -20,7 +21,14 @@ const COLLAPSE_KEY = 'forexforge_sidebar_collapsed';
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   const { theme, toggle } = useTheme();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(COLLAPSE_KEY) === '1');
+
+  async function handleLogout() {
+    await logout();
+    navigate('/login', { replace: true });
+  }
 
   const setAndPersistCollapsed = (v: boolean) => {
     setCollapsed(v);
@@ -89,6 +97,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           >
             {collapsed ? <PanelLeftOpen className="w-[18px] h-[18px] shrink-0" /> : <PanelLeftClose className="w-[18px] h-[18px] shrink-0" />}
             {!collapsed && <span>Collapse</span>}
+          </button>
+          <button
+            onClick={handleLogout}
+            title={collapsed ? (user?.email ? `Log out (${user.email})` : 'Log out') : undefined}
+            className={cn(
+              'flex items-center gap-3 rounded-md text-sm font-medium text-sidebar-muted hover:text-sidebar-foreground hover:bg-white/5 transition-colors w-full',
+              collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
+            )}
+          >
+            <LogOut className="w-[18px] h-[18px] shrink-0" />
+            {!collapsed && <span className="truncate">{user?.email ?? 'Log out'}</span>}
           </button>
         </div>
       </aside>
