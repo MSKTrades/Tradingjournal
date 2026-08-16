@@ -14,6 +14,17 @@ CREATE TABLE IF NOT EXISTS accounts (
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Optional prop-firm-style risk rules for an account, e.g. "5% daily loss
+-- limit, 10% max drawdown" (common FTMO/funded-challenge terms). Both are
+-- expressed as a percent of the account's starting_balance and are entirely
+-- optional (NULL = not tracked) - set one or both to power the Risk
+-- Guardrail widget on the Summary page and the drawdown limit line on the
+-- Performance page's drawdown chart. Purely informational: nothing in this
+-- app blocks a trade from being logged if a limit is exceeded, it's a
+-- warning surface, not an enforcement mechanism.
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS daily_loss_limit_pct NUMERIC;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS max_drawdown_limit_pct NUMERIC;
+
 CREATE TABLE IF NOT EXISTS trades (
   id                     SERIAL PRIMARY KEY,
   account_id             INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
