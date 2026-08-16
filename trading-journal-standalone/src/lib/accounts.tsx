@@ -8,6 +8,8 @@ export type NewAccountPayload = {
   name: string;
   type: string | null;
   starting_balance: number | null;
+  daily_loss_limit_pct: number | null;
+  max_drawdown_limit_pct: number | null;
 };
 
 export type AccountPatch = {
@@ -16,6 +18,8 @@ export type AccountPatch = {
   starting_balance: number | null;
   active: boolean;
   sort_order: number;
+  daily_loss_limit_pct: number | null;
+  max_drawdown_limit_pct: number | null;
 };
 
 type AccountContextValue = {
