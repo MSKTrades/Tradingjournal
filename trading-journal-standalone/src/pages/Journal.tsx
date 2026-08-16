@@ -585,6 +585,7 @@ export default function Journal() {
         customColumns={customCols}
         checklists={checklists}
         nextTradeNumber={nextTradeNumber}
+        trades={trades}
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
         onAddCustomColumn={handleAddCol}

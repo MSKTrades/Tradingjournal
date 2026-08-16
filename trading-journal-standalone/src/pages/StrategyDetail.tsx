@@ -295,6 +295,7 @@ export default function StrategyDetail() {
         customColumns={customCols}
         checklists={checklists}
         nextTradeNumber={nextTradeNumber}
+        trades={allTrades}
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
         onAddCustomColumn={handleAddCol}

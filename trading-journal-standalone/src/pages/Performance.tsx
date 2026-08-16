@@ -7,11 +7,12 @@ import { RefreshCw, TrendingUp, TrendingDown, Calendar, BarChart2, ChevronLeft, 
 import { Button } from '../lib/ui/button';
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, LineChart, Line,
+  ResponsiveContainer, ReferenceLine, LineChart, Line, AreaChart, Area,
 } from 'recharts';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import { fmtMoney, plColor, StrategyResult, Trade, Tag } from './data/types';
+import { computeDrawdown } from './data/risk';
 import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters } from './ui/PerformanceFilterBar';
 
 // --- TYPES ---
@@ -463,9 +464,51 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
 
 // --- MAIN EXPORT ---
 
+function DrawdownSection({ trades, startingBalance }: { trades: Trade[]; startingBalance: number | null }) {
+  const dd = useMemo(() => computeDrawdown(trades, startingBalance), [trades, startingBalance]);
+
+  return (
+    <Card className="mb-6">
+      <CardContent className="pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <p className="text-sm font-semibold">Drawdown</p>
+          <div className="flex gap-4 text-xs">
+            <span className="text-muted-foreground">
+              Max: <span className="font-mono font-semibold text-red-500 dark:text-red-400">{fmtMoney(dd.maxDDDollar)} ({dd.maxDDPct.toFixed(1)}%)</span>
+            </span>
+            <span className="text-muted-foreground">
+              Current: <span className="font-mono font-semibold text-red-500 dark:text-red-400">{fmtMoney(dd.currentDDDollar)} ({dd.currentDDPct.toFixed(1)}%)</span>
+            </span>
+          </div>
+        </div>
+        {dd.curve.length < 2 ? (
+          <div className="p-8 text-center text-muted-foreground text-sm">Not enough trades yet to plot a drawdown curve.</div>
+        ) : (
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={dd.curve.map(p => ({ ...p, ddNeg: -p.ddPct }))} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="idx" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} width={45} tickFormatter={(v) => `${v}%`} domain={['dataMin', 0]} />
+                <Tooltip
+                  contentStyle={{ fontSize: 11 }}
+                  labelFormatter={(v) => `Trade #${v}`}
+                  formatter={(_v: number, _k: string, item: any) => [`${item.payload.ddPct.toFixed(1)}% (${fmtMoney(item.payload.ddDollar)})`, 'Drawdown']}
+                />
+                <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
+                <Area type="monotone" dataKey="ddNeg" stroke="hsl(var(--chart-1))" fill="hsl(var(--chart-1))" fillOpacity={0.18} strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Performance() {
   const [strategyId, setStrategyId] = useState<string>('RAW');
-  const { activeAccountId } = useAccount();
+  const { activeAccountId, activeAccount } = useAccount();
 
   const { data: strategiesData } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const strategies = strategiesData ?? [];
@@ -583,6 +626,12 @@ export default function Performance() {
 
           {/* NEW: Expectancy and Winners/Losers sections */}
           <ExpectancyCards stats={stats} />
+
+          {/* Drawdown - always the FULL unfiltered trade history for this
+              account (not the strategy/filter-bar-narrowed set below), since
+              "how far below my peak balance am I right now" is a statement
+              about the real account, not about a filtered slice of it. */}
+          <DrawdownSection trades={rawTradesForHourly ?? []} startingBalance={activeAccount?.starting_balance ?? null} />
 
           {/* Cumulative P/L across whatever the filter bar + strategy
               dropdown currently narrow down to - a single running total,

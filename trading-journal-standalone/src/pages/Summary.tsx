@@ -10,6 +10,7 @@ import { useAccount } from '../lib/accounts';
 import { useTheme } from '../lib/theme';
 import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney } from './data/types';
 import CurrencyFlag from './ui/CurrencyFlag';
+import RiskGuardrail from './ui/RiskGuardrail';
 
 function fmtPF(v: number | null) {
   return v === null ? '∞' : v.toFixed(2);
@@ -701,7 +702,7 @@ function quoteOfDay(): string {
 
 export default function Summary() {
   const navigate = useNavigate();
-  const { activeAccountId } = useAccount();
+  const { activeAccountId, activeAccount } = useAccount();
   const { data, loading, refetch } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const results: StrategyResult[] = data ?? [];
   const { data: rawTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
@@ -726,6 +727,8 @@ export default function Summary() {
           <RefreshCw className="w-4 h-4 mr-1" /> Refresh
         </Button>
       </div>
+
+      <RiskGuardrail account={activeAccount} trades={trades} />
 
       <SessionsWidget />
 
