@@ -1,0 +1,169 @@
+// Risk-management math shared across the app: drawdown (Performance page +
+// the Summary Risk Guardrail) and the position size calculator (Journal
+// trade form). Kept in one place so "how do we compute current balance"
+// and "how do we compute drawdown" can't quietly drift apart between the
+// two screens that both need them.
+import { Trade } from './types';
+
+// --- Equity / drawdown -----------------------------------------------------
+
+export type DrawdownPoint = {
+  idx: number;
+  date: string;
+  equity: number;
+  peak: number;
+  ddDollar: number; // >= 0, distance below the running peak
+  ddPct: number;    // >= 0, same distance as a % of the peak
+};
+
+export type DrawdownResult = {
+  curve: DrawdownPoint[];
+  currentBalance: number;
+  maxDDDollar: number;
+  maxDDPct: number;
+  currentDDDollar: number;
+  currentDDPct: number;
+};
+
+const EMPTY_DRAWDOWN: DrawdownResult = {
+  curve: [], currentBalance: 0, maxDDDollar: 0, maxDDPct: 0, currentDDDollar: 0, currentDDPct: 0,
+};
+
+// Builds a running equity curve from a starting balance + every trade's
+// already-server-computed gain_loss, then walks it to find the running peak
+// and the drawdown (peak minus current) at each point. Trades are ordered
+// by trade_placed_at (falling back to created_at) - the same simplification
+// Performance.tsx's existing "Cumulative P/L" chart already makes, rather
+// than trying to replicate the server's fuller trade_number-aware ordering
+// client-side.
+export function computeDrawdown(trades: Trade[], startingBalance: number | null): DrawdownResult {
+  const dated = trades.filter(t => t.trade_placed_at);
+  if (dated.length === 0) {
+    return { ...EMPTY_DRAWDOWN, currentBalance: startingBalance ?? 0 };
+  }
+
+  const sorted = [...dated].sort((a, b) => {
+    const byDate = new Date(a.trade_placed_at!).getTime() - new Date(b.trade_placed_at!).getTime();
+    if (byDate !== 0) return byDate;
+    return new Date((a as any).created_at ?? 0).getTime() - new Date((b as any).created_at ?? 0).getTime();
+  });
+
+  const base = startingBalance ?? Number(sorted[0]!.start_capital ?? 0);
+  let equity = base;
+  let peak = base;
+  let maxDDDollar = 0;
+  let maxDDPct = 0;
+
+  const curve: DrawdownPoint[] = sorted.map((t, i) => {
+    equity += Number(t.gain_loss ?? 0);
+    peak = Math.max(peak, equity);
+    const ddDollar = Math.max(0, peak - equity);
+    const ddPct = peak > 0 ? (ddDollar / peak) * 100 : 0;
+    maxDDDollar = Math.max(maxDDDollar, ddDollar);
+    maxDDPct = Math.max(maxDDPct, ddPct);
+    return {
+      idx: i + 1,
+      date: t.trade_placed_at!,
+      equity: Math.round(equity * 100) / 100,
+      peak: Math.round(peak * 100) / 100,
+      ddDollar: Math.round(ddDollar * 100) / 100,
+      ddPct: Math.round(ddPct * 100) / 100,
+    };
+  });
+
+  const last = curve[curve.length - 1]!;
+  return {
+    curve,
+    currentBalance: last.equity,
+    maxDDDollar: Math.round(maxDDDollar * 100) / 100,
+    maxDDPct: Math.round(maxDDPct * 100) / 100,
+    currentDDDollar: last.ddDollar,
+    currentDDPct: last.ddPct,
+  };
+}
+
+// Local-date (not UTC) "today", matching how a trader thinks about "today's
+// P&L" - trade_placed_at is a plain DATE with no time/timezone attached, so
+// comparing it against the viewer's own local calendar date (rather than
+// UTC) is the correct comparison, same reasoning already used for
+// trade_executed_at elsewhere in this app.
+function todayISODate(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function computeTodayPnL(trades: Trade[]): number {
+  const today = todayISODate();
+  const total = trades
+    .filter(t => (t.trade_placed_at ?? '').slice(0, 10) === today)
+    .reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
+  return Math.round(total * 100) / 100;
+}
+
+// --- Position size calculator -----------------------------------------------
+
+export type PositionSizeResult = {
+  riskDollar: number;
+  pipValuePerStdLot: number; // in account currency (assumed USD), per 1.00 standard lot (100,000 units)
+  lots: number | null;       // standard lots, e.g. 0.42
+  units: number | null;      // lots * 100,000
+  approximate: boolean;      // true when the pip-value conversion is a fallback estimate, not exact
+};
+
+// Pip value per standard lot (100,000 units), in USD, assuming a USD
+// account. This is exact for the common cases (any XXXUSD pair, and
+// USDJPY using its own quoted price to convert JPY -> USD) and falls back
+// to the standard "$10/pip" majors approximation for anything else (e.g.
+// JPY or other non-USD crosses) - a real conversion there needs a second
+// live exchange rate this app doesn't fetch, so it's flagged as
+// approximate rather than silently presented as exact.
+function pipValuePerStandardLot(pair: string | null, entryPrice: number | null): { value: number; approximate: boolean } {
+  const clean = (pair ?? '').toUpperCase().replace(/[^A-Z]/g, '');
+  const unitsPerStdLot = 100000;
+
+  if (clean.length !== 6) return { value: 10, approximate: true };
+
+  const base = clean.slice(0, 3);
+  const quote = clean.slice(3, 6);
+  const isJpyQuote = quote === 'JPY';
+  const pipSize = isJpyQuote ? 0.01 : 0.0001;
+  const pipValueInQuoteCcy = pipSize * unitsPerStdLot; // $10 for 4-decimal XXXUSD; ¥1000 for XXXJPY
+
+  if (quote === 'USD') return { value: pipValueInQuoteCcy, approximate: false };
+  if (base === 'USD' && isJpyQuote && entryPrice) {
+    // USDJPY specifically: its own quoted price *is* the JPY-per-USD rate,
+    // so no separate lookup is needed to convert JPY pip value -> USD.
+    return { value: pipValueInQuoteCcy / entryPrice, approximate: false };
+  }
+  // Any other cross (EURJPY, EURGBP, etc.) would need a second currency's
+  // rate this app doesn't have - approximate with the typical majors value.
+  return { value: 10, approximate: true };
+}
+
+export function positionSizeLots(opts: {
+  accountBalance: number;
+  riskPct: number | null;
+  slPips: number | null;
+  pair: string | null;
+  entryPrice: number | null;
+}): PositionSizeResult {
+  const { accountBalance, riskPct, slPips, pair, entryPrice } = opts;
+  const { value: pipValuePerStdLot, approximate } = pipValuePerStandardLot(pair, entryPrice);
+  const riskDollar = Math.round(accountBalance * ((riskPct ?? 0) / 100) * 100) / 100;
+
+  if (!riskPct || !slPips || slPips <= 0 || pipValuePerStdLot <= 0) {
+    return { riskDollar, pipValuePerStdLot, lots: null, units: null, approximate };
+  }
+
+  const lots = riskDollar / (slPips * pipValuePerStdLot);
+  return {
+    riskDollar,
+    pipValuePerStdLot,
+    lots: Math.round(lots * 100) / 100,
+    units: Math.round(lots * 100000),
+    approximate,
+  };
+}

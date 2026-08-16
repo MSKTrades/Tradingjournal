@@ -6,6 +6,10 @@ export type Account = {
   active: boolean;
   sort_order: number;
   created_at: string;
+  // Optional prop-firm-style risk rules, both as a % of starting_balance.
+  // NULL = not tracked for this account. See schema.sql for the full note.
+  daily_loss_limit_pct: number | null;
+  max_drawdown_limit_pct: number | null;
 };
 
 export type Trade = {
@@ -308,6 +312,15 @@ export function plColor(v: number | null | undefined): string {
 export const REPLAY_TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'] as const;
 export type ReplayTimeframe = typeof REPLAY_TIMEFRAMES[number];
 
+// A handful of common Dukascopy instrument ids, for the Fetch Data dialog's
+// pair picker. Dukascopy actually covers hundreds of forex/metals/indices/
+// crypto instruments beyond this list - the dialog's pair field also takes
+// free text, this is just autocomplete for the ones most people will want.
+export const COMMON_PAIRS = [
+  'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
+  'EURGBP', 'EURJPY', 'GBPJPY', 'XAUUSD', 'XAGUSD',
+];
+
 export type ChartDataset = {
   id: number;
   pair: string;
@@ -344,5 +357,6 @@ export type BacktestTrade = {
   result: string | null;       // 'Profit' | 'Loss' | null while open
   rr: number | null;
   notes: string | null;
+  tags: string[];              // shares the same reusable tag pool as trades.tags
   created_at: string;
 };
