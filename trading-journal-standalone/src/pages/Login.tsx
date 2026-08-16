@@ -1,16 +1,18 @@
 import { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { LogoMark } from '../components/Logo';
 import { Button } from '../lib/ui/button';
 import { useAuth } from '../lib/auth';
+import { OAuthButtons, Divider, oauthErrorMessage } from './ui/OAuthButtons';
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation() as { state?: { from?: string } };
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => oauthErrorMessage(searchParams.get('error')));
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
@@ -41,6 +43,9 @@ export default function Login() {
         <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
           <h1 className="text-lg font-semibold mb-1">Welcome back</h1>
           <p className="text-sm text-muted-foreground mb-6">Log in to your trading journal.</p>
+
+          <OAuthButtons />
+          <Divider />
 
           <form onSubmit={onSubmit} className="space-y-4">
             <div>

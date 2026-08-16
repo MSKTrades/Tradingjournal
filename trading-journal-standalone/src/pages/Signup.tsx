@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { LogoMark } from '../components/Logo';
 import { Button } from '../lib/ui/button';
 import { useAuth } from '../lib/auth';
+import { OAuthButtons, Divider } from './ui/OAuthButtons';
 
 export default function Signup() {
   const { signup } = useAuth();
@@ -42,6 +43,9 @@ export default function Signup() {
         <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
           <h1 className="text-lg font-semibold mb-1">Create your account</h1>
           <p className="text-sm text-muted-foreground mb-6">Start journaling and backtesting in minutes.</p>
+
+          <OAuthButtons />
+          <Divider />
 
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
