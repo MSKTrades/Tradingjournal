@@ -19,10 +19,12 @@ type FormState = {
   type: string;
   starting_balance: string;
   active: boolean;
+  daily_loss_limit_pct: string;
+  max_drawdown_limit_pct: string;
 };
 
 function emptyForm(): FormState {
-  return { name: '', type: '', starting_balance: '', active: true };
+  return { name: '', type: '', starting_balance: '', active: true, daily_loss_limit_pct: '', max_drawdown_limit_pct: '' };
 }
 
 function fromAccount(a: Account): FormState {
@@ -31,6 +33,8 @@ function fromAccount(a: Account): FormState {
     type: a.type ?? '',
     starting_balance: a.starting_balance != null ? String(a.starting_balance) : '',
     active: a.active,
+    daily_loss_limit_pct: a.daily_loss_limit_pct != null ? String(a.daily_loss_limit_pct) : '',
+    max_drawdown_limit_pct: a.max_drawdown_limit_pct != null ? String(a.max_drawdown_limit_pct) : '',
   };
 }
 
@@ -63,6 +67,8 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
         starting_balance: form.starting_balance.trim() === '' ? null : Number(form.starting_balance),
         active: form.active,
         sort_order: account?.sort_order ?? 0,
+        daily_loss_limit_pct: form.daily_loss_limit_pct.trim() === '' ? null : Number(form.daily_loss_limit_pct),
+        max_drawdown_limit_pct: form.max_drawdown_limit_pct.trim() === '' ? null : Number(form.max_drawdown_limit_pct),
       };
       await onSave(payload);
       onClose();
@@ -132,6 +138,29 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
             />
             <p className="text-xs text-muted-foreground">Used as the default Start Capital for this account's first trade.</p>
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <Label>Daily Loss Limit % (optional)</Label>
+              <Input
+                type="number" step={0.1} min={0} placeholder="e.g. 5"
+                value={form.daily_loss_limit_pct}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('daily_loss_limit_pct', e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Max Drawdown Limit % (optional)</Label>
+              <Input
+                type="number" step={0.1} min={0} placeholder="e.g. 10"
+                value={form.max_drawdown_limit_pct}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('max_drawdown_limit_pct', e.target.value)}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-2">
+            If this account is a prop-firm challenge, set these to match its rules (e.g. FTMO-style 5% daily / 10% max)
+            to get a live guardrail on the Summary page showing how close you are to either limit. Leave blank to skip.
+          </p>
 
           {account && (
             <div className="flex items-center gap-3">

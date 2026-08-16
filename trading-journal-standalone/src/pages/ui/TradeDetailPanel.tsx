@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3 } fro
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
+import { computeDrawdown, positionSizeLots } from '../data/risk';
 import { useAccount } from '../../lib/accounts';
 import { api, useFetch } from '../../lib/api';
 import { cn } from '../../lib/utils';
@@ -61,6 +62,10 @@ type Props = {
   // create/edit rules itself.
   checklists: Checklist[];
   nextTradeNumber: number;
+  // Already-fetched trades for the currently active account (from Journal's
+  // own fetch) — used only to work out a live current balance for the
+  // Position Size Calculator below, not re-fetched here.
+  trades: Trade[];
   onSave: (t: TradePayload) => Promise<void>;
   onClose: () => void;
   onAddCustomColumn: (name: string, type: string) => Promise<void>;
@@ -163,7 +168,7 @@ function StructureSelect({ label, value, onChange }: { label: string; value: str
 }
 
 export default function TradeDetailPanel({
-  open, trade, customColumns, checklists, nextTradeNumber, onSave, onClose, onAddCustomColumn,
+  open, trade, customColumns, checklists, nextTradeNumber, trades, onSave, onClose, onAddCustomColumn,
 }: Props) {
   const { accounts, activeAccountId } = useAccount();
   const [form, setForm] = useState<TradePayload>(() => empty(activeAccountId ?? 0, nextTradeNumber));
@@ -195,6 +200,34 @@ export default function TradeDetailPanel({
     const followed = activeChecklist.items.filter(i => form.checklist_results[String(i.id)] === true).length;
     return { followed, total: activeChecklist.items.length };
   }, [form.checklist_enabled, form.checklist_results, activeChecklist]);
+
+  // Position Size Calculator — uses the selected trade's own account (not
+  // necessarily the globally active one, since a trade can belong to any
+  // account) and, for the currently active account only, its live running
+  // balance (starting balance + all trades so far) rather than the static
+  // starting balance, so the suggested size reflects where the account
+  // actually stands today. For any other account we fall back to its
+  // starting balance since we don't have that account's trades loaded here.
+  const selectedAccount = accounts.find(a => a.id === form.account_id) ?? null;
+  const accountBalanceForSizing = useMemo(() => {
+    if (!selectedAccount) return null;
+    if (form.account_id === activeAccountId) {
+      const dd = computeDrawdown(trades, selectedAccount.starting_balance);
+      return dd.currentBalance || selectedAccount.starting_balance;
+    }
+    return selectedAccount.starting_balance;
+  }, [selectedAccount, form.account_id, activeAccountId, trades]);
+
+  const sizing = useMemo(() => {
+    if (accountBalanceForSizing == null) return null;
+    return positionSizeLots({
+      accountBalance: accountBalanceForSizing,
+      riskPct: form.position_size,
+      slPips: form.sl_pips,
+      pair: form.coin_token,
+      entryPrice: form.entry_price,
+    });
+  }, [accountBalanceForSizing, form.position_size, form.sl_pips, form.coin_token, form.entry_price]);
 
   function set<K extends keyof TradePayload>(k: K, v: TradePayload[K]) {
     setForm(p => ({ ...p, [k]: v }));
@@ -371,6 +404,7 @@ export default function TradeDetailPanel({
             <Section title="Stop Loss / Take Profit">
               <NumField label="SL Price" field="sl_price" step={0.00001} placeholder="e.g. 1.0810" />
               <NumField label="TP Price" field="tp_price" step={0.00001} placeholder="e.g. 1.0910" />
+              <NumField label="SL Distance (pips)" field="sl_pips" step={0.1} min={0} placeholder="e.g. 18" />
             </Section>
 
             <Section title="Exit">
@@ -405,6 +439,38 @@ export default function TradeDetailPanel({
               </div>
               <NumField label="RR Achieved" field="rr" step={0.1} min={0} placeholder="e.g. 3" />
               <NumField label="Position Size (% of capital)" field="position_size" step={0.01} min={0} placeholder="e.g. 0.5" />
+
+              {sizing && form.position_size != null && form.sl_pips != null && form.sl_pips > 0 && (
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Position Size Calculator
+                  </p>
+                  {sizing.lots != null ? (
+                    <>
+                      <p className="text-lg font-bold leading-tight">
+                        {sizing.lots.toFixed(2)} lots
+                        <span className="text-xs font-normal text-muted-foreground ml-1.5">
+                          ({sizing.units?.toLocaleString()} units)
+                        </span>
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Risking {fmtMoney(sizing.riskDollar)} ({form.position_size}% of {fmtMoney(accountBalanceForSizing)})
+                        &nbsp;at {form.sl_pips} pip SL
+                      </p>
+                      {sizing.approximate && (
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5">
+                          Approximate — pip value for this pair is estimated at $10/pip (standard lot). Exact for
+                          XXXUSD and USDJPY pairs.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Enter Position Size %, SL Distance (pips), and a pair to see a suggested lot size.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <Label className="text-xs mb-1.5 block">TP Levels Hit</Label>
