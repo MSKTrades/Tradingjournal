@@ -476,12 +476,28 @@ ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT
 -- single-user-per-login product (you and your own journal), not a
 -- multi-tenant system with per-user data partitioning, so `users` isn't
 -- referenced by `accounts`/`trades`/etc. It just gates who can reach the app
--- at all. password_hash is a bcrypt hash, never a plaintext password.
+-- at all. password_hash is a bcrypt hash, never a plaintext password - and
+-- is NULL for accounts created via Google/Facebook (OAuth-only accounts
+-- never get a local password unless the person later sets one).
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS users (
   id             SERIAL PRIMARY KEY,
   email          TEXT NOT NULL UNIQUE,
-  password_hash  TEXT NOT NULL,
+  password_hash  TEXT,
   name           TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Upgrade an existing (pre-OAuth) database in place: password_hash was
+-- originally NOT NULL back when email/password was the only sign-in method.
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+
+-- Which OAuth provider (if any) this account is linked to, and that
+-- provider's own user ID for it - not currently used to look anyone up
+-- (email is the single source of truth for "is this the same person",
+-- so signing up with a password and later using "Continue with Google" on
+-- the same email just links onto the existing row) but kept for reference /
+-- future use (e.g. showing "connected via Google" in a settings page).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
