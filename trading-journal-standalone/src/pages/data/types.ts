@@ -105,6 +105,7 @@ export type CustomColumn = {
   data_type: string;
   visible: boolean;
   sort_order: number;
+  account_id: number; // which account this field belongs to — fields no longer show across every account
 };
 
 // A reusable, user-defined tag (e.g. "A+ Setup", "Revenge Trade",
