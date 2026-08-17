@@ -72,7 +72,6 @@ type Props = {
 };
 
 const INSTRUMENTS = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'GBPJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAGUSD'];
-const STRUCTURE_OPTS = ['Bullish', 'Bearish', 'Ranging'];
 
 function empty(accountId: number, tradeNumber: number): TradePayload {
   return {
@@ -166,17 +165,6 @@ function TpToggle({ label, checked, onChange }: { label: string; checked: boolea
       <span className="text-sm">{checked ? '✅' : '⬜'}</span>
       <span className="text-[11px] font-bold">{label}</span>
     </button>
-  );
-}
-
-function StructureSelect({ label, value, onChange }: { label: string; value: string | null; onChange: (v: string | null) => void }) {
-  return (
-    <FieldRow label={label}>
-      <Select value={value ?? ''} onChange={e => onChange(e.target.value || null)}>
-        <option value="">Select…</option>
-        {STRUCTURE_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
-      </Select>
-    </FieldRow>
   );
 }
 
@@ -303,6 +291,23 @@ export default function TradeDetailPanel({
   }
   function setExtra(key: string, value: unknown) {
     setForm(p => ({ ...p, extra_data: { ...p.extra_data, [key]: value } }));
+  }
+  // Partial 1 / Partial 2 are the RR multiples where you took partial profit
+  // (e.g. closed half the position at 1.5R, the rest at 3R). Most trades
+  // don't need that much granularity - you can just type the final RR
+  // Achieved directly - but if you DO fill in both partials, we auto-fill RR
+  // Achieved as their average (equal-size close assumption) so you don't
+  // have to do the math yourself. Auto-fill only fires the moment both
+  // partials become present; it doesn't fight you if you edit RR Achieved
+  // by hand afterwards - only changing a partial again will recompute it.
+  function setPartial(key: 'partial_1' | 'partial_2', v: number | null) {
+    setForm(p => {
+      const next = { ...p, [key]: v };
+      if (next.partial_1 != null && next.partial_2 != null) {
+        next.rr = Math.round(((next.partial_1 + next.partial_2) / 2) * 100) / 100;
+      }
+      return next;
+    });
   }
   function setChecklistResult(itemId: number, value: boolean) {
     setForm(p => ({ ...p, checklist_results: { ...p.checklist_results, [String(itemId)]: value } }));
@@ -528,6 +533,12 @@ export default function TradeDetailPanel({
                 </Select>
               </FieldRow>
               <NumField label="RR Achieved" {...numField('rr')} step={0.1} min={0} placeholder="e.g. 3" />
+              <NumField label="Partial 1 (RR)" value={form.partial_1} onChange={v => setPartial('partial_1', v)} step={0.1} min={0} />
+              <NumField label="Partial 2 (RR)" value={form.partial_2} onChange={v => setPartial('partial_2', v)} step={0.1} min={0} />
+              <p className="text-xs text-muted-foreground -mt-2">
+                Enter RR Achieved directly, or fill in both Partials and it'll be calculated for you.
+              </p>
+              <NumField label="Max RR Reached" {...numField('max_rr')} step={0.1} min={0} />
 
               <div>
                 <Label className="text-xs mb-1.5 block">TP Levels Hit</Label>
@@ -563,21 +574,13 @@ export default function TradeDetailPanel({
               )}
             </Section>
 
-            <CollapsibleSection
-              storageKey="forexforge_panel_smc_open"
-              title="SMC / ICT Metrics (optional)"
-              subtitle="Structure and session-based metrics"
-            >
-              {/* 15M Structure and 1M WR moved down to Custom Fields (see
-                  the migration in schema.sql) - strategy-specific fields
-                  that don't belong baked into every account by default.
-                  1M Before Chart stays here since it wasn't part of that
-                  move. */}
-              <StructureSelect label="1M Before Chart" value={form.before_chart_1m} onChange={v => set('before_chart_1m', v)} />
-              <NumField label="Partial 1 (RR)" {...numField('partial_1')} step={0.1} min={0} />
-              <NumField label="Partial 2 (RR)" {...numField('partial_2')} step={0.1} min={0} />
-              <NumField label="Max RR Reached" {...numField('max_rr')} step={0.1} min={0} />
-            </CollapsibleSection>
+            {/* The old "SMC / ICT Metrics (optional)" section used to live
+                here with 1M Before Chart, Partial 1/2, and Max RR Reached.
+                1M Before Chart is gone entirely (unused - see below), and
+                the other three now live up in the Result section, right
+                below RR Achieved, since that's the calculation they
+                actually feed into. 15M Structure / 1M WR moved to Custom
+                Fields earlier (see the migration in schema.sql). */}
 
             <CollapsibleSection
               storageKey="forexforge_panel_custom_open"
