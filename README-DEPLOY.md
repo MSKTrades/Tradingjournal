@@ -1,66 +1,58 @@
-# ForexForge — Risk Guardrail, Drawdown Chart & Position Size Calculator
+# ForexForge — Custom Fields are now per-account
 
-This delivery adds three things you asked for:
-
-1. **Daily loss / max drawdown guardrail** — a widget on the Summary page that shows how close you are to a prop-firm-style daily loss limit and overall max drawdown limit, per account.
-2. **Drawdown chart** — a new card on the Performance page showing your equity's distance below its running peak over time, plus max/current drawdown figures.
-3. **Position Size Calculator** — right on the Journal trade form. Enter SL Distance (pips) and Position Size (% of capital) and it tells you the suggested lot size and dollar risk, using the account's *live* current balance.
-
-Everything here is entirely client-side except one small addition to the existing accounts API — no new serverless functions were added, so you're still safely under Vercel's 12-function cap on the Hobby plan.
-
-## 1. Apply the files
-
-Same process as before: use GitHub's "Add files via upload" (or drag-and-drop in the GitHub web UI) into your `MSKTrades/Tradingjournal` repo, inside the `trading-journal-standalone` folder, preserving the folder structure below. This will overwrite the existing versions of these files.
-
-Files in this delivery:
+Six files changed:
 
 ```
 trading-journal-standalone/
-├── schema.sql                          (changed — 2 new columns on accounts)
-├── api/accounts.ts                     (changed — new columns supported)
-├── src/lib/accounts.tsx                (changed — new fields on payload types)
-├── src/pages/data/types.ts             (changed — Account type updated)
-├── src/pages/data/risk.ts              (NEW — drawdown & position-size math)
-├── src/pages/ui/AccountDialog.tsx      (changed — new Daily/Max Drawdown % inputs)
-├── src/pages/ui/RiskGuardrail.tsx      (NEW — the Summary page guardrail widget)
-├── src/pages/Summary.tsx               (changed — renders RiskGuardrail)
-├── src/pages/Performance.tsx           (changed — renders the Drawdown chart)
-├── src/pages/ui/TradeDetailPanel.tsx   (changed — SL pips field + calculator)
-├── src/pages/Journal.tsx               (changed — passes trades to the panel)
-└── src/pages/StrategyDetail.tsx        (changed — same, for trades opened from Strategies)
+├── schema.sql                          (changed — custom_columns scoped to an account)
+├── api/columns.ts                      (changed — filters/saves by account_id)
+├── src/pages/data/types.ts             (changed — CustomColumn now carries account_id)
+├── src/pages/Journal.tsx               (changed — fetches/creates columns for the active account)
+├── src/pages/StrategyDetail.tsx        (changed — same, for trades opened from Strategies)
+└── src/pages/ui/StrategyDialog.tsx     (changed — strategy condition fields scoped the same way)
 ```
 
-Note: this delivery does **not** touch the Google/Facebook login files from last time — that round is already live and untouched here.
+## What changed
 
-## 2. Re-run schema.sql in Neon
+Custom fields (CISD Break, Total Inverse Candles, SL Pips, and anything else you've added under "Custom Fields") used to be global — every account showed the exact same list, whether it actually used those fields or not. That's why your brand-new test account was showing all seven SMC fields from your main account.
 
-Two new nullable columns were added to `accounts`:
+Now each account has its own set of custom fields:
 
-```sql
-ALTER TABLE accounts ADD COLUMN IF NOT EXISTS daily_loss_limit_pct NUMERIC;
-ALTER TABLE accounts ADD COLUMN IF NOT EXISTS max_drawdown_limit_pct NUMERIC;
-```
+- A **new account starts with none** — the Custom Fields section is blank until you add your own with "+ Add your own field".
+- A field you add on one account **only shows up on that account** going forward.
+- Your **existing accounts keep every custom field they already use**, untouched — nothing was deleted, and no trade data was touched.
 
-Open your Neon SQL editor and run the full `schema.sql` again (it's all `IF NOT EXISTS` / idempotent, so it's safe to re-run against your existing database — it won't touch your trade data).
+## 1. Apply the files
+
+Same as always: GitHub's "Add files via upload" into `MSKTrades/Tradingjournal`, inside `trading-journal-standalone/`, preserving the folder paths above — this overwrites the six files listed.
+
+## 2. Re-run schema.sql in Neon — this one matters more than usual
+
+Open your Neon SQL editor and run the full `schema.sql` again. It's still safe and idempotent (nothing here touches your trades or their data), but this update includes a one-time migration that needs to actually run once to sort your existing custom fields onto the right accounts:
+
+- It adds an `account_id` column to `custom_columns`.
+- For every custom field that used to be global, it looks at which of your accounts actually have a trade using that field (i.e. a trade whose data includes a value for it) and gives just those accounts their own copy of the field.
+- Any account with zero trades using a given field — like the new one you just created — gets none of them.
+- If a custom field was defined but genuinely never used on any trade anywhere, it's dropped (nothing was relying on it, since no trade data references it).
+
+Practically: your main account should end up with the same custom fields it has today, and your new test account's Custom Fields section will be empty until you add fields to it yourself.
+
+**Do this before redeploying** — the app expects `custom_columns` rows to have an `account_id` once this version's frontend/API code is live.
 
 ## 3. Environment variables
 
-None needed. This round doesn't touch auth, OAuth, or any secrets.
+None needed.
 
 ## 4. Redeploy on Vercel
 
-Once the files are pushed and the schema is updated, trigger a redeploy the same way as before (Vercel should auto-deploy on push if it's connected to the repo; otherwise redeploy manually from the Vercel dashboard).
+Trigger a redeploy the same way as before (auto-deploy on push, or manually from the Vercel dashboard).
 
-## 5. How to use it
+## 5. Double-check after deploying
 
-**Set risk limits on an account:** go to the account switcher → Edit Account (the account you're using for your funding challenge). You'll see two new optional fields — "Daily Loss Limit %" and "Max Drawdown Limit %". For an FTMO-style challenge that's typically 5% and 10%. Leave either blank if you don't want to track it — the guardrail widget only shows up on Summary once at least one of these is set, and only for accounts that have it set.
+- Open your main account → Journal → any trade → Custom Fields — you should still see CISD Break, Total Inverse Candles, etc. with their existing values intact.
+- Switch to your new test account → open a trade → Custom Fields should be empty, with just "+ Add your own field".
+- Add a field on the test account, confirm it does **not** appear back on your main account.
 
-**Position sizer:** open any trade (new or existing) in the Journal, fill in "SL Distance (pips)" (in the Stop Loss / Take Profit section) and "Position Size (% of capital)" (in the Result section), and a small card appears showing suggested lot size, unit size, and dollar risk. It uses your account's live running balance (starting balance plus every trade recorded so far), not just the static starting balance — so the sizing tracks where you actually stand today.
+## A heads-up on Strategies
 
-One honest caveat on the pip-value math: it's exact for any pair quoted in USD (EURUSD, GBPUSD, etc.) and for USDJPY. For any other pair (crosses like GBPJPY, EURGBP, or gold/crypto tickers) it falls back to the standard $10/pip-per-standard-lot approximation, since getting it exactly right for those would need a second live exchange rate this app doesn't currently fetch. The calculator flags this with an "Approximate" note whenever it applies, so you always know when to double-check with your broker's own calculator before sizing a real trade.
-
-## A correction from the earlier competitive-brief notes
-
-I'd flagged "calendar heatmap of daily P&L" as something FX Replay/TradeZella have that ForexForge was missing. Looking at the actual code more closely, ForexForge already has this — it's the **Calendar** tab on the Performance page (daily P&L grid with color coding and weekly totals), alongside a separate **Heatmap** tab (monthly % returns by year). So no new work was needed there — that one was already covered.
-
-Still on the table from that brief, if you want them next: MAE/MFE excursion analysis and Monte Carlo resampling on your backtest trades. Just say the word.
+Strategy condition fields (the dropdown when you're setting up a filter like "CISD Break ≤ 8") also pull from custom fields, so that dropdown now shows whichever account is currently active in the account switcher, instead of always showing every custom field from every account. If you build a strategy that references a custom field, make sure you're on the right account in the switcher first.
