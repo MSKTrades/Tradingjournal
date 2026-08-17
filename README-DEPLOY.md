@@ -1,58 +1,25 @@
-# ForexForge — Custom Fields are now per-account
+# ForexForge — More stats on the Journal top bar
 
-Six files changed:
-
-```
-trading-journal-standalone/
-├── schema.sql                          (changed — custom_columns scoped to an account)
-├── api/columns.ts                      (changed — filters/saves by account_id)
-├── src/pages/data/types.ts             (changed — CustomColumn now carries account_id)
-├── src/pages/Journal.tsx               (changed — fetches/creates columns for the active account)
-├── src/pages/StrategyDetail.tsx        (changed — same, for trades opened from Strategies)
-└── src/pages/ui/StrategyDialog.tsx     (changed — strategy condition fields scoped the same way)
-```
+One file changed: `src/pages/Journal.tsx`.
 
 ## What changed
 
-Custom fields (CISD Break, Total Inverse Candles, SL Pips, and anything else you've added under "Custom Fields") used to be global — every account showed the exact same list, whether it actually used those fields or not. That's why your brand-new test account was showing all seven SMC fields from your main account.
+The stat row at the top of the Journal page (Total Trades, Win Rate, Profit Factor, the Wins/Losses pie) now has these added, in this order:
 
-Now each account has its own set of custom fields:
+1. **Total Wins** / **Total Losses** / **Total Break Even** — raw counts, colored green/red/muted the same way the rest of the app colors outcomes.
+2. **Starting Capital** — the account's starting balance.
+3. **Current Capital** — the account's live running balance (starting balance plus every trade's P/L so far, same math the Performance page's drawdown chart and the Position Size Calculator already use), colored green if you're up overall and red if you're down.
+4. **Position Size %** — the highest and lowest "Position Size (% of capital)" you've actually used, so you can see at a glance if your sizing has been consistent or all over the place.
+5. **Max Loss Race** — how much of your account's Max Drawdown Limit % (set on the account when you created or edited it) you've used up so far, as a progress bar plus the dollar figures — the same "race against the limit" idea as the Risk Guardrail widget on the Summary page, just surfaced here too since this is where you're actually reviewing trades. Only shows up if that account has a Max Drawdown Limit % set — if you haven't set one, this card just doesn't appear (same as Risk Guardrail).
 
-- A **new account starts with none** — the Custom Fields section is blank until you add your own with "+ Add your own field".
-- A field you add on one account **only shows up on that account** going forward.
-- Your **existing accounts keep every custom field they already use**, untouched — nothing was deleted, and no trade data was touched.
+One behavior worth knowing: Total Trades, Total Wins/Losses/Break Even, and Position Size % all reflect whatever the filter bar above them is currently set to (Assets/Side/Outcome/Tags/Day/date range) — same as Win Rate and Profit Factor already did. Starting Capital, Current Capital, and Max Loss Race always reflect the whole account, regardless of filters, since a partial/filtered view of your trades wouldn't give you a real balance or drawdown number.
 
-## 1. Apply the files
+## Apply the file
 
-Same as always: GitHub's "Add files via upload" into `MSKTrades/Tradingjournal`, inside `trading-journal-standalone/`, preserving the folder paths above — this overwrites the six files listed.
+Same as always: GitHub's "Add files via upload" into `MSKTrades/Tradingjournal`, inside `trading-journal-standalone/src/pages/`, overwriting the existing `Journal.tsx`.
 
-## 2. Re-run schema.sql in Neon — this one matters more than usual
+No schema changes, no environment variables, no other files touched.
 
-Open your Neon SQL editor and run the full `schema.sql` again. It's still safe and idempotent (nothing here touches your trades or their data), but this update includes a one-time migration that needs to actually run once to sort your existing custom fields onto the right accounts:
+## Verified
 
-- It adds an `account_id` column to `custom_columns`.
-- For every custom field that used to be global, it looks at which of your accounts actually have a trade using that field (i.e. a trade whose data includes a value for it) and gives just those accounts their own copy of the field.
-- Any account with zero trades using a given field — like the new one you just created — gets none of them.
-- If a custom field was defined but genuinely never used on any trade anywhere, it's dropped (nothing was relying on it, since no trade data references it).
-
-Practically: your main account should end up with the same custom fields it has today, and your new test account's Custom Fields section will be empty until you add fields to it yourself.
-
-**Do this before redeploying** — the app expects `custom_columns` rows to have an `account_id` once this version's frontend/API code is live.
-
-## 3. Environment variables
-
-None needed.
-
-## 4. Redeploy on Vercel
-
-Trigger a redeploy the same way as before (auto-deploy on push, or manually from the Vercel dashboard).
-
-## 5. Double-check after deploying
-
-- Open your main account → Journal → any trade → Custom Fields — you should still see CISD Break, Total Inverse Candles, etc. with their existing values intact.
-- Switch to your new test account → open a trade → Custom Fields should be empty, with just "+ Add your own field".
-- Add a field on the test account, confirm it does **not** appear back on your main account.
-
-## A heads-up on Strategies
-
-Strategy condition fields (the dropdown when you're setting up a filter like "CISD Break ≤ 8") also pull from custom fields, so that dropdown now shows whichever account is currently active in the account switcher, instead of always showing every custom field from every account. If you build a strategy that references a custom field, make sure you're on the right account in the switcher first.
+Checked in a real browser with mock data (a 3-trade account, $10,000 starting balance, a 10% Max Drawdown Limit): Total Wins/Losses/Break Even counted correctly, Starting Capital showed $10,000, Current Capital showed $9,950 in red (net down $50), Position Size % showed ▲1.00% / ▼0.25% matching the highest/lowest sized trades, and Max Loss Race showed "$200 of $1,000 (10.0% max)" at 20% used with a green bar — all matching the underlying numbers by hand. Also checked dark mode — same layout, correct contrast.
