@@ -5,6 +5,7 @@ import { Input } from '../lib/ui/form';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
 import { Checklist } from './data/types';
+import DailyRoutine from './ui/DailyRoutine';
 
 export default function Checklists() {
   const { data: rawChecklists, loading, refetch } = useFetch<Checklist[]>('/checklist');
@@ -16,6 +17,8 @@ export default function Checklists() {
   const [renameValue, setRenameValue] = useState('');
   const [addingItemFor, setAddingItemFor] = useState<number | null>(null);
   const [newItemText, setNewItemText] = useState('');
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [editItemValue, setEditItemValue] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
 
   async function handleAddChecklist() {
@@ -80,6 +83,19 @@ export default function Checklists() {
     }
   }
 
+  async function handleEditItem(id: number) {
+    const text = editItemValue.trim();
+    if (!text) return;
+    setBusy(`edit-item-${id}`);
+    try {
+      await api.put(`/checklist?resource=item&id=${id}`, { text });
+      setEditingItemId(null);
+      refetch();
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -93,6 +109,8 @@ export default function Checklists() {
           <Plus className="w-4 h-4 mr-1" /> Add Checklist
         </Button>
       </div>
+
+      <DailyRoutine />
 
       {loading && <div className="text-center py-16 text-muted-foreground">Loading…</div>}
 
@@ -166,20 +184,49 @@ export default function Checklists() {
               )}
 
               {cl.items.map((item, idx) => (
-                <div key={item.id} className="flex items-center gap-2 group">
-                  <span className="text-sm flex-1">
-                    <span className="font-semibold text-muted-foreground mr-1.5">Rule {idx + 1}:</span>
-                    {item.text}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteItem(item.id)}
-                    disabled={busy === `delete-item-${item.id}`}
-                    className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                editingItemId === item.id ? (
+                  <div key={item.id} className="flex items-center gap-1.5">
+                    <span className="font-semibold text-muted-foreground text-sm shrink-0">Rule {idx + 1}:</span>
+                    <Input
+                      autoFocus
+                      value={editItemValue}
+                      className="h-7 text-sm flex-1"
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditItemValue(e.target.value)}
+                      onKeyDown={(e: React.KeyboardEvent) => {
+                        if (e.key === 'Enter') handleEditItem(item.id);
+                        if (e.key === 'Escape') setEditingItemId(null);
+                      }}
+                    />
+                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleEditItem(item.id)} disabled={busy === `edit-item-${item.id}`}>
+                      <Check className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setEditingItemId(null)}>
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div key={item.id} className="flex items-center gap-2 group">
+                    <span className="text-sm flex-1">
+                      <span className="font-semibold text-muted-foreground mr-1.5">Rule {idx + 1}:</span>
+                      {item.text}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { setEditingItemId(item.id); setEditItemValue(item.text); }}
+                      className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteItem(item.id)}
+                      disabled={busy === `delete-item-${item.id}`}
+                      className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )
               ))}
 
               {addingItemFor === cl.id ? (
