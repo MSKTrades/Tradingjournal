@@ -48,7 +48,14 @@ export function computeDrawdown(trades: Trade[], startingBalance: number | null)
     return new Date((a as any).created_at ?? 0).getTime() - new Date((b as any).created_at ?? 0).getTime();
   });
 
-  const base = startingBalance ?? Number(sorted[0]!.start_capital ?? 0);
+  // starting_balance (like every other NUMERIC column from Postgres) comes
+  // back over the API as a string, not a number - forgetting to coerce it
+  // here used to make `equity` a string too, and `equity += Number(...)`
+  // silently does string concatenation instead of addition, poisoning the
+  // whole curve with NaN a couple of trades in (visible as a flat 0%
+  // drawdown line with "$NaN" max/current, since `peak > 0` is false for a
+  // NaN peak and quietly falls back to the 0 branch below).
+  const base = startingBalance != null ? Number(startingBalance) : Number(sorted[0]!.start_capital ?? 0);
   let equity = base;
   let peak = base;
   let maxDDDollar = 0;
@@ -113,6 +120,18 @@ export type PositionSizeResult = {
   approximate: boolean;      // true when the pip-value conversion is a fallback estimate, not exact
 };
 
+// A pair's pip size: 0.01 for any JPY-quoted pair (2-decimal quoting), 0.0001
+// for everything else (4-decimal quoting - true for the other majors/crosses
+// this app targets; exotics with 3-decimal quoting etc. aren't handled
+// specially and fall back to this same default). Shared by the pip-value
+// calc below and the SL-distance auto-calc in TradeDetailPanel, so both
+// agree on what "1 pip" means for a given pair.
+function pipSizeForPair(pair: string | null): number {
+  const clean = (pair ?? '').toUpperCase().replace(/[^A-Z]/g, '');
+  const quote = clean.length === 6 ? clean.slice(3, 6) : '';
+  return quote === 'JPY' ? 0.01 : 0.0001;
+}
+
 // Pip value per standard lot (100,000 units), in USD, assuming a USD
 // account. This is exact for the common cases (any XXXUSD pair, and
 // USDJPY using its own quoted price to convert JPY -> USD) and falls back
@@ -129,7 +148,7 @@ function pipValuePerStandardLot(pair: string | null, entryPrice: number | null):
   const base = clean.slice(0, 3);
   const quote = clean.slice(3, 6);
   const isJpyQuote = quote === 'JPY';
-  const pipSize = isJpyQuote ? 0.01 : 0.0001;
+  const pipSize = pipSizeForPair(pair);
   const pipValueInQuoteCcy = pipSize * unitsPerStdLot; // $10 for 4-decimal XXXUSD; ¥1000 for XXXJPY
 
   if (quote === 'USD') return { value: pipValueInQuoteCcy, approximate: false };
@@ -166,4 +185,17 @@ export function positionSizeLots(opts: {
     units: Math.round(lots * 100000),
     approximate,
   };
+}
+
+// Distance between Entry Price and SL Price, in pips, for the given pair -
+// powers the "auto-fill SL Distance once both prices are in" rule on the
+// trade form. Returns null (rather than 0) when either price is missing, so
+// the caller can tell "nothing to calculate yet" apart from "calculated to
+// zero pips" and leave whatever the user already typed into SL Distance
+// alone instead of clobbering it.
+export function slPipsFromPrices(entryPrice: number | null, slPrice: number | null, pair: string | null): number | null {
+  if (entryPrice == null || slPrice == null) return null;
+  const pipSize = pipSizeForPair(pair);
+  const pips = Math.abs(entryPrice - slPrice) / pipSize;
+  return isFinite(pips) ? Math.round(pips * 10) / 10 : null;
 }
