@@ -27,7 +27,34 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     // Single round trip: fetch every checklist plus every item, then nest
     // items under their checklist in JS. Simpler for the frontend than
     // forcing a second fetch per checklist.
-    const checklists = await sql.unsafe('SELECT * FROM checklists ORDER BY sort_order ASC, id ASC');
+    //
+    // account_id is optional: the Checklists management page calls this
+    // without one because it needs to see (and edit the scoping of) every
+    // rule set that exists, account-restricted or not. Everywhere else
+    // (Journal's grading picker, Summary's compliance widget) passes the
+    // active account so only checklists that apply there come back — same
+    // account_ids = '[]' (every account) OR @> containment convention as
+    // strategies.
+    const accountIdParam = req.query.account_id;
+    const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
+    const scoped = !!accountId && !isNaN(accountId);
+
+    const checklists = scoped
+      ? await sql.unsafe(
+          `SELECT * FROM checklists
+           WHERE account_ids = '[]'::jsonb OR account_ids @> $1::jsonb
+           ORDER BY sort_order ASC, id ASC`,
+          // Raw array, NOT JSON.stringify()'d - postgres.js serializes a
+          // bound value a second time when the placeholder has a ::jsonb
+          // cast, so JSON.stringify([accountId]) here would send the JSON
+          // *string* "[2]" instead of the JSON *array* [2], and `@>`
+          // containment against a string never matches - every scoped
+          // checklist would silently vanish from every account, including
+          // its own. See the account_ids write path in api/strategies.ts
+          // for the same reasoning applied to INSERT/UPDATE.
+          [[accountId]]
+        )
+      : await sql.unsafe('SELECT * FROM checklists ORDER BY sort_order ASC, id ASC');
     const items = await sql.unsafe('SELECT * FROM checklist_items ORDER BY sort_order ASC, id ASC');
     const byChecklist = new Map<number, any[]>();
     for (const item of items) {
@@ -35,7 +62,11 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       list.push(item);
       byChecklist.set(item.checklist_id, list);
     }
-    const withItems = checklists.map((c: any) => ({ ...c, items: byChecklist.get(c.id) ?? [] }));
+    const withItems = checklists.map((c: any) => ({
+      ...c,
+      account_ids: typeof c.account_ids === 'string' ? JSON.parse(c.account_ids || '[]') : c.account_ids ?? [],
+      items: byChecklist.get(c.id) ?? [],
+    }));
     res.status(200).json(withItems);
     return;
   }
@@ -70,8 +101,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM checklists');
       const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
       const rows = await sql.unsafe(
-        `INSERT INTO checklists (name, sort_order) VALUES ($1, $2) RETURNING *`,
-        [p.name, nextOrder]
+        `INSERT INTO checklists (name, sort_order, account_ids) VALUES ($1, $2, $3::jsonb) RETURNING *`,
+        [p.name, nextOrder, p.account_ids ?? []]
       );
       res.status(200).json({ ...rows[0], items: [] });
       return;
@@ -100,8 +131,19 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
 
     if (resource === 'checklist') {
+      // Renaming and re-scoping (Applies To) both land here, but as two
+      // independent, partial edits - the rename UI only ever sends `name`
+      // and the account-pill toggle only ever sends `account_ids`, so this
+      // only updates whichever field(s) were actually included rather than
+      // defaulting a missing `account_ids` to '[]' and silently wiping out
+      // scoping every time someone renames a checklist.
       const p = req.body;
-      await sql.unsafe('UPDATE checklists SET name = $1 WHERE id = $2', [p.name, id]);
+      if (p.name !== undefined) {
+        await sql.unsafe('UPDATE checklists SET name = $1 WHERE id = $2', [p.name, id]);
+      }
+      if (p.account_ids !== undefined) {
+        await sql.unsafe('UPDATE checklists SET account_ids = $1::jsonb WHERE id = $2', [p.account_ids, id]);
+      }
       res.status(200).json({ id });
       return;
     }
