@@ -706,7 +706,7 @@ export default function Summary() {
   const { data, loading, refetch } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const results: StrategyResult[] = data ?? [];
   const { data: rawTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
-  const { data: rawChecklists } = useFetch<Checklist[]>('/checklist');
+  const { data: rawChecklists } = useFetch<Checklist[]>(`/checklist?account_id=${activeAccountId ?? ''}`);
   const trades: Trade[] = rawTrades ?? [];
   const checklists: Checklist[] = rawChecklists ?? [];
 

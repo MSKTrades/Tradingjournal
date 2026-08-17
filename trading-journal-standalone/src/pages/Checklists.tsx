@@ -4,12 +4,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '../lib/ui/card';
 import { Input } from '../lib/ui/form';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
+import { useAccount } from '../lib/accounts';
 import { Checklist } from './data/types';
 import DailyRoutine from './ui/DailyRoutine';
 
 export default function Checklists() {
+  // Unscoped fetch (no account_id) on purpose - this is the one place a
+  // checklist restricted to some other account still needs to show up, so
+  // you can see and change its scoping. Everywhere else (Journal's grading
+  // picker, Summary's compliance widget) passes the active account and only
+  // gets back checklists that apply there.
   const { data: rawChecklists, loading, refetch } = useFetch<Checklist[]>('/checklist');
   const checklists: Checklist[] = rawChecklists ?? [];
+  const { accounts } = useAccount();
 
   const [addingChecklist, setAddingChecklist] = useState(false);
   const [newChecklistName, setNewChecklistName] = useState('');
@@ -57,6 +64,24 @@ export default function Checklists() {
     } finally {
       setBusy(null);
     }
+  }
+
+  // Same interaction as Strategy's "Applies To" pills, but auto-saving on
+  // every click (no dialog / Save button) to match how the rest of this
+  // page already works - add/edit/delete a rule all save immediately too.
+  async function handleSetChecklistAccounts(cl: Checklist, account_ids: number[]) {
+    setBusy(`accounts-${cl.id}`);
+    try {
+      await api.put(`/checklist?resource=checklist&id=${cl.id}`, { account_ids });
+      refetch();
+    } finally {
+      setBusy(null);
+    }
+  }
+  function toggleChecklistAccount(cl: Checklist, accountId: number) {
+    const current = cl.account_ids ?? [];
+    const next = current.includes(accountId) ? current.filter(a => a !== accountId) : [...current, accountId];
+    handleSetChecklistAccounts(cl, next);
   }
 
   async function handleAddItem(checklistId: number) {
@@ -179,6 +204,39 @@ export default function Checklists() {
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-2 pt-0">
+              <div className="mb-1">
+                <p className="text-xs text-muted-foreground font-medium mb-1">Applies To</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    disabled={busy === `accounts-${cl.id}`}
+                    onClick={() => handleSetChecklistAccounts(cl, [])}
+                    className={`px-2 py-0.5 rounded-md text-xs font-medium border transition-colors ${
+                      (cl.account_ids ?? []).length === 0
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-transparent text-muted-foreground border-border hover:border-foreground/40'
+                    }`}
+                  >
+                    All Accounts
+                  </button>
+                  {accounts.map(a => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      disabled={busy === `accounts-${cl.id}`}
+                      onClick={() => toggleChecklistAccount(cl, a.id)}
+                      className={`px-2 py-0.5 rounded-md text-xs font-medium border transition-colors ${
+                        (cl.account_ids ?? []).includes(a.id)
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-transparent text-muted-foreground border-border hover:border-foreground/40'
+                      }`}
+                    >
+                      {a.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {cl.items.length === 0 && addingItemFor !== cl.id && (
                 <p className="text-xs text-muted-foreground italic">No rules yet</p>
               )}

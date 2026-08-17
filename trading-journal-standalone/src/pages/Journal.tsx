@@ -1,5 +1,4 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Button } from '../lib/ui/button';
 import { Badge, Checkbox } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
@@ -125,15 +124,10 @@ function JournalInsights({ trades, allTrades, account }: JournalInsightsProps) {
     const grossWin = wins.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
     const grossLoss = -losses.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
     const profitFactor = grossLoss > 0 ? grossWin / grossLoss : (grossWin > 0 ? null : 0);
-    const pieData = [
-      { name: 'Wins', value: wins.length, color: 'hsl(var(--success))' },
-      { name: 'Losses', value: losses.length, color: 'hsl(var(--destructive))' },
-      { name: 'Breakeven', value: breakeven.length, color: 'hsl(var(--muted-foreground))' },
-    ].filter(d => d.value > 0);
 
     return {
       total: trades.length, wins: wins.length, losses: losses.length, breakeven: breakeven.length,
-      winRate, profitFactor, pieData,
+      winRate, profitFactor,
     };
   }, [trades]);
 
@@ -212,28 +206,6 @@ function JournalInsights({ trades, allTrades, account }: JournalInsightsProps) {
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Profit Factor</p>
         <p className="text-xl font-bold">{stats.profitFactor === null ? '∞' : stats.profitFactor.toFixed(2)}</p>
       </div>
-      {stats.pieData.length > 0 && (
-        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 flex items-center gap-3">
-          <div className="w-16 h-16 shrink-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={stats.pieData} dataKey="value" nameKey="name" innerRadius={16} outerRadius={30} paddingAngle={2}>
-                  {stats.pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                </Pie>
-                <Tooltip contentStyle={{ fontSize: 11 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex flex-col gap-1">
-            {stats.pieData.map(d => (
-              <div key={d.name} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.color }} />
-                {d.name} ({d.value})
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -401,7 +373,7 @@ export default function Journal() {
   const { accounts, loading: accountsLoading, activeAccountId, activeAccount } = useAccount();
   const { data: rawTrades, loading, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
   const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>(`/columns?account_id=${activeAccountId ?? ''}`);
-  const { data: rawChecklists } = useFetch<Checklist[]>('/checklist');
+  const { data: rawChecklists } = useFetch<Checklist[]>(`/checklist?account_id=${activeAccountId ?? ''}`);
   const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
   const allTags: Tag[] = rawTags ?? [];
   const [filters, setFilters] = useState<PerfFilters>(emptyFilters);

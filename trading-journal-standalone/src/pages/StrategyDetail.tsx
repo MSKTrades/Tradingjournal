@@ -39,7 +39,7 @@ export default function StrategyDetail() {
   const { data: resultsData, loading: resultsLoading } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const { data: rawTrades, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
   const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>(`/columns?account_id=${activeAccountId ?? ''}`);
-  const { data: rawChecklists } = useFetch<Checklist[]>('/checklist');
+  const { data: rawChecklists } = useFetch<Checklist[]>(`/checklist?account_id=${activeAccountId ?? ''}`);
 
   const results: StrategyResult[] = resultsData ?? [];
   const strategy = results.find(r => String(r.id) === id);
