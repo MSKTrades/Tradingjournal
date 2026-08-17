@@ -9,9 +9,10 @@ import { useAccount } from '../lib/accounts';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
 import ManageColumnsDialog from './ui/ManageColumnsDialog';
 import ImportTradesDialog, { ImportedTrade } from './ui/ImportTradesDialog';
-import { Trade, CustomColumn, Checklist, Tag, fmtMoney, fmtPct, fmtNum, plColor } from './data/types';
+import { Trade, CustomColumn, Checklist, Tag, Account, fmtMoney, fmtPct, fmtNum, plColor } from './data/types';
 import { cn } from '../lib/utils';
 import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters } from './ui/PerformanceFilterBar';
+import { computeDrawdown } from './data/risk';
 
 const DEFAULT_COLS = [
   { key: 'trade_number',          label: '#',            vis: true },
@@ -98,7 +99,23 @@ function renderCell(trade: Trade, key: string): React.ReactNode {
 // recede next to the two outcomes that actually matter, not compete with
 // them as a third "category". Direct counts in the legend (not just color)
 // are the required secondary encoding for a colorblind-safe read.
-function JournalInsights({ trades }: { trades: Trade[] }) {
+// Same green/yellow/orange/red staging RiskGuardrail already uses for "how
+// close to the limit" gauges on the Summary page - reused here so the same
+// percentage-of-limit always reads the same way everywhere in the app.
+function raceColor(pct: number): { bar: string; text: string } {
+  if (pct >= 100) return { bar: 'bg-red-500', text: 'text-red-500' };
+  if (pct >= 75) return { bar: 'bg-orange-500', text: 'text-orange-500' };
+  if (pct >= 50) return { bar: 'bg-yellow-500', text: 'text-yellow-600 dark:text-yellow-400' };
+  return { bar: 'bg-green-500', text: 'text-green-600 dark:text-green-400' };
+}
+
+type JournalInsightsProps = {
+  trades: Trade[];      // the filtered/visible set - Total Trades, win/loss counts, and position size all track whatever the filter bar currently shows
+  allTrades: Trade[];   // every trade on this account, unfiltered - capital and the drawdown race need the account's real running balance, not just a filtered slice of it
+  account: Account | null;
+};
+
+function JournalInsights({ trades, allTrades, account }: JournalInsightsProps) {
   const stats = useMemo(() => {
     const wins = trades.filter(t => t.profit_loss === 'Profit');
     const losses = trades.filter(t => t.profit_loss === 'Loss');
@@ -113,8 +130,34 @@ function JournalInsights({ trades }: { trades: Trade[] }) {
       { name: 'Losses', value: losses.length, color: 'hsl(var(--destructive))' },
       { name: 'Breakeven', value: breakeven.length, color: 'hsl(var(--muted-foreground))' },
     ].filter(d => d.value > 0);
-    return { total: trades.length, wins: wins.length, losses: losses.length, breakeven: breakeven.length, winRate, profitFactor, pieData };
+
+    // position_size (like every NUMERIC column from Postgres) can come back
+    // as a string, so it's coerced with Number(...) before comparing - same
+    // gotcha already fixed once for starting_balance in risk.ts.
+    const sizes = trades
+      .map(t => t.position_size != null ? Number(t.position_size) : null)
+      .filter((n): n is number => n != null && !isNaN(n));
+    const minSize = sizes.length > 0 ? Math.min(...sizes) : null;
+    const maxSize = sizes.length > 0 ? Math.max(...sizes) : null;
+
+    return {
+      total: trades.length, wins: wins.length, losses: losses.length, breakeven: breakeven.length,
+      winRate, profitFactor, pieData, minSize, maxSize,
+    };
   }, [trades]);
+
+  // Starting/current capital and the max-drawdown race reflect the whole
+  // account, not the filtered view above - computeDrawdown already knows
+  // how to turn a starting balance + every trade's gain_loss into a running
+  // equity curve (same helper the Performance page's drawdown chart uses).
+  const dd = useMemo(
+    () => computeDrawdown(allTrades, account?.starting_balance ?? null),
+    [allTrades, account?.starting_balance]
+  );
+  const startingBalance = account?.starting_balance != null ? Number(account.starting_balance) : null;
+  const maxDDLimitPct = account?.max_drawdown_limit_pct != null ? Number(account.max_drawdown_limit_pct) : null;
+  const maxDDLimitDollar = startingBalance != null && maxDDLimitPct != null ? startingBalance * (maxDDLimitPct / 100) : null;
+  const maxDDUsedPct = maxDDLimitDollar != null && maxDDLimitDollar > 0 ? (dd.currentDDDollar / maxDDLimitDollar) * 100 : null;
 
   if (trades.length === 0) return null;
 
@@ -124,6 +167,53 @@ function JournalInsights({ trades }: { trades: Trade[] }) {
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Trades</p>
         <p className="text-xl font-bold">{stats.total}</p>
       </div>
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[100px]">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Wins</p>
+        <p className="text-xl font-bold text-green-600 dark:text-green-400">{stats.wins}</p>
+      </div>
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[100px]">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Losses</p>
+        <p className="text-xl font-bold text-red-500 dark:text-red-400">{stats.losses}</p>
+      </div>
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[110px]">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Break Even</p>
+        <p className="text-xl font-bold text-muted-foreground">{stats.breakeven}</p>
+      </div>
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[120px]">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Starting Capital</p>
+        <p className="text-xl font-bold">{fmtMoney(startingBalance)}</p>
+      </div>
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[120px]">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Current Capital</p>
+        <p className={cn('text-xl font-bold', plColor(startingBalance != null ? dd.currentBalance - startingBalance : null))}>
+          {fmtMoney(dd.currentBalance)}
+        </p>
+      </div>
+      {(stats.minSize != null && stats.maxSize != null) && (
+        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[130px]">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Position Size %</p>
+          <p className="text-sm font-bold">
+            <span className="text-green-600 dark:text-green-400">▲ {fmtNum(stats.maxSize, 2)}%</span>
+            {' / '}
+            <span className="text-red-500 dark:text-red-400">▼ {fmtNum(stats.minSize, 2)}%</span>
+          </p>
+          <p className="text-[10px] text-muted-foreground">highest / lowest used</p>
+        </div>
+      )}
+      {maxDDLimitDollar != null && maxDDUsedPct != null && (
+        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[180px]">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Max Loss Race</p>
+            <span className={cn('text-[10px] font-mono font-semibold', raceColor(maxDDUsedPct).text)}>
+              {Math.min(999, maxDDUsedPct).toFixed(0)}% used
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full bg-muted overflow-hidden mt-1.5 mb-1.5">
+            <div className={cn('h-full transition-[width]', raceColor(maxDDUsedPct).bar)} style={{ width: `${Math.min(100, Math.max(0, maxDDUsedPct))}%` }} />
+          </div>
+          <p className="text-[10px] text-muted-foreground">{fmtMoney(dd.currentDDDollar)} of {fmtMoney(maxDDLimitDollar)} ({fmtNum(maxDDLimitPct, 1)}% max)</p>
+        </div>
+      )}
       <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[140px]">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Win Rate</p>
         <p className="text-xl font-bold">{stats.winRate}%</p>
@@ -493,7 +583,7 @@ export default function Journal() {
 
       <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={allTags} />
 
-      <JournalInsights trades={filtered} />
+      <JournalInsights trades={filtered} allTrades={trades} account={activeAccount} />
 
       <TableScrollBar containerRef={tableScrollRef} />
 
