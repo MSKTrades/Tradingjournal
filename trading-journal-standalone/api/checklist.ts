@@ -16,7 +16,11 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   if (req.method === 'GET') {
     if (req.query.resource === 'daily_routine') {
       const rows = await sql.unsafe('SELECT * FROM daily_routine_notes ORDER BY note_date DESC');
-      res.status(200).json(rows);
+      const normalized = rows.map((r: any) => ({
+        ...r,
+        points: typeof r.points === 'string' ? JSON.parse(r.points || '[]') : r.points ?? [],
+      }));
+      res.status(200).json(normalized);
       return;
     }
 
@@ -41,16 +45,22 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const resource = p.resource ?? 'checklist';
 
     if (resource === 'daily_routine') {
-      // Upsert by date — saving today's note again overwrites the same row
-      // (note_date is UNIQUE) instead of creating a duplicate for the day.
+      // Upsert by date — saving today's points again overwrites the same
+      // row (note_date is UNIQUE) instead of creating a duplicate for the
+      // day. The whole array is written each time (add/edit/delete a point
+      // all recompute the full list client-side and POST it here) rather
+      // than exposing per-point CRUD endpoints, since a day's points are
+      // few and this keeps the API surface — and the Vercel Hobby function
+      // count — small.
       const noteDate = String(p.note_date ?? '').trim();
       if (!noteDate) { res.status(400).json({ error: 'note_date is required' }); return; }
+      const points = Array.isArray(p.points) ? p.points : [];
       const rows = await sql.unsafe(
-        `INSERT INTO daily_routine_notes (note_date, text)
-         VALUES ($1, $2)
-         ON CONFLICT (note_date) DO UPDATE SET text = EXCLUDED.text, updated_at = now()
+        `INSERT INTO daily_routine_notes (note_date, points)
+         VALUES ($1, $2::jsonb)
+         ON CONFLICT (note_date) DO UPDATE SET points = EXCLUDED.points, updated_at = now()
          RETURNING *`,
-        [noteDate, p.text ?? '']
+        [noteDate, points]
       );
       res.status(200).json(rows[0]);
       return;
@@ -105,10 +115,10 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     }
 
     if (resource === 'daily_routine') {
-      // Editing a past day's note directly by id (the "today" editor uses
+      // Editing a past day's points directly by id (the "today" editor uses
       // the POST upsert above instead, keyed by date rather than id).
-      const text = String(req.body?.text ?? '');
-      await sql.unsafe('UPDATE daily_routine_notes SET text = $1, updated_at = now() WHERE id = $2', [text, id]);
+      const points = Array.isArray(req.body?.points) ? req.body.points : [];
+      await sql.unsafe('UPDATE daily_routine_notes SET points = $1::jsonb, updated_at = now() WHERE id = $2', [points, id]);
       res.status(200).json({ id });
       return;
     }
