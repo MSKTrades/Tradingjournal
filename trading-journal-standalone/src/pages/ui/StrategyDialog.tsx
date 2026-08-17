@@ -26,6 +26,7 @@ export type StrategyPayload = {
   split_percent: number | null;
   active: boolean;
   sort_order: number;
+  account_ids: number[]; // [] = every account (including new ones)
 };
 
 function emptyStrategy(): StrategyPayload {
@@ -40,6 +41,7 @@ function emptyStrategy(): StrategyPayload {
     split_percent: null,
     active: true,
     sort_order: 0,
+    account_ids: [],
   };
 }
 
@@ -56,6 +58,7 @@ function toPayload(s: Strategy): StrategyPayload {
     split_percent: s.split_percent != null ? Number(s.split_percent) : null,
     active: s.active,
     sort_order: s.sort_order,
+    account_ids: s.account_ids ?? [],
   };
 }
 
@@ -77,7 +80,7 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   // rest of the app (Journal, Strategy Detail) already scopes custom
   // columns, and means a condition field only shows up here if it's
   // actually one you've defined on the account you're working in.
-  const { activeAccountId } = useAccount();
+  const { accounts, activeAccountId } = useAccount();
   const { data: rawCols } = useFetch<CustomColumn[]>(`/columns?account_id=${activeAccountId ?? ''}`);
   const allFields = useMemo(() => {
     const custom = (rawCols ?? [])
@@ -105,6 +108,17 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   }
   function toggleDay(day: number) {
     setForm(prev => ({ ...prev, days: prev.days.includes(day) ? prev.days.filter(d => d !== day) : [...prev.days, day] }));
+  }
+  // Clicking a specific account switches out of "All Accounts" mode (an
+  // empty array) into a restricted list containing just that account;
+  // clicking "All Accounts" itself resets back to []. There's no separate
+  // on/off switch for the restriction - the array being empty or not IS the
+  // mode, same shape the account-scoped custom fields already settled on.
+  function toggleAccount(id: number) {
+    setForm(prev => ({
+      ...prev,
+      account_ids: prev.account_ids.includes(id) ? prev.account_ids.filter(a => a !== id) : [...prev.account_ids, id],
+    }));
   }
 
   async function handleSave() {
@@ -178,6 +192,31 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
             </div>
             <p className="text-xs text-muted-foreground mt-1.5">
               {form.days.length === 0 ? 'No days selected — all days allowed.' : `Only trades placed on ${form.days.length} selected day(s) qualify.`}
+            </p>
+          </div>
+
+          <div>
+            <Label className="mb-2 block">Applies To</Label>
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" onClick={() => setField('account_ids', [])}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                  form.account_ids.length === 0 ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-border hover:border-foreground/40'
+                }`}>
+                All Accounts
+              </button>
+              {accounts.map(a => (
+                <button key={a.id} type="button" onClick={() => toggleAccount(a.id)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                    form.account_ids.includes(a.id) ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-border hover:border-foreground/40'
+                  }`}>
+                  {a.name}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1.5">
+              {form.account_ids.length === 0
+                ? 'Counted on every account, including new ones you create later.'
+                : `Only counted on ${form.account_ids.length} selected account${form.account_ids.length === 1 ? '' : 's'} — won’t show up anywhere else, including new accounts.`}
             </p>
           </div>
 
