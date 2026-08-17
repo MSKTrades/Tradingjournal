@@ -328,11 +328,17 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         FROM trades
         WHERE account_id = $1
       `, [accountId]),
+      // account_ids = '[]' (the default every strategy is created with) means
+      // "every account" - only strategies deliberately restricted to a
+      // specific list (via the Strategies page) get filtered out here when
+      // this account isn't in that list. `@>` is jsonb containment: does the
+      // array contain this account's id as an element.
       sql.unsafe(`
-        SELECT * FROM strategies 
-        WHERE active = true 
+        SELECT * FROM strategies
+        WHERE active = true
+          AND (account_ids = '[]'::jsonb OR account_ids @> $1::jsonb)
         ORDER BY sort_order ASC, id ASC
-      `),
+      `, [JSON.stringify([accountId])]),
     ]);
 
     const trades = tradesRaw as Trade[];
