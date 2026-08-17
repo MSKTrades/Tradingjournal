@@ -165,6 +165,18 @@ export type Checklist = {
   items: ChecklistItem[];
 };
 
+// A free-text pre-trade routine note for one calendar day - "did I check
+// every pair for CISD, what's today's bias" and so on. One row per date;
+// saving today's note again just overwrites that same row (see the PUT
+// upsert in api/checklist.ts) rather than creating duplicates. Kept as a
+// running history you can scroll back through, not wiped each day.
+export type DailyRoutineNote = {
+  id: number;
+  note_date: string; // YYYY-MM-DD
+  text: string;
+  updated_at: string;
+};
+
 export type StrategyResult = {
   id: number;
   name: string;
