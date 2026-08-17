@@ -365,7 +365,18 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(await getTagGroups(sql));
       return;
     }
-    const rows = await sql.unsafe('SELECT * FROM custom_columns ORDER BY sort_order ASC, id ASC');
+    // Custom fields are scoped to a single account (see schema.sql's
+    // account-scoping migration) — tolerant of a missing/invalid account_id
+    // the same way GET /trades is, since this fires before the account
+    // context has resolved on first render; an empty list there just means
+    // "nothing to show yet", not an error.
+    const accountIdParam = req.query.account_id;
+    const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
+    if (!accountId || isNaN(accountId)) { res.status(200).json([]); return; }
+    const rows = await sql.unsafe(
+      'SELECT * FROM custom_columns WHERE account_id = $1 ORDER BY sort_order ASC, id ASC',
+      [accountId]
+    );
     res.status(200).json(rows);
   } else if (req.method === 'POST') {
     const p = req.body;
@@ -419,11 +430,19 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(rows[0]);
       return;
     }
-    const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM custom_columns');
+    const accountId = Number(p.account_id);
+    if (!accountId || isNaN(accountId)) { res.status(400).json({ error: 'account_id is required' }); return; }
+    const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM custom_columns WHERE account_id = $1', [accountId]);
     const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
+    // Same col_key derived on this account before (e.g. two fields that both
+    // normalize to the same key) just returns the existing row instead of
+    // erroring on the unique (account_id, col_key) index — same
+    // already-exists-is-a-no-op pattern used by tags/tag_groups above.
+    const existing = await sql.unsafe('SELECT * FROM custom_columns WHERE account_id = $1 AND col_key = $2', [accountId, p.col_key]);
+    if (existing.length > 0) { res.status(200).json(existing[0]); return; }
     const rows = await sql.unsafe(
-      `INSERT INTO custom_columns (name, col_key, data_type, sort_order) VALUES ($1, $2, $3, $4) RETURNING *`,
-      [p.name, p.col_key, p.data_type ?? 'text', nextOrder]
+      `INSERT INTO custom_columns (name, col_key, data_type, sort_order, account_id) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [p.name, p.col_key, p.data_type ?? 'text', nextOrder, accountId]
     );
     res.status(200).json(rows[0]);
   } else if (req.method === 'DELETE') {
