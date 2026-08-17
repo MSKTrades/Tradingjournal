@@ -154,14 +154,16 @@ export type ChecklistItem = {
 };
 
 // A named, reusable rule set (e.g. "London Reversal", "Breakout Setup").
-// Global across accounts, same as Strategy — one trader, several rule sets,
-// one per setup they trade. Managed on its own Checklists tab; picked per
-// trade from the trade screen.
+// Account-scoped the same way Strategy is (see account_ids below) — one
+// trader, several rule sets, some shared across every account and some
+// built for just one. Managed on its own Checklists tab; picked per trade
+// from the trade screen.
 export type Checklist = {
   id: number;
   name: string;
   sort_order: number;
   active: boolean;
+  account_ids: number[]; // [] = every account (including new ones) — same convention as Strategy.account_ids
   items: ChecklistItem[];
 };
 
