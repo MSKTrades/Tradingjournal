@@ -116,13 +116,25 @@ CREATE TABLE IF NOT EXISTS custom_columns (
 -- Checklists: named, reusable rule sets you define for yourself (e.g.
 -- "London Reversal", "Breakout Setup"). Global across accounts, same as
 -- `strategies` — one trader, several rule sets, one per setup they trade.
+-- account_ids works exactly like strategies.account_ids ([] = every
+-- account, including new ones; a non-empty array restricts a rule set to
+-- just those accounts) - same reasoning: a checklist built for one
+-- account's setup (e.g. a "London Reversal" rule set for a GBPUSD-only
+-- account) shouldn't clutter the grading picker or compliance stats on a
+-- completely different account.
 CREATE TABLE IF NOT EXISTS checklists (
   id          SERIAL PRIMARY KEY,
   name        TEXT NOT NULL,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   active      BOOLEAN NOT NULL DEFAULT true,
+  account_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Upgrade an existing database in place: every checklist that already
+-- exists gets the default '[]' (applies to every account), so nothing you've
+-- already built stops showing up anywhere until you deliberately restrict it.
+ALTER TABLE checklists ADD COLUMN IF NOT EXISTS account_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- Individual rules ("Waited for CISD?", "Risk <= 1%?") belonging to one
 -- checklist. Checked off per trade (see trades.checklist_results below)
