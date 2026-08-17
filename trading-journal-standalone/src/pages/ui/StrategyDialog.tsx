@@ -5,6 +5,7 @@ import { Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trash2, Plus } from 'lucide-react';
 import { Strategy, Condition, CustomColumn, CONDITION_FIELDS, CONDITION_FIELD_DUPLICATE_KEYS, OPS, WEEKDAYS } from '../data/types';
 import { useFetch } from '../../lib/api';
+import { useAccount } from '../../lib/accounts';
 
 type Props = {
   open: boolean;
@@ -71,7 +72,13 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   // CONDITION_FIELDS entry above (same underlying data, kept under its
   // original label so strategies saved before custom columns existed
   // still show the field they were built with).
-  const { data: rawCols } = useFetch<CustomColumn[]>('/columns');
+  // Custom fields are scoped per account now, so this pulls in whichever
+  // account is currently active in the account switcher - matches how the
+  // rest of the app (Journal, Strategy Detail) already scopes custom
+  // columns, and means a condition field only shows up here if it's
+  // actually one you've defined on the account you're working in.
+  const { activeAccountId } = useAccount();
+  const { data: rawCols } = useFetch<CustomColumn[]>(`/columns?account_id=${activeAccountId ?? ''}`);
   const allFields = useMemo(() => {
     const custom = (rawCols ?? [])
       .filter(c => c.data_type === 'number' && !CONDITION_FIELD_DUPLICATE_KEYS.has(c.col_key))
