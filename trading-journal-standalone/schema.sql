@@ -384,49 +384,6 @@ SET starting_balance = (
 WHERE starting_balance IS NULL
   AND EXISTS (SELECT 1 FROM trades WHERE trades.account_id = accounts.id);
 
--- ============================================================================
--- MIGRATION: move SMC-specific fields out of the built-in "SMC / ICT
--- Metrics" section and into ordinary user-defined custom fields. These are
--- specific to one trading strategy, not something every ForexForge user
--- needs — moving them to custom fields means new users don't see them by
--- default, while your existing values carry over untouched.
---
--- The original columns (cisd_break, total_inverse_candles, etc.) are left in
--- place but unused going forward, rather than dropped, so there's no risk to
--- historical data if anything needs to be cross-checked later.
--- ============================================================================
-INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order)
-VALUES
-  ('CISD Break',             'cisd_break',            'number', true, 100),
-  ('Total Inverse Candles',  'total_inverse_candles', 'number', true, 101),
-  ('Inverse Candle Size',    'inverse_candle_size',   'number', true, 102),
-  ('Distance from Asia H/L', 'distance_from_asia',    'number', true, 103),
-  ('Liquidity Swept',        'liquidity_swept',       'text',   true, 104),
-  ('Liquidity Swept No.',    'liquidity_swept_no',    'number', true, 105),
-  ('SL Pips',                'sl_pips',                'number', true, 106)
-ON CONFLICT (col_key) DO NOTHING;
-
-UPDATE trades SET extra_data = extra_data || jsonb_build_object('cisd_break', cisd_break)
-WHERE cisd_break IS NOT NULL AND NOT (extra_data ? 'cisd_break');
-
-UPDATE trades SET extra_data = extra_data || jsonb_build_object('total_inverse_candles', total_inverse_candles)
-WHERE total_inverse_candles IS NOT NULL AND NOT (extra_data ? 'total_inverse_candles');
-
-UPDATE trades SET extra_data = extra_data || jsonb_build_object('inverse_candle_size', inverse_candle_size)
-WHERE inverse_candle_size IS NOT NULL AND NOT (extra_data ? 'inverse_candle_size');
-
-UPDATE trades SET extra_data = extra_data || jsonb_build_object('distance_from_asia', distance_from_asia)
-WHERE distance_from_asia IS NOT NULL AND NOT (extra_data ? 'distance_from_asia');
-
-UPDATE trades SET extra_data = extra_data || jsonb_build_object('liquidity_swept', liquidity_swept)
-WHERE liquidity_swept IS NOT NULL AND NOT (extra_data ? 'liquidity_swept');
-
-UPDATE trades SET extra_data = extra_data || jsonb_build_object('liquidity_swept_no', liquidity_swept_no)
-WHERE liquidity_swept_no IS NOT NULL AND NOT (extra_data ? 'liquidity_swept_no');
-
-UPDATE trades SET extra_data = extra_data || jsonb_build_object('sl_pips', sl_pips)
-WHERE sl_pips IS NOT NULL AND NOT (extra_data ? 'sl_pips');
-
 -- Idempotent column addition for the Entry Type field (Market / Limit / Stop).
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_type TEXT;
 
@@ -615,3 +572,121 @@ DELETE FROM custom_columns WHERE account_id IS NULL;
 ALTER TABLE custom_columns ALTER COLUMN account_id SET NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS custom_columns_account_col_key_idx ON custom_columns (account_id, col_key);
+
+-- ============================================================================
+-- MIGRATION: move legacy built-in fields into per-account custom fields.
+-- Covers the original SMC/ICT fields (cisd_break, total_inverse_candles,
+-- inverse_candle_size, distance_from_asia, liquidity_swept,
+-- liquidity_swept_no, sl_pips) plus 15M Structure (structure_15m) and 1M WR
+-- (wr_1m), which used to be hardcoded into every account's trade form under
+-- "SMC / ICT Metrics" whether or not that account's strategy actually used
+-- them. As a custom field, each one only shows up on the accounts that
+-- actually have data in it - a brand-new account starts with none of them,
+-- and you can add back whichever ones a given strategy needs from the
+-- Custom Fields screen.
+--
+-- This runs AFTER the custom_columns_account_col_key_idx unique index above
+-- (account_id is guaranteed NOT NULL and that composite unique index is
+-- guaranteed to exist by this point) and inserts one row per account that
+-- actually has a trade using the field - derived directly from the old
+-- fixed column via GROUP BY, not from a global row that gets converted
+-- afterwards. That two-step "insert global, then convert" approach is what
+-- an earlier version of this migration did, and it broke on a second run
+-- against a fresh database (the global row would get deleted for having no
+-- matching accounts, then the next run tried to re-insert the same global
+-- row and hit the NOT NULL constraint on account_id). Deriving the
+-- per-account row directly, in one step, side-steps that entirely and is
+-- safe to run any number of times: ON CONFLICT (account_id, col_key) DO
+-- NOTHING means a field an account already has just gets skipped.
+--
+-- The original fixed columns (cisd_break, structure_15m, etc.) are left in
+-- place and untouched here - old trade rows keep their historical values
+-- there for safety, but the app itself now reads/writes these fields
+-- through extra_data (backfilled below) instead.
+-- ============================================================================
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT 'CISD Break', 'cisd_break', 'number', true, 100, t.account_id
+FROM trades t WHERE t.cisd_break IS NOT NULL
+GROUP BY t.account_id
+ON CONFLICT (account_id, col_key) DO NOTHING;
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT 'Total Inverse Candles', 'total_inverse_candles', 'number', true, 101, t.account_id
+FROM trades t WHERE t.total_inverse_candles IS NOT NULL
+GROUP BY t.account_id
+ON CONFLICT (account_id, col_key) DO NOTHING;
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT 'Inverse Candle Size', 'inverse_candle_size', 'number', true, 102, t.account_id
+FROM trades t WHERE t.inverse_candle_size IS NOT NULL
+GROUP BY t.account_id
+ON CONFLICT (account_id, col_key) DO NOTHING;
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT 'Distance from Asia H/L', 'distance_from_asia', 'number', true, 103, t.account_id
+FROM trades t WHERE t.distance_from_asia IS NOT NULL
+GROUP BY t.account_id
+ON CONFLICT (account_id, col_key) DO NOTHING;
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT 'Liquidity Swept', 'liquidity_swept', 'text', true, 104, t.account_id
+FROM trades t WHERE t.liquidity_swept IS NOT NULL
+GROUP BY t.account_id
+ON CONFLICT (account_id, col_key) DO NOTHING;
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT 'Liquidity Swept No.', 'liquidity_swept_no', 'number', true, 105, t.account_id
+FROM trades t WHERE t.liquidity_swept_no IS NOT NULL
+GROUP BY t.account_id
+ON CONFLICT (account_id, col_key) DO NOTHING;
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT 'SL Pips', 'sl_pips', 'number', true, 106, t.account_id
+FROM trades t WHERE t.sl_pips IS NOT NULL
+GROUP BY t.account_id
+ON CONFLICT (account_id, col_key) DO NOTHING;
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT '15M Structure', 'structure_15m', 'text', true, 107, t.account_id
+FROM trades t WHERE t.structure_15m IS NOT NULL
+GROUP BY t.account_id
+ON CONFLICT (account_id, col_key) DO NOTHING;
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT '1M WR', 'wr_1m', 'text', true, 108, t.account_id
+FROM trades t WHERE t.wr_1m IS NOT NULL
+GROUP BY t.account_id
+ON CONFLICT (account_id, col_key) DO NOTHING;
+
+-- Backfill trades.extra_data from each old fixed column so the Custom
+-- Fields inputs (which read/write extra_data, not these columns) show the
+-- historical values instead of appearing blank. Guarded by `NOT (extra_data
+-- ? key)` so a trade that's already been backfilled (or already had the key
+-- some other way) is left alone on re-runs.
+UPDATE trades SET extra_data = extra_data || jsonb_build_object('cisd_break', cisd_break)
+WHERE cisd_break IS NOT NULL AND NOT (extra_data ? 'cisd_break');
+
+UPDATE trades SET extra_data = extra_data || jsonb_build_object('total_inverse_candles', total_inverse_candles)
+WHERE total_inverse_candles IS NOT NULL AND NOT (extra_data ? 'total_inverse_candles');
+
+UPDATE trades SET extra_data = extra_data || jsonb_build_object('inverse_candle_size', inverse_candle_size)
+WHERE inverse_candle_size IS NOT NULL AND NOT (extra_data ? 'inverse_candle_size');
+
+UPDATE trades SET extra_data = extra_data || jsonb_build_object('distance_from_asia', distance_from_asia)
+WHERE distance_from_asia IS NOT NULL AND NOT (extra_data ? 'distance_from_asia');
+
+UPDATE trades SET extra_data = extra_data || jsonb_build_object('liquidity_swept', liquidity_swept)
+WHERE liquidity_swept IS NOT NULL AND NOT (extra_data ? 'liquidity_swept');
+
+UPDATE trades SET extra_data = extra_data || jsonb_build_object('liquidity_swept_no', liquidity_swept_no)
+WHERE liquidity_swept_no IS NOT NULL AND NOT (extra_data ? 'liquidity_swept_no');
+
+UPDATE trades SET extra_data = extra_data || jsonb_build_object('sl_pips', sl_pips)
+WHERE sl_pips IS NOT NULL AND NOT (extra_data ? 'sl_pips');
+
+UPDATE trades SET extra_data = extra_data || jsonb_build_object('structure_15m', structure_15m)
+WHERE structure_15m IS NOT NULL AND NOT (extra_data ? 'structure_15m');
+
+UPDATE trades SET extra_data = extra_data || jsonb_build_object('wr_1m', wr_1m)
+WHERE wr_1m IS NOT NULL AND NOT (extra_data ? 'wr_1m');
