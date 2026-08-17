@@ -10,6 +10,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       ...s,
       conditions: typeof s.conditions === 'string' ? JSON.parse(s.conditions || '[]') : s.conditions ?? [],
       days: typeof s.days === 'string' ? JSON.parse(s.days || '[]') : s.days ?? [],
+      account_ids: typeof s.account_ids === 'string' ? JSON.parse(s.account_ids || '[]') : s.account_ids ?? [],
       time_start: s.time_start ?? null,
       time_end: s.time_end ?? null,
     }));
@@ -21,8 +22,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const p = req.body;
     const rows = await sql.unsafe(
       `INSERT INTO strategies
-         (name, conditions, days, time_start, time_end, tp1_rr, tp2_rr, split_percent, sort_order, active)
-       VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, $6, $7, $8, $9, $10)
+         (name, conditions, days, time_start, time_end, tp1_rr, tp2_rr, split_percent, sort_order, active, account_ids)
+       VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
        RETURNING id`,
       [
         p.name,
@@ -38,6 +39,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.split_percent ?? null,
         p.sort_order ?? 0,
         p.active ?? true,
+        p.account_ids ?? [],
       ]
     );
     res.status(200).json(rows[0]);
@@ -54,8 +56,9 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       `UPDATE strategies SET
          name = $1, conditions = $2::jsonb, days = $3::jsonb,
          time_start = $4, time_end = $5,
-         tp1_rr = $6, tp2_rr = $7, split_percent = $8, active = $9, sort_order = $10
-       WHERE id = $11`,
+         tp1_rr = $6, tp2_rr = $7, split_percent = $8, active = $9, sort_order = $10,
+         account_ids = $11::jsonb
+       WHERE id = $12`,
       [
         p.name,
         p.conditions ?? [],
@@ -67,6 +70,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.split_percent ?? null,
         p.active ?? true,
         p.sort_order ?? 0,
+        p.account_ids ?? [],
         id,
       ]
     );
