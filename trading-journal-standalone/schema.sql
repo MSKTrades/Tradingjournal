@@ -162,12 +162,31 @@ END $$;
 -- row instead of piling up duplicates; kept as a running history on the
 -- Checklists page rather than wiped each day, since a past day's notes are
 -- useful to scroll back through later.
+-- `points` is a JSONB array of strings — "Checked EU/GU/UJ for CISD",
+-- "Confirmed daily bias", one entry per line item, rendered stacked one
+-- below the other (same "Rule 1: / Rule 2: ..." spirit as checklist rules)
+-- instead of a single free-text paragraph. `text` is kept around (unused by
+-- the app going forward) purely so nothing breaks for anyone upgrading from
+-- the very first version of this table; existing notes are copied into
+-- `points` as a single-item array below so a day you already logged doesn't
+-- just disappear once the UI switches to reading points.
 CREATE TABLE IF NOT EXISTS daily_routine_notes (
   id          SERIAL PRIMARY KEY,
   note_date   DATE NOT NULL UNIQUE,
   text        TEXT NOT NULL DEFAULT '',
+  points      JSONB NOT NULL DEFAULT '[]'::jsonb,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Upgrade an existing database in place: add `points` if this table was
+-- created before the point-system redesign, then backfill any pre-existing
+-- free-text note into it as a single point. The WHERE clause makes this
+-- safe to run every time schema.sql is re-applied — once a row has been
+-- backfilled its `points` is no longer '[]', so it's skipped on later runs.
+ALTER TABLE daily_routine_notes ADD COLUMN IF NOT EXISTS points JSONB NOT NULL DEFAULT '[]'::jsonb;
+UPDATE daily_routine_notes
+  SET points = jsonb_build_array(text)
+  WHERE points = '[]'::jsonb AND text IS NOT NULL AND btrim(text) <> '';
 
 CREATE INDEX IF NOT EXISTS idx_trades_placed_at ON trades (trade_placed_at);
 CREATE INDEX IF NOT EXISTS idx_trades_number    ON trades (trade_number);
