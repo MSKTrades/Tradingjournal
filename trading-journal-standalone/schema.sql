@@ -86,13 +86,19 @@ CREATE TABLE IF NOT EXISTS strategies (
   sort_order     INTEGER NOT NULL DEFAULT 0
 );
 
+-- Custom fields are scoped to a single account (account_id), not shared
+-- across every account you track - a fresh account starts with none, and a
+-- field you add while journaling one account never shows up on another. See
+-- the migration near the bottom of this file for how fields that predate
+-- this scoping (back when they were global) were carried forward.
 CREATE TABLE IF NOT EXISTS custom_columns (
   id          SERIAL PRIMARY KEY,
   name        TEXT NOT NULL,
-  col_key     TEXT NOT NULL UNIQUE,   -- key used inside trades.extra_data
+  col_key     TEXT NOT NULL,          -- key used inside trades.extra_data; unique per account, not globally (see index below)
   data_type   TEXT NOT NULL DEFAULT 'text',
   visible     BOOLEAN NOT NULL DEFAULT true,
-  sort_order  INTEGER NOT NULL DEFAULT 0
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  account_id  INTEGER REFERENCES accounts(id) ON DELETE CASCADE
 );
 
 -- Checklists: named, reusable rule sets you define for yourself (e.g.
@@ -512,3 +518,43 @@ ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+
+-- ============================================================================
+-- MIGRATION: scope custom_columns to a single account instead of showing
+-- every field on every account. Before this, a field you added anywhere
+-- (e.g. the SMC fields migrated in above) showed up on every account you
+-- track, including a brand-new one created to test a completely different
+-- strategy - not what you want when that new account doesn't use those
+-- fields at all.
+--
+-- Upgrade path for a database that already has global custom_columns rows
+-- (account_id IS NULL, from before this column existed): for each such
+-- field, look at which accounts actually have a trade that USES it (a trade
+-- whose extra_data contains that key) and give each of those accounts its
+-- own copy of the field. An account with zero trades referencing a given
+-- field - such as one you just created - gets none of them, exactly as if
+-- it always had its own blank set of custom fields. A field nobody had
+-- actually used on any account is dropped entirely rather than carried
+-- forward as dead weight; nothing is lost from any trade's data either way,
+-- since extra_data on the trades themselves is never touched here.
+--
+-- Self-guarding: once this has run, no custom_columns rows are left with
+-- account_id IS NULL, so re-running schema.sql again is a no-op here.
+-- ============================================================================
+ALTER TABLE custom_columns ADD COLUMN IF NOT EXISTS account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE;
+
+-- The old "one col_key for the whole app" uniqueness rule no longer applies
+-- now that the same field name/key can independently exist per account.
+ALTER TABLE custom_columns DROP CONSTRAINT IF EXISTS custom_columns_col_key_key;
+
+INSERT INTO custom_columns (name, col_key, data_type, visible, sort_order, account_id)
+SELECT DISTINCT c.name, c.col_key, c.data_type, c.visible, c.sort_order, t.account_id
+FROM custom_columns c
+JOIN trades t ON t.extra_data ? c.col_key
+WHERE c.account_id IS NULL;
+
+DELETE FROM custom_columns WHERE account_id IS NULL;
+
+ALTER TABLE custom_columns ALTER COLUMN account_id SET NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS custom_columns_account_col_key_idx ON custom_columns (account_id, col_key);
