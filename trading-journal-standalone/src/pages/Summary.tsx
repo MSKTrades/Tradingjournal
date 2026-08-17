@@ -728,8 +728,6 @@ export default function Summary() {
         </Button>
       </div>
 
-      <RiskGuardrail account={activeAccount} trades={trades} />
-
       <SessionsWidget />
 
       {totalTrades > 0 && (
@@ -814,6 +812,8 @@ export default function Summary() {
           </Table>
         </div>
       )}
+
+      <RiskGuardrail account={activeAccount} trades={trades} />
 
       <ChecklistCompliance trades={trades} checklists={checklists} />
 

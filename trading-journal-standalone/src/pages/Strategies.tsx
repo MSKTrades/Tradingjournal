@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../lib/ui/card';
 import { Badge, Switch } from '../lib/ui/form';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
+import { useAccount } from '../lib/accounts';
 import StrategyDialog, { StrategyPayload } from './ui/StrategyDialog';
 import { Strategy, Condition, FIELD_LABELS, WEEKDAYS } from './data/types';
 
@@ -14,6 +15,7 @@ function condLabel(c: Condition): string {
 
 export default function Strategies() {
   const { data: rawStrategies, loading, refetch } = useFetch<Strategy[]>('/strategies');
+  const { accounts } = useAccount();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editStrat, setEditStrat] = useState<Strategy | null>(null);
@@ -27,10 +29,19 @@ const strategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
   days: Array.isArray(s.days)
     ? s.days
     : (typeof s.days === 'string' ? JSON.parse(s.days || '[]') : []),
+  account_ids: Array.isArray(s.account_ids)
+    ? s.account_ids
+    : (typeof s.account_ids === 'string' ? JSON.parse(s.account_ids || '[]') : []),
   tp1_rr: Number(s.tp1_rr),
   tp2_rr: s.tp2_rr != null ? Number(s.tp2_rr) : null,
   split_percent: s.split_percent != null ? Number(s.split_percent) : null,
 }));
+
+  function accountsLabel(s: Strategy): string {
+    if (!s.account_ids || s.account_ids.length === 0) return 'All accounts';
+    const names = s.account_ids.map(id => accounts.find(a => a.id === id)?.name ?? 'Deleted account');
+    return names.join(', ');
+  }
 
   async function handleSave(payload: StrategyPayload) {
     if (payload.id != null) await api.put(`/strategies?id=${payload.id}`, payload);
@@ -116,6 +127,13 @@ const strategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div>
+                <p className="text-xs text-muted-foreground font-medium mb-1.5">Applies To</p>
+                <Badge variant={s.account_ids && s.account_ids.length > 0 ? 'outline' : 'secondary'} className="text-xs">
+                  {accountsLabel(s)}
+                </Badge>
               </div>
 
               <div>
