@@ -65,6 +65,11 @@ function toPayload(s: Strategy): StrategyPayload {
 export default function StrategyDialog({ open, strategy, onSave, onClose }: Props) {
   const [form, setForm] = useState<StrategyPayload>(emptyStrategy);
   const [saving, setSaving] = useState(false);
+  // If the save request fails (network hiccup, a stale/half-deployed API
+  // function, etc.) this surfaces it instead of the dialog just silently
+  // closing (or silently doing nothing) and leaving you to guess whether
+  // your change actually stuck - see handleSave below.
+  const [error, setError] = useState<string | null>(null);
 
   // Filter conditions can compare against ANY numeric field logged on a
   // trade, not just the three original SMC-specific ones - so besides the
@@ -90,7 +95,10 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   }, [rawCols]);
 
   useEffect(() => {
-    if (open) setForm(strategy ? toPayload(strategy) : emptyStrategy());
+    if (open) {
+      setForm(strategy ? toPayload(strategy) : emptyStrategy());
+      setError(null);
+    }
   }, [open, strategy]);
 
   function setField<K extends keyof StrategyPayload>(k: K, v: StrategyPayload[K]) {
@@ -123,8 +131,21 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
 
   async function handleSave() {
     setSaving(true);
-    try { await onSave(form); onClose(); }
-    finally { setSaving(false); }
+    setError(null);
+    try {
+      await onSave(form);
+      onClose();
+    } catch (err) {
+      // Previously an unhandled rejection here meant the dialog just sat
+      // there with no explanation - a failed save (e.g. the account_ids
+      // column missing because a schema migration wasn't re-run, or an
+      // API function that's out of sync with the frontend) looked
+      // identical to a successful one that silently reverted. Now it's
+      // shown inline so it's obvious the save didn't go through.
+      setError(err instanceof Error ? err.message : 'Failed to save strategy. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!open) return null;
@@ -288,6 +309,12 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
             <Switch checked={form.active} onCheckedChange={(v) => setField('active', v)} />
             <Label>Active (included in Summary)</Label>
           </div>
+
+          {error && (
+            <div className="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded p-2">
+              Couldn't save: {error}
+            </div>
+          )}
         </div>
 
         <DialogFooter>

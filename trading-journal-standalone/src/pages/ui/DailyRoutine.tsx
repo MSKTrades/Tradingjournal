@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../lib/ui/card';
 import { Button } from '../../lib/ui/button';
-import { Textarea } from '../../lib/ui/form';
-import { ClipboardList, Pencil, Trash2, X, Check } from 'lucide-react';
+import { Input } from '../../lib/ui/form';
+import { ClipboardList, Pencil, Trash2, X, Check, Plus } from 'lucide-react';
 import { api, useFetch } from '../../lib/api';
 import { DailyRoutineNote } from '../data/types';
 
@@ -23,63 +23,178 @@ function fmtNoteDate(isoDate: string): string {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// A free-text pre-trade routine note, one per calendar day - "checked every
-// pair for CISD, no setup yet", daily bias, whatever the morning routine is.
-// Lives on the Checklists page since it's the same "rules I hold myself to
-// before I trade" spirit as the rule-set checklists above it, just captured
-// as a running journal instead of a graded rule set.
+// A section identifier: 'today' for the always-on-top today box, or a past
+// note's numeric id for a History entry - used to key which row's add/edit
+// controls are currently open, since both sections share the same
+// add/edit/delete interaction.
+type Section = 'today' | number;
+
+// A single day's routine points, one below the other - "checked EU/GU/UJ for
+// CISD", "confirmed daily bias", etc. Same "Point 1: / Point 2: ..." stacked
+// list interaction as the rule-set checklists below it on this page, just
+// journaling a running history instead of grading a fixed rule set against a
+// trade. There's no dedicated per-point API - every add/edit/delete
+// recomputes the day's full points array client-side and upserts the whole
+// thing (POST for today, keyed by date; PUT by id for a past day), since a
+// day's list is short and this keeps the API surface (and the Vercel Hobby
+// function count) small.
 export default function DailyRoutine() {
   const { data: rawNotes, refetch } = useFetch<DailyRoutineNote[]>('/checklist?resource=daily_routine');
   const notes: DailyRoutineNote[] = rawNotes ?? [];
   const today = todayISODate();
 
   const todayNote = notes.find(n => n.note_date.slice(0, 10) === today) ?? null;
+  const todayPoints = todayNote?.points ?? [];
   const history = notes.filter(n => n.note_date.slice(0, 10) !== today);
 
-  // null = "untouched this session" - fall back to whatever's saved for
-  // today (once it's loaded) rather than an empty box wiping a note you
-  // already saved earlier today.
-  const [draft, setDraft] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingPoint, setEditingPoint] = useState<{ section: Section; index: number } | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [addingFor, setAddingFor] = useState<Section | null>(null);
+  const [newPointValue, setNewPointValue] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
 
-  const savedTodayText = todayNote?.text ?? '';
-  const todayText = draft ?? savedTodayText;
-  const dirty = todayText !== savedTodayText;
-
-  async function handleSaveToday() {
-    setSaving(true);
-    try {
-      await api.post('/checklist', { resource: 'daily_routine', note_date: today, text: todayText });
-      setDraft(null);
-      refetch();
-    } finally {
-      setSaving(false);
-    }
+  function pointsFor(section: Section): string[] {
+    return section === 'today' ? todayPoints : (history.find(n => n.id === section)?.points ?? []);
   }
 
-  async function handleEditHistory(id: number) {
-    setBusy(`edit-${id}`);
+  // Every mutation recomputes the full array and upserts it - POST
+  // (upsert-by-date) for today since it may not have a row yet, PUT-by-id
+  // for a past day that already exists.
+  async function savePoints(section: Section, points: string[]) {
+    if (section === 'today') {
+      await api.post('/checklist', { resource: 'daily_routine', note_date: today, points });
+    } else {
+      await api.put(`/checklist?resource=daily_routine&id=${section}`, { points });
+    }
+    refetch();
+  }
+
+  async function handleAddPoint(section: Section) {
+    const text = newPointValue.trim();
+    if (!text) return;
+    setBusy(`add-${section}`);
     try {
-      await api.put(`/checklist?resource=daily_routine&id=${id}`, { text: editValue });
-      setEditingId(null);
-      refetch();
+      await savePoints(section, [...pointsFor(section), text]);
+      setNewPointValue('');
+      setAddingFor(null);
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleDeleteHistory(id: number) {
-    if (!window.confirm("Delete this day's note? This can't be undone.")) return;
-    setBusy(`delete-${id}`);
+  async function handleEditPoint(section: Section, index: number) {
+    const text = editValue.trim();
+    if (!text) return;
+    setBusy(`edit-${section}-${index}`);
+    try {
+      await savePoints(section, pointsFor(section).map((p, i) => (i === index ? text : p)));
+      setEditingPoint(null);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDeletePoint(section: Section, index: number) {
+    setBusy(`delete-${section}-${index}`);
+    try {
+      await savePoints(section, pointsFor(section).filter((_, i) => i !== index));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDeleteNote(id: number) {
+    if (!window.confirm("Delete this day's routine? This can't be undone.")) return;
+    setBusy(`delete-note-${id}`);
     try {
       await api.del(`/checklist?resource=daily_routine&id=${id}`);
       refetch();
     } finally {
       setBusy(null);
     }
+  }
+
+  function renderPoints(section: Section, points: string[]) {
+    return (
+      <div className="flex flex-col gap-2">
+        {points.length === 0 && addingFor !== section && (
+          <p className="text-xs text-muted-foreground italic">No points yet</p>
+        )}
+
+        {points.map((point, idx) => (
+          editingPoint?.section === section && editingPoint.index === idx ? (
+            <div key={idx} className="flex items-center gap-1.5">
+              <span className="font-semibold text-muted-foreground text-sm shrink-0">Point {idx + 1}:</span>
+              <Input
+                autoFocus
+                value={editValue}
+                className="h-7 text-sm flex-1"
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditValue(e.target.value)}
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter') handleEditPoint(section, idx);
+                  if (e.key === 'Escape') setEditingPoint(null);
+                }}
+              />
+              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleEditPoint(section, idx)} disabled={busy === `edit-${section}-${idx}`}>
+                <Check className="w-3.5 h-3.5" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setEditingPoint(null)}>
+                <X className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <div key={idx} className="flex items-center gap-2 group">
+              <span className="text-sm flex-1">
+                <span className="font-semibold text-muted-foreground mr-1.5">Point {idx + 1}:</span>
+                {point}
+              </span>
+              <button
+                type="button"
+                onClick={() => { setEditingPoint({ section, index: idx }); setEditValue(point); }}
+                className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeletePoint(section, idx)}
+                disabled={busy === `delete-${section}-${idx}`}
+                className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )
+        ))}
+
+        {addingFor === section ? (
+          <div className="flex items-center gap-1.5 border border-dashed border-border rounded-md p-1.5 mt-1">
+            <Input
+              autoFocus
+              value={newPointValue}
+              placeholder="e.g. Checked EU/GU/UJ for CISD"
+              className="h-7 text-xs flex-1"
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPointValue(e.target.value)}
+              onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && handleAddPoint(section)}
+            />
+            <Button size="sm" className="h-7" onClick={() => handleAddPoint(section)} disabled={!newPointValue.trim() || busy === `add-${section}`}>
+              Add
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => { setAddingFor(null); setNewPointValue(''); }}>
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => { setAddingFor(section); setNewPointValue(''); }}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mt-1 self-start"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add a point
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -90,23 +205,13 @@ export default function DailyRoutine() {
           <CardTitle className="text-base font-bold">Daily Routine</CardTitle>
         </div>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Notes on what you checked before trading today — pairs scanned, whether CISD's formed, daily bias, anything else worth remembering.
+          What you check before trading today — pairs scanned, whether CISD's formed, daily bias, anything else worth remembering, one point at a time.
         </p>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 pt-0">
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-1.5">Today — {fmtNoteDate(today)}</p>
-          <Textarea
-            rows={4}
-            placeholder="e.g. Checked EURUSD, GBPUSD, USDJPY for CISD — GU formed one on 15M, waiting for retrace into POI. Daily bias: bullish."
-            value={todayText}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value)}
-          />
-          <div className="flex justify-end mt-2">
-            <Button size="sm" onClick={handleSaveToday} disabled={saving || !dirty}>
-              {saving ? 'Saving…' : 'Save'}
-            </Button>
-          </div>
+          {renderPoints('today', todayPoints)}
         </div>
 
         {history.length > 0 && (
@@ -114,38 +219,19 @@ export default function DailyRoutine() {
             <p className="text-xs font-medium text-muted-foreground mb-1.5">History</p>
             <div className="flex flex-col gap-2 max-h-96 overflow-y-auto pr-1">
               {history.map(n => (
-                <div key={n.id} className="rounded-md border border-border bg-muted/30 p-2.5 group">
-                  <div className="flex items-start justify-between gap-2">
+                <div key={n.id} className="rounded-md border border-border bg-muted/30 p-2.5 group/note">
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
                     <p className="text-xs font-medium text-muted-foreground">{fmtNoteDate(n.note_date)}</p>
-                    {editingId !== n.id && (
-                      <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button type="button" onClick={() => { setEditingId(n.id); setEditValue(n.text); }} className="text-muted-foreground hover:text-foreground">
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button type="button" onClick={() => handleDeleteHistory(n.id)} disabled={busy === `delete-${n.id}`} className="text-muted-foreground hover:text-destructive">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteNote(n.id)}
+                      disabled={busy === `delete-note-${n.id}`}
+                      className="text-muted-foreground hover:text-destructive opacity-0 group-hover/note:opacity-100 transition-opacity shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  {editingId === n.id ? (
-                    <div className="flex flex-col gap-2 mt-1.5">
-                      <Textarea rows={3} autoFocus className="text-sm" value={editValue}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditValue(e.target.value)} />
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={() => handleEditHistory(n.id)} disabled={busy === `edit-${n.id}`}>
-                          <Check className="w-3.5 h-3.5 mr-1" /> Save
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                          <X className="w-3.5 h-3.5 mr-1" /> Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm whitespace-pre-wrap mt-1">
-                      {n.text ? n.text : <span className="italic text-muted-foreground">No note</span>}
-                    </p>
-                  )}
+                  {renderPoints(n.id, n.points ?? [])}
                 </div>
               ))}
             </div>
