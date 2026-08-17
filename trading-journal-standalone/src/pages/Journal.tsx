@@ -110,8 +110,8 @@ function raceColor(pct: number): { bar: string; text: string } {
 }
 
 type JournalInsightsProps = {
-  trades: Trade[];      // the filtered/visible set - Total Trades, win/loss counts, and position size all track whatever the filter bar currently shows
-  allTrades: Trade[];   // every trade on this account, unfiltered - capital and the drawdown race need the account's real running balance, not just a filtered slice of it
+  trades: Trade[];      // the filtered/visible set - Total Trades and the win/loss counts track whatever the filter bar currently shows
+  allTrades: Trade[];   // every trade on this account, unfiltered - capital, Total P/L, and the drawdown race need the account's real running balance, not just a filtered slice of it
   account: Account | null;
 };
 
@@ -131,18 +131,9 @@ function JournalInsights({ trades, allTrades, account }: JournalInsightsProps) {
       { name: 'Breakeven', value: breakeven.length, color: 'hsl(var(--muted-foreground))' },
     ].filter(d => d.value > 0);
 
-    // position_size (like every NUMERIC column from Postgres) can come back
-    // as a string, so it's coerced with Number(...) before comparing - same
-    // gotcha already fixed once for starting_balance in risk.ts.
-    const sizes = trades
-      .map(t => t.position_size != null ? Number(t.position_size) : null)
-      .filter((n): n is number => n != null && !isNaN(n));
-    const minSize = sizes.length > 0 ? Math.min(...sizes) : null;
-    const maxSize = sizes.length > 0 ? Math.max(...sizes) : null;
-
     return {
       total: trades.length, wins: wins.length, losses: losses.length, breakeven: breakeven.length,
-      winRate, profitFactor, pieData, minSize, maxSize,
+      winRate, profitFactor, pieData,
     };
   }, [trades]);
 
@@ -155,6 +146,10 @@ function JournalInsights({ trades, allTrades, account }: JournalInsightsProps) {
     [allTrades, account?.starting_balance]
   );
   const startingBalance = account?.starting_balance != null ? Number(account.starting_balance) : null;
+  const totalPLDollar = startingBalance != null ? dd.currentBalance - startingBalance : null;
+  const totalPLPct = startingBalance != null && startingBalance !== 0 && totalPLDollar != null
+    ? (totalPLDollar / startingBalance) * 100
+    : null;
   const maxDDLimitPct = account?.max_drawdown_limit_pct != null ? Number(account.max_drawdown_limit_pct) : null;
   const maxDDLimitDollar = startingBalance != null && maxDDLimitPct != null ? startingBalance * (maxDDLimitPct / 100) : null;
   const maxDDUsedPct = maxDDLimitDollar != null && maxDDLimitDollar > 0 ? (dd.currentDDDollar / maxDDLimitDollar) * 100 : null;
@@ -185,21 +180,15 @@ function JournalInsights({ trades, allTrades, account }: JournalInsightsProps) {
       </div>
       <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[120px]">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Current Capital</p>
-        <p className={cn('text-xl font-bold', plColor(startingBalance != null ? dd.currentBalance - startingBalance : null))}>
+        <p className={cn('text-xl font-bold', plColor(totalPLDollar))}>
           {fmtMoney(dd.currentBalance)}
         </p>
       </div>
-      {(stats.minSize != null && stats.maxSize != null) && (
-        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[130px]">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Position Size %</p>
-          <p className="text-sm font-bold">
-            <span className="text-green-600 dark:text-green-400">▲ {fmtNum(stats.maxSize, 2)}%</span>
-            {' / '}
-            <span className="text-red-500 dark:text-red-400">▼ {fmtNum(stats.minSize, 2)}%</span>
-          </p>
-          <p className="text-[10px] text-muted-foreground">highest / lowest used</p>
-        </div>
-      )}
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[130px]">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total P/L</p>
+        <p className={cn('text-xl font-bold', plColor(totalPLDollar))}>{fmtMoney(totalPLDollar)}</p>
+        <p className={cn('text-[10px]', plColor(totalPLDollar))}>{fmtPct(totalPLPct)}</p>
+      </div>
       {maxDDLimitDollar != null && maxDDUsedPct != null && (
         <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[180px]">
           <div className="flex items-baseline justify-between gap-2">
