@@ -155,6 +155,20 @@ BEGIN
   END IF;
 END $$;
 
+-- Daily Routine: a free-text note per calendar day for whatever pre-trade
+-- checks you want to log before placing anything — "checked EU/GU/UJ for
+-- CISD, no setup yet", daily bias, which pairs you scanned, etc. One row per
+-- date (note_date is UNIQUE) so saving today's note again upserts that same
+-- row instead of piling up duplicates; kept as a running history on the
+-- Checklists page rather than wiped each day, since a past day's notes are
+-- useful to scroll back through later.
+CREATE TABLE IF NOT EXISTS daily_routine_notes (
+  id          SERIAL PRIMARY KEY,
+  note_date   DATE NOT NULL UNIQUE,
+  text        TEXT NOT NULL DEFAULT '',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_trades_placed_at ON trades (trade_placed_at);
 CREATE INDEX IF NOT EXISTS idx_trades_number    ON trades (trade_number);
 
