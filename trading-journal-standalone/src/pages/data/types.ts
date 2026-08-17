@@ -96,6 +96,7 @@ export type Strategy = {
   split_percent: number | null;
   active: boolean;
   sort_order: number;
+  account_ids: number[]; // which accounts this strategy is counted on; [] = every account, including new ones you create later
 };
 
 export type CustomColumn = {
