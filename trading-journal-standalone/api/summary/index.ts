@@ -333,12 +333,21 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       // specific list (via the Strategies page) get filtered out here when
       // this account isn't in that list. `@>` is jsonb containment: does the
       // array contain this account's id as an element.
+      //
+      // The param MUST be a raw JS array, not JSON.stringify()'d - binding a
+      // value to a `::jsonb`-cast placeholder makes postgres.js serialize it
+      // itself, so JSON.stringify([accountId]) here sent the JSON *string*
+      // "[2]" instead of the JSON *array* [2]. `@>` containment against a
+      // string never matches, so this was silently hiding every
+      // account-scoped strategy from every account's Summary page,
+      // including the one it was actually scoped to - not just from other
+      // accounts as intended.
       sql.unsafe(`
         SELECT * FROM strategies
         WHERE active = true
           AND (account_ids = '[]'::jsonb OR account_ids @> $1::jsonb)
         ORDER BY sort_order ASC, id ASC
-      `, [JSON.stringify([accountId])]),
+      `, [[accountId]]),
     ]);
 
     const trades = tradesRaw as Trade[];
