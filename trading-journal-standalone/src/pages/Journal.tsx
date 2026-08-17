@@ -321,7 +321,7 @@ function JournalPagination({
 export default function Journal() {
   const { accounts, loading: accountsLoading, activeAccountId, activeAccount } = useAccount();
   const { data: rawTrades, loading, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
-  const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>('/columns');
+  const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>(`/columns?account_id=${activeAccountId ?? ''}`);
   const { data: rawChecklists } = useFetch<Checklist[]>('/checklist');
   const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
   const allTags: Tag[] = rawTags ?? [];
@@ -443,7 +443,9 @@ export default function Journal() {
 
   async function handleAddCol(name: string, type: string) {
     const col_key = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    await api.post('/columns', { name, col_key, data_type: type });
+    // Scoped to whichever account is currently active — a field added here
+    // only shows up on this account going forward, not every account.
+    await api.post('/columns', { name, col_key, data_type: type, account_id: activeAccountId });
     refetchCols();
   }
 

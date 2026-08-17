@@ -38,7 +38,7 @@ export default function StrategyDetail() {
 
   const { data: resultsData, loading: resultsLoading } = useFetch<StrategyResult[]>(`/summary?account_id=${activeAccountId ?? ''}`);
   const { data: rawTrades, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
-  const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>('/columns');
+  const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>(`/columns?account_id=${activeAccountId ?? ''}`);
   const { data: rawChecklists } = useFetch<Checklist[]>('/checklist');
 
   const results: StrategyResult[] = resultsData ?? [];
@@ -101,7 +101,7 @@ export default function StrategyDetail() {
 
   async function handleAddCol(name: string, type: string) {
     const col_key = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    await api.post('/columns', { name, col_key, data_type: type });
+    await api.post('/columns', { name, col_key, data_type: type, account_id: activeAccountId });
     refetchCols();
   }
 
