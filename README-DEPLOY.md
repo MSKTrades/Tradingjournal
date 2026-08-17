@@ -1,54 +1,57 @@
-# ForexForge — Risk Guardrail moved + Strategies scoped per account
+# ForexForge — Checklist rule editing fixed + new Daily Routine notes
 
-Seven files changed:
+Five files changed:
 
 ```
 trading-journal-standalone/
-├── schema.sql                          (changed — strategies get an account_ids column)
-├── api/strategies.ts                   (changed — reads/saves account_ids)
-├── api/summary/index.ts                (changed — filters strategies by account_ids)
-├── src/pages/data/types.ts             (changed — Strategy now carries account_ids)
-├── src/pages/Summary.tsx               (changed — Risk Guardrail moved below the strategy table)
-├── src/pages/Strategies.tsx            (changed — shows which accounts each strategy applies to)
-└── src/pages/ui/StrategyDialog.tsx     (changed — new "Applies To" picker)
+├── schema.sql                          (changed — new daily_routine_notes table)
+├── api/checklist.ts                    (changed — item editing + Daily Routine endpoints)
+├── src/pages/data/types.ts             (changed — new DailyRoutineNote type)
+├── src/pages/Checklists.tsx            (changed — rule text is now editable; renders Daily Routine)
+└── src/pages/ui/DailyRoutine.tsx       (NEW — the Daily Routine widget)
 ```
 
-## What changed
+## 1. Checklist rule editing — bug fix
 
-**1. Risk Guardrail moved.** On the Summary page, the Risk Guardrail widget (Daily Loss / Max Drawdown bars) used to sit at the very top, above Trading Sessions and the strategy performance summary. It now sits right below the strategy summary table (or the "no active strategies" message when there isn't one yet), just above Market Sentiment.
+Once you added a rule to a checklist (like "Wait for price to reach POI on 15M" in Fractal Model), there was no way to fix a typo or reword it — only delete and re-add from scratch. Each rule now has a pencil icon next to the X (hover over the rule to see both) that lets you edit its text in place, Enter to save or Escape to cancel — same pattern as renaming a checklist itself.
 
-**2. Strategies can now be scoped to specific accounts.** This is the fix for strategies "coming across" into a brand-new account. Every strategy (edit it from the Strategies page) now has an **Applies To** picker: "All Accounts" (the default — behaves exactly like today, counted everywhere including new accounts) or one or more specific accounts. Restrict a strategy to just the account(s) it was actually built for, and it stops being evaluated against every other account — including new ones you create later.
+## 2. Daily Routine — new notes widget
 
-Nothing changes automatically for strategies you already have: every existing strategy defaults to "All Accounts" (same as today), so nothing disappears on its own. You decide which strategies to restrict, and to which accounts, from the Strategies page whenever you're ready.
+A new card at the top of the Checklists page, above your rule-set checklists. It's a free-text notepad for whatever you want to check before placing any trade that day — which pairs you scanned, whether CISD's formed anywhere, your daily bias, anything else worth remembering.
 
-The Strategies page itself now shows an "Applies To" badge on every strategy card so you can see its scope at a glance without opening the editor.
+- **Today's box** is always at the top, pre-filled with whatever you already saved for today (if anything) — type and hit Save to update it.
+- **History** below it keeps every previous day's note, most recent first, so you can scroll back through your own routine over time. Each past entry has its own edit (pencil) and delete icons on hover, in case you want to fix or clear an old one.
+- Saving today's note again just overwrites today's entry — it won't create duplicates for the same day.
 
-## 1. Apply the files
+This is entirely separate from the rule-set checklists (Fractal Model, etc.) below it — those are still for grading individual trades against fixed rules; Daily Routine is just a running journal, not something a trade gets checked against.
 
-Same as always: GitHub's "Add files via upload" into `MSKTrades/Tradingjournal`, inside `trading-journal-standalone/`, preserving the folder paths above — this overwrites the seven files listed.
+## 3. Apply the files
 
-## 2. Re-run schema.sql in Neon
+Same as always: GitHub's "Add files via upload" into `MSKTrades/Tradingjournal`, inside `trading-journal-standalone/`, preserving the folder paths above.
 
-One new column, safe and idempotent to add:
+## 4. Re-run schema.sql in Neon
+
+One new table:
 
 ```sql
-ALTER TABLE strategies ADD COLUMN IF NOT EXISTS account_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+CREATE TABLE IF NOT EXISTS daily_routine_notes (
+  id          SERIAL PRIMARY KEY,
+  note_date   DATE NOT NULL UNIQUE,
+  text        TEXT NOT NULL DEFAULT '',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
-Open your Neon SQL editor and run the full `schema.sql` again. Every existing strategy gets `[]` (All Accounts) automatically — nothing about your current strategy results changes until you deliberately restrict one.
+Open your Neon SQL editor and run the full `schema.sql` again — safe and idempotent, doesn't touch anything else.
 
-## 3. Environment variables
+## 5. Environment variables
 
 None needed.
 
-## 4. Redeploy on Vercel
+## 6. Redeploy on Vercel
 
-Trigger a redeploy the same way as before.
-
-## 5. How to use it
-
-Go to **Strategies**, click the pencil on any strategy, and look for the new **Applies To** section (right below Days Traded). Click a specific account to restrict the strategy to just that one (click more than one if it should apply to a few but not all); click **All Accounts** any time to lift the restriction again.
+Trigger a redeploy the same way as before. No new serverless function was added — Daily Routine and the rule-editing fix both piggyback on the existing `/api/checklist` endpoint, so you're still safely under Vercel's 12-function cap.
 
 ## Verified
 
-Checked in a real browser with two mock accounts and two mock strategies (one left at "All Accounts", one restricted to just "Main Account"): the Strategies page correctly showed "All accounts" and "Main Account" badges on the respective cards, and the edit dialog's Applies To picker correctly highlighted the right pill(s) and updated its helper text live. Also confirmed the Summary page now renders Risk Guardrail after the strategy summary section (both when a strategy table is present and when the "no active strategies" empty state shows instead), right before Market Sentiment.
+Checked in a real browser: hovering a rule now shows both a pencil and an X, clicking the pencil pre-fills an editable input with the rule's current text, and pressing Enter saved it — confirmed the PUT request carried the exact new text and the rule updated on screen immediately. Also typed and saved a Daily Routine note for today and confirmed the POST request carried the right date and text, and the note appeared correctly formatted. Two mock history entries (with dates like "Sun, Aug 16, 2026") rendered correctly below today's box.
