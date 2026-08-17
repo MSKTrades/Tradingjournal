@@ -1,27 +1,54 @@
-# ForexForge — More stats on the Journal top bar
+# ForexForge — Risk Guardrail moved + Strategies scoped per account
 
-One file changed: `src/pages/Journal.tsx`.
+Seven files changed:
+
+```
+trading-journal-standalone/
+├── schema.sql                          (changed — strategies get an account_ids column)
+├── api/strategies.ts                   (changed — reads/saves account_ids)
+├── api/summary/index.ts                (changed — filters strategies by account_ids)
+├── src/pages/data/types.ts             (changed — Strategy now carries account_ids)
+├── src/pages/Summary.tsx               (changed — Risk Guardrail moved below the strategy table)
+├── src/pages/Strategies.tsx            (changed — shows which accounts each strategy applies to)
+└── src/pages/ui/StrategyDialog.tsx     (changed — new "Applies To" picker)
+```
 
 ## What changed
 
-The stat row at the top of the Journal page (Total Trades, Win Rate, Profit Factor) now has these added, in this order:
+**1. Risk Guardrail moved.** On the Summary page, the Risk Guardrail widget (Daily Loss / Max Drawdown bars) used to sit at the very top, above Trading Sessions and the strategy performance summary. It now sits right below the strategy summary table (or the "no active strategies" message when there isn't one yet), just above Market Sentiment.
 
-1. **Total Wins** / **Total Losses** / **Total Break Even** — raw counts, colored green/red/muted the same way the rest of the app colors outcomes.
-2. **Starting Capital** — the account's starting balance.
-3. **Current Capital** — the account's live running balance (starting balance plus every trade's P/L so far, same math the Performance page's drawdown chart and the Position Size Calculator already use), colored green if you're up overall and red if you're down.
-4. **Total P/L** — the account's total profit/loss so far, in dollars and percent (Current Capital minus Starting Capital), colored the same way.
-5. **Max Loss Race** — how much of your account's Max Drawdown Limit % (set on the account when you created or edited it) you've used up so far, as a progress bar plus the dollar figures — the same "race against the limit" idea as the Risk Guardrail widget on the Summary page, just surfaced here too since this is where you're actually reviewing trades. Only shows up if that account has a Max Drawdown Limit % set — if you haven't set one, this card just doesn't appear (same as Risk Guardrail).
+**2. Strategies can now be scoped to specific accounts.** This is the fix for strategies "coming across" into a brand-new account. Every strategy (edit it from the Strategies page) now has an **Applies To** picker: "All Accounts" (the default — behaves exactly like today, counted everywhere including new accounts) or one or more specific accounts. Restrict a strategy to just the account(s) it was actually built for, and it stops being evaluated against every other account — including new ones you create later.
 
-(An earlier version of this delivery had a "Position Size %" card showing your highest/lowest position size used — swapped out for Total P/L per your last message, since with most accounts sizing a fixed % per trade that card just showed the same number twice and wasn't useful. The Wins/Losses donut chart that used to sit next to Profit Factor has also been removed per your request — its numbers are already covered by the Total Wins/Losses/Break Even cards and the Win Rate card's "W/L/BE" breakdown, so nothing is lost.)
+Nothing changes automatically for strategies you already have: every existing strategy defaults to "All Accounts" (same as today), so nothing disappears on its own. You decide which strategies to restrict, and to which accounts, from the Strategies page whenever you're ready.
 
-One behavior worth knowing: Total Trades and Total Wins/Losses/Break Even reflect whatever the filter bar above them is currently set to (Assets/Side/Outcome/Tags/Day/date range) — same as Win Rate and Profit Factor already did. Starting Capital, Current Capital, Total P/L, and Max Loss Race always reflect the whole account, regardless of filters, since a partial/filtered view of your trades wouldn't give you a real balance or P/L number.
+The Strategies page itself now shows an "Applies To" badge on every strategy card so you can see its scope at a glance without opening the editor.
 
-## Apply the file
+## 1. Apply the files
 
-Same as always: GitHub's "Add files via upload" into `MSKTrades/Tradingjournal`, inside `trading-journal-standalone/src/pages/`, overwriting the existing `Journal.tsx`.
+Same as always: GitHub's "Add files via upload" into `MSKTrades/Tradingjournal`, inside `trading-journal-standalone/`, preserving the folder paths above — this overwrites the seven files listed.
 
-No schema changes, no environment variables, no other files touched.
+## 2. Re-run schema.sql in Neon
+
+One new column, safe and idempotent to add:
+
+```sql
+ALTER TABLE strategies ADD COLUMN IF NOT EXISTS account_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+```
+
+Open your Neon SQL editor and run the full `schema.sql` again. Every existing strategy gets `[]` (All Accounts) automatically — nothing about your current strategy results changes until you deliberately restrict one.
+
+## 3. Environment variables
+
+None needed.
+
+## 4. Redeploy on Vercel
+
+Trigger a redeploy the same way as before.
+
+## 5. How to use it
+
+Go to **Strategies**, click the pencil on any strategy, and look for the new **Applies To** section (right below Days Traded). Click a specific account to restrict the strategy to just that one (click more than one if it should apply to a few but not all); click **All Accounts** any time to lift the restriction again.
 
 ## Verified
 
-Checked in a real browser with mock data (a 3-trade account, $15,000 starting balance, 10% Max Drawdown Limit): Total Wins/Losses/Break Even counted correctly, Starting Capital showed $15,000, Current Capital showed $21,422 in green, and Total P/L showed +$6,422 (+42.81%) in green — matching Current minus Starting Capital exactly. Max Loss Race showed 0% used since this run had no live drawdown below peak. Also checked light and dark mode — same layout, correct contrast.
+Checked in a real browser with two mock accounts and two mock strategies (one left at "All Accounts", one restricted to just "Main Account"): the Strategies page correctly showed "All accounts" and "Main Account" badges on the respective cards, and the edit dialog's Applies To picker correctly highlighted the right pill(s) and updated its helper text live. Also confirmed the Summary page now renders Risk Guardrail after the strategy summary section (both when a strategy table is present and when the "no active strategies" empty state shows instead), right before Market Sentiment.
