@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3 } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
-import { computeDrawdown, positionSizeLots } from '../data/risk';
+import { computeDrawdown, positionSizeLots, slPipsFromPrices } from '../data/risk';
 import { useAccount } from '../../lib/accounts';
 import { api, useFetch } from '../../lib/api';
 import { cn } from '../../lib/utils';
@@ -220,12 +220,38 @@ export default function TradeDetailPanel({
   const { data: rawTagGroups, refetch: refetchTagGroups } = useFetch<TagGroup[]>('/columns?resource=tag_groups');
   const tagGroups: TagGroup[] = rawTagGroups ?? [];
 
+  // Guards the SL-distance auto-calc effect below against firing the moment
+  // a trade loads: opening an existing trade (or switching between trades)
+  // replaces `form` wholesale, which looks identical to the user having just
+  // typed new Entry/SL prices - without this flag, every trade you opened
+  // would have its saved SL Distance silently recomputed and overwritten
+  // from the raw price difference the instant the panel opened, even if the
+  // real distance included spread/slippage the naive calc can't see.
+  const skipNextAutoSlPips = useRef(true);
+
   useEffect(() => {
     if (open) {
       setForm(trade ? fromTrade(trade) : empty(activeAccountId ?? 0, nextTradeNumber));
       setSaveError(null);
+      skipNextAutoSlPips.current = true;
     }
   }, [open, trade, activeAccountId, nextTradeNumber]);
+
+  // Rule: once both Entry Price and SL Price are filled in, SL Distance
+  // (pips) keeps itself in sync with them automatically. You can still
+  // hand-edit SL Distance afterward - that edit sticks until you change
+  // either price again, at which point it's recalculated fresh.
+  useEffect(() => {
+    if (skipNextAutoSlPips.current) {
+      skipNextAutoSlPips.current = false;
+      return;
+    }
+    const pips = slPipsFromPrices(form.entry_price, form.sl_price, form.coin_token);
+    if (pips != null) {
+      setForm(p => (p.entry_price === form.entry_price && p.sl_price === form.sl_price ? { ...p, sl_pips: pips } : p));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.entry_price, form.sl_price, form.coin_token]);
 
   const activeChecklist = checklists.find(c => c.id === form.checklist_id) ?? null;
 
@@ -432,36 +458,14 @@ export default function TradeDetailPanel({
             <Section title="Stop Loss / Take Profit">
               <NumField label="SL Price" {...numField('sl_price')} step={0.00001} placeholder="e.g. 1.0810" />
               <NumField label="TP Price" {...numField('tp_price')} step={0.00001} placeholder="e.g. 1.0910" />
-              <NumField label="SL Distance (pips)" {...numField('sl_pips')} step={0.1} min={0} placeholder="e.g. 18" />
-            </Section>
-
-            <Section title="Exit">
-              <FieldRow label="Date Closed">
-                <Input type="date" value={form.date_closed ?? ''}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('date_closed', e.target.value || null)} />
-              </FieldRow>
-              <FieldRow label="Time Closed">
-                <Input type="time" value={form.time_closed ?? ''}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('time_closed', e.target.value || null)} />
-              </FieldRow>
-              <FieldRow label="Closed Session">
-                <Select value={form.closed_session ?? ''} onChange={e => set('closed_session', e.target.value || null)}>
-                  <option value="">Select…</option>
-                  {SESSIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                </Select>
-              </FieldRow>
-            </Section>
-
-            <Section title="Result">
-              <FieldRow label="Result">
-                <Select value={form.profit_loss ?? ''} onChange={e => set('profit_loss', e.target.value || null)}>
-                  <option value="">Select…</option>
-                  <option value="Profit">✅ Profit</option>
-                  <option value="Loss">❌ Loss</option>
-                  <option value="Breakeven">➖ Breakeven</option>
-                </Select>
-              </FieldRow>
-              <NumField label="RR Achieved" {...numField('rr')} step={0.1} min={0} placeholder="e.g. 3" />
+              <NumField
+                label="SL Distance (pips)" {...numField('sl_pips')} step={0.1} min={0} placeholder="e.g. 18"
+              />
+              {form.entry_price != null && form.sl_price != null && (
+                <p className="text-[11px] text-muted-foreground -mt-2 ml-[138px]">
+                  Auto-calculated from Entry/SL Price — edit above to override.
+                </p>
+              )}
               <NumField label="Position Size (% of capital)" {...numField('position_size')} step={0.01} min={0} placeholder="e.g. 0.5" />
 
               {sizing && form.position_size != null && form.sl_pips != null && form.sl_pips > 0 && (
@@ -495,6 +499,35 @@ export default function TradeDetailPanel({
                   )}
                 </div>
               )}
+            </Section>
+
+            <Section title="Exit">
+              <FieldRow label="Date Closed">
+                <Input type="date" value={form.date_closed ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('date_closed', e.target.value || null)} />
+              </FieldRow>
+              <FieldRow label="Time Closed">
+                <Input type="time" value={form.time_closed ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('time_closed', e.target.value || null)} />
+              </FieldRow>
+              <FieldRow label="Closed Session">
+                <Select value={form.closed_session ?? ''} onChange={e => set('closed_session', e.target.value || null)}>
+                  <option value="">Select…</option>
+                  {SESSIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                </Select>
+              </FieldRow>
+            </Section>
+
+            <Section title="Result">
+              <FieldRow label="Result">
+                <Select value={form.profit_loss ?? ''} onChange={e => set('profit_loss', e.target.value || null)}>
+                  <option value="">Select…</option>
+                  <option value="Profit">✅ Profit</option>
+                  <option value="Loss">❌ Loss</option>
+                  <option value="Breakeven">➖ Breakeven</option>
+                </Select>
+              </FieldRow>
+              <NumField label="RR Achieved" {...numField('rr')} step={0.1} min={0} placeholder="e.g. 3" />
 
               <div>
                 <Label className="text-xs mb-1.5 block">TP Levels Hit</Label>
