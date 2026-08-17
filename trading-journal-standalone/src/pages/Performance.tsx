@@ -124,12 +124,24 @@ function computeHourly(trades: Trade[]): { rows: PeriodRow[]; skipped: number } 
     // class of bug as gain_loss above, which already guards with Number().
     const rrVals = group.map(t => t.rr).filter(v => v != null).map(v => Number(v));
     const avg_rr = rrVals.length > 0 ? Math.round((rrVals.reduce((s, v) => s + v, 0) / rrVals.length) * 100) / 100 : null;
+    // The server's monthly/yearly/weekday/session buckets compute pct_return
+    // as total $ gain over that bucket's *starting* capital, which works
+    // because trades within one of those buckets are still in chronological
+    // order relative to each other. An hour-of-day bucket isn't - a 14:00
+    // trade from January and a 14:00 trade from June land in the same
+    // bucket despite the account's capital having moved a lot in between,
+    // so there's no single meaningful "starting capital" for the bucket.
+    // Summing each trade's own already-computed gain_loss_pct (its gain
+    // against ITS OWN start_capital at the time it closed) sidesteps that -
+    // it's the closest equivalent to "total % P/L" that still makes sense
+    // for a non-contiguous bucket like this.
+    const pct_return = Math.round(group.reduce((s, t) => s + Number(t.gain_loss_pct ?? 0), 0) * 100) / 100;
     return {
       period: fmtHourLabel(h),
       total_trades: group.length,
       wins, losses, win_rate,
       total_gain: Math.round(total_gain * 100) / 100,
-      pct_return: 0,
+      pct_return,
       start_capital: 0, end_capital: 0,
       profit_factor, avg_rr,
     };
@@ -402,9 +414,9 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
 
       <div className="grid grid-cols-8 gap-1 mb-1">
         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
-          <div key={d} className="text-center text-xs text-muted-foreground py-2">{d}</div>
+          <div key={d} className="text-center text-sm text-muted-foreground py-2">{d}</div>
         ))}
-        <div className="text-center text-xs font-bold text-white py-2">Total</div>
+        <div className="text-center text-sm font-bold text-white py-2">Total</div>
       </div>
 
       <div className="flex flex-col gap-1">
@@ -415,7 +427,7 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
           return (
             <div key={wIdx} className="grid grid-cols-8 gap-1">
               {week.map((day, dIdx) => {
-                if (!day) return <div key={dIdx} className="bg-zinc-950 min-h-[80px] rounded-sm p-2 border border-zinc-900/50" />;
+                if (!day) return <div key={dIdx} className="bg-zinc-950 min-h-[90px] rounded-sm p-2 border border-zinc-900/50" />;
 
                 const dailyData = findDailyData(year, month, day);
 
@@ -428,13 +440,13 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
                 const isPos = dailyData && dailyData.total_gain > 0;
 
                 return (
-                  <div key={dIdx} className={`min-h-[80px] rounded-sm p-2 flex flex-col justify-between border ${isNeg ? 'bg-red-950/20 border-red-900/30' : isPos ? 'bg-green-950/20 border-green-900/30' : 'bg-zinc-950 border-zinc-900/50'}`}>
+                  <div key={dIdx} className={`min-h-[90px] rounded-sm p-2 flex flex-col justify-between border ${isNeg ? 'bg-red-950/20 border-red-900/30' : isPos ? 'bg-green-950/20 border-green-900/30' : 'bg-zinc-950 border-zinc-900/50'}`}>
                     <div className="flex justify-between items-start">
-                      <span className="text-xs text-zinc-500 font-mono">{day}</span>
-                      {dailyData && <span className="text-[10px] text-zinc-400">{dailyData.total_trades} trade{dailyData.total_trades > 1 ? 's' : ''}</span>}
+                      <span className="text-sm text-zinc-400 font-mono">{day}</span>
+                      {dailyData && <span className="text-xs text-zinc-300">{dailyData.total_trades} trade{dailyData.total_trades > 1 ? 's' : ''}</span>}
                     </div>
                     {dailyData && (
-                      <div className={`text-xs font-bold font-mono ${isPos ? 'text-green-500' : 'text-red-500'}`}>
+                      <div className={`text-base font-bold font-mono ${isPos ? 'text-green-500' : 'text-red-500'}`}>
                         {isPos ? '+' : ''}{fmtMoney(dailyData.total_gain)}
                       </div>
                     )}
@@ -443,12 +455,12 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
               })}
 
               {/* Weekly Total Column */}
-              <div className={`min-h-[80px] rounded-sm p-2 flex flex-col justify-between border ${weeklyGains < 0 ? 'bg-red-950/40 border-red-900/50' : weeklyGains > 0 ? 'bg-green-950/40 border-green-900/50' : 'bg-zinc-900 border-zinc-800'}`}>
+              <div className={`min-h-[90px] rounded-sm p-2 flex flex-col justify-between border ${weeklyGains < 0 ? 'bg-red-950/40 border-red-900/50' : weeklyGains > 0 ? 'bg-green-950/40 border-green-900/50' : 'bg-zinc-900 border-zinc-800'}`}>
                 <div className="flex justify-between items-start">
-                  <span className="text-[10px] text-zinc-400">{weeklyTrades} trades</span>
-                  <span className="text-[10px] font-bold">w{wIdx + 1}</span>
+                  <span className="text-xs text-zinc-300">{weeklyTrades} trades</span>
+                  <span className="text-xs font-bold">w{wIdx + 1}</span>
                 </div>
-                <div className={`text-xs font-bold font-mono ${weeklyGains > 0 ? 'text-green-500' : weeklyGains < 0 ? 'text-red-500' : 'text-zinc-500'}`}>
+                <div className={`text-base font-bold font-mono ${weeklyGains > 0 ? 'text-green-500' : weeklyGains < 0 ? 'text-red-500' : 'text-zinc-500'}`}>
                    {weeklyGains > 0 ? '+' : ''}{fmtMoney(weeklyGains)}
                 </div>
               </div>
@@ -701,6 +713,7 @@ export default function Performance() {
                         <TableHead>Month</TableHead>
                         <TableHead className="text-center">Trades</TableHead>
                         <TableHead className="text-center">Win %</TableHead>
+                        <TableHead className="text-center">Total % P/L</TableHead>
                         <TableHead className="text-right">Gain / Loss $</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -710,6 +723,9 @@ export default function Performance() {
                           <TableCell className="font-semibold">{fmtPeriod(r.period, true)}</TableCell>
                           <TableCell className="text-center">{r.total_trades}</TableCell>
                           <TableCell className="text-center">{r.win_rate}%</TableCell>
+                          <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                            {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
+                          </TableCell>
                           <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
                         </TableRow>
                       ))}
@@ -736,6 +752,30 @@ export default function Performance() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+                  <div className="overflow-x-auto border rounded-lg"><Table>
+                    <TableHeader>
+                      <TableRow className="text-xs">
+                        <TableHead>Year</TableHead>
+                        <TableHead className="text-center">Trades</TableHead>
+                        <TableHead className="text-center">Win %</TableHead>
+                        <TableHead className="text-center">Total % P/L</TableHead>
+                        <TableHead className="text-right">Gain / Loss $</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {[...yearly].reverse().map(r => (
+                        <TableRow key={r.period} className="text-xs">
+                          <TableCell className="font-semibold">{r.period}</TableCell>
+                          <TableCell className="text-center">{r.total_trades}</TableCell>
+                          <TableCell className="text-center">{r.win_rate}%</TableCell>
+                          <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                            {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
+                          </TableCell>
+                          <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table></div>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -757,6 +797,34 @@ export default function Performance() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+                  <div className="overflow-x-auto border rounded-lg"><Table>
+                    <TableHeader>
+                      <TableRow className="text-xs">
+                        <TableHead>Day</TableHead>
+                        <TableHead className="text-center">Trades</TableHead>
+                        <TableHead className="text-center">Wins</TableHead>
+                        <TableHead className="text-center">Losses</TableHead>
+                        <TableHead className="text-center">Win %</TableHead>
+                        <TableHead className="text-center">Total % P/L</TableHead>
+                        <TableHead className="text-right">Gain / Loss $</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {weekday.map(r => (
+                        <TableRow key={r.period} className="text-xs">
+                          <TableCell className="font-semibold">{r.period}</TableCell>
+                          <TableCell className="text-center">{r.total_trades}</TableCell>
+                          <TableCell className="text-center text-green-600 dark:text-green-400">{r.wins}</TableCell>
+                          <TableCell className="text-center text-red-500 dark:text-red-400">{r.losses}</TableCell>
+                          <TableCell className="text-center">{r.win_rate}%</TableCell>
+                          <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                            {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
+                          </TableCell>
+                          <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table></div>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -792,6 +860,7 @@ export default function Performance() {
                             <TableHead className="text-center">Win %</TableHead>
                             <TableHead className="text-center">Avg R</TableHead>
                             <TableHead className="text-center">Profit Factor</TableHead>
+                            <TableHead className="text-center">Total % P/L</TableHead>
                             <TableHead className="text-right">Gain / Loss $</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -803,6 +872,9 @@ export default function Performance() {
                               <TableCell className="text-center">{r.win_rate}%</TableCell>
                               <TableCell className="text-center">{r.avg_rr !== null ? `${r.avg_rr}R` : '—'}</TableCell>
                               <TableCell className="text-center">{fmtPF(r.profit_factor)}</TableCell>
+                              <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                                {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
+                              </TableCell>
                               <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
                             </TableRow>
                           ))}
@@ -853,6 +925,7 @@ export default function Performance() {
                             <TableHead className="text-center">Win %</TableHead>
                             <TableHead className="text-center">Avg R</TableHead>
                             <TableHead className="text-center">Profit Factor</TableHead>
+                            <TableHead className="text-center">Total % P/L</TableHead>
                             <TableHead className="text-right">Gain / Loss $</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -864,6 +937,9 @@ export default function Performance() {
                               <TableCell className="text-center">{r.win_rate}%</TableCell>
                               <TableCell className="text-center">{r.avg_rr !== null ? `${r.avg_rr}R` : '—'}</TableCell>
                               <TableCell className="text-center">{fmtPF(r.profit_factor)}</TableCell>
+                              <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                                {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
+                              </TableCell>
                               <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
                             </TableRow>
                           ))}
