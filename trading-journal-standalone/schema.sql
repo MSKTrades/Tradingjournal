@@ -83,8 +83,20 @@ CREATE TABLE IF NOT EXISTS strategies (
   tp2_rr         NUMERIC,
   split_percent  NUMERIC,
   active         BOOLEAN NOT NULL DEFAULT true,
-  sort_order     INTEGER NOT NULL DEFAULT 0
+  sort_order     INTEGER NOT NULL DEFAULT 0,
+  -- Which accounts this strategy is counted on. [] (the default) means every
+  -- account, including ones created after this strategy was - preserves
+  -- today's behavior for every strategy that already exists. Restricting a
+  -- strategy to specific account ids is opt-in from the Strategies page, for
+  -- when you don't want e.g. a strategy built for one account's rules to
+  -- also get evaluated against a completely different account's trades.
+  account_ids    JSONB NOT NULL DEFAULT '[]'::jsonb
 );
+
+-- Upgrade an existing database in place: every strategy that already exists
+-- gets the default '[]' (applies to every account), so nothing you've
+-- already built stops showing up anywhere until you deliberately restrict it.
+ALTER TABLE strategies ADD COLUMN IF NOT EXISTS account_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- Custom fields are scoped to a single account (account_id), not shared
 -- across every account you track - a fresh account starts with none, and a
