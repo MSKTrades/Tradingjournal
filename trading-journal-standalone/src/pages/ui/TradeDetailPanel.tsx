@@ -568,8 +568,11 @@ export default function TradeDetailPanel({
               title="SMC / ICT Metrics (optional)"
               subtitle="Structure and session-based metrics"
             >
-              <StructureSelect label="15M Structure" value={form.structure_15m} onChange={v => set('structure_15m', v)} />
-              <StructureSelect label="1M WR" value={form.wr_1m} onChange={v => set('wr_1m', v)} />
+              {/* 15M Structure and 1M WR moved down to Custom Fields (see
+                  the migration in schema.sql) - strategy-specific fields
+                  that don't belong baked into every account by default.
+                  1M Before Chart stays here since it wasn't part of that
+                  move. */}
               <StructureSelect label="1M Before Chart" value={form.before_chart_1m} onChange={v => set('before_chart_1m', v)} />
               <NumField label="Partial 1 (RR)" {...numField('partial_1')} step={0.1} min={0} />
               <NumField label="Partial 2 (RR)" {...numField('partial_2')} step={0.1} min={0} />
