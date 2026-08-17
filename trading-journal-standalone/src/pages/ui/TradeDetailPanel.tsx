@@ -104,8 +104,22 @@ function fromTrade(t: Trade): TradePayload {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-3 pb-5 mb-5 border-b border-border last:border-0">
-      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{title}</p>
+      <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">{title}</p>
       {children}
+    </div>
+  );
+}
+
+// Field label sits to the left of its input rather than stacked above it,
+// at a fixed width so every row in a section lines up into one aligned
+// column - and stays a plain (non-bold) weight so the bold Section title
+// above it remains the strongest thing on the page, not just the first.
+const FIELD_LABEL_WIDTH = 'w-[126px]';
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3">
+      <Label className={cn('text-xs font-normal shrink-0', FIELD_LABEL_WIDTH)}>{label}</Label>
+      <div className="flex-1 min-w-0">{children}</div>
     </div>
   );
 }
@@ -131,7 +145,7 @@ function CollapsibleSection({ storageKey, title, subtitle, children }: {
         className="flex items-center gap-1.5 w-full text-left"
       >
         {open ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
-        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{title}</span>
+        <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">{title}</span>
       </button>
       {!open && subtitle && <p className="text-xs text-muted-foreground mt-1 ml-5">{subtitle}</p>}
       {open && <div className="flex flex-col gap-3 mt-3">{children}</div>}
@@ -157,13 +171,38 @@ function TpToggle({ label, checked, onChange }: { label: string; checked: boolea
 
 function StructureSelect({ label, value, onChange }: { label: string; value: string | null; onChange: (v: string | null) => void }) {
   return (
-    <div className="flex flex-col gap-1">
-      <Label className="text-xs">{label}</Label>
+    <FieldRow label={label}>
       <Select value={value ?? ''} onChange={e => onChange(e.target.value || null)}>
         <option value="">Select…</option>
         {STRUCTURE_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
       </Select>
-    </div>
+    </FieldRow>
+  );
+}
+
+// Defined at module scope (not inside TradeDetailPanel) on purpose: a
+// component function declared inside another component's body gets a brand
+// new function identity on every render, and React treats "different
+// function identity" as "different component type" - so every keystroke
+// (which updates `form` and re-renders the parent) was unmounting and
+// remounting a fresh <input>, kicking focus out after a single character.
+// Taking `value`/`onChange` as plain props instead of closing over
+// `form`/`set` keeps this component's identity stable across renders, which
+// is what actually fixes the focus loss.
+function NumField({ label, value, onChange, step = 0.01, min, placeholder }: {
+  label: string; value: number | null; onChange: (v: number | null) => void;
+  step?: number; min?: number; placeholder?: string;
+}) {
+  return (
+    <FieldRow label={label}>
+      <Input
+        type="number" step={step} min={min} placeholder={placeholder}
+        value={value ?? ''}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          onChange(e.target.value === '' ? null : Number(e.target.value))
+        }
+      />
+    </FieldRow>
   );
 }
 
@@ -211,11 +250,15 @@ export default function TradeDetailPanel({
   const selectedAccount = accounts.find(a => a.id === form.account_id) ?? null;
   const accountBalanceForSizing = useMemo(() => {
     if (!selectedAccount) return null;
+    // starting_balance comes back from the API as a string (same as every
+    // other Postgres NUMERIC column) even though it's typed as `number` -
+    // coerce it explicitly rather than relying on the compile-time type.
+    const startingBalanceNum = selectedAccount.starting_balance != null ? Number(selectedAccount.starting_balance) : null;
     if (form.account_id === activeAccountId) {
-      const dd = computeDrawdown(trades, selectedAccount.starting_balance);
-      return dd.currentBalance || selectedAccount.starting_balance;
+      const dd = computeDrawdown(trades, startingBalanceNum);
+      return dd.currentBalance || startingBalanceNum;
     }
-    return selectedAccount.starting_balance;
+    return startingBalanceNum;
   }, [selectedAccount, form.account_id, activeAccountId, trades]);
 
   const sizing = useMemo(() => {
@@ -239,21 +282,13 @@ export default function TradeDetailPanel({
     setForm(p => ({ ...p, checklist_results: { ...p.checklist_results, [String(itemId)]: value } }));
   }
 
-  function NumField({ label, field, step = 0.01, min, placeholder }: {
-    label: string; field: keyof TradePayload; step?: number; min?: number; placeholder?: string;
-  }) {
-    return (
-      <div className="flex flex-col gap-1">
-        <Label className="text-xs">{label}</Label>
-        <Input
-          type="number" step={step} min={min} placeholder={placeholder}
-          value={(form[field] as number | null) ?? ''}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-            set(field, (e.target.value === '' ? null : Number(e.target.value)) as TradePayload[typeof field])
-          }
-        />
-      </div>
-    );
+  // Small typed helper so each <NumField> call site below doesn't have to
+  // repeat `value={form.x} onChange={v => set('x', v)}` by hand.
+  function numField<K extends keyof TradePayload>(field: K) {
+    return {
+      value: form[field] as unknown as number | null,
+      onChange: (v: number | null) => set(field, v as TradePayload[K]),
+    };
   }
 
   async function handleSave() {
@@ -349,96 +384,85 @@ export default function TradeDetailPanel({
                 trade, then SL/TP together, then everything about coming OUT
                 of it, then the result. */}
             <Section title="Trade Info">
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Account</Label>
+              <FieldRow label="Account">
                 <Select value={form.account_id} onChange={e => set('account_id', Number(e.target.value))}>
                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.type ? ` (${a.type})` : ''}</option>)}
                 </Select>
-              </div>
-              <NumField label="Trade #" field="trade_number" step={1} min={1} />
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Pair</Label>
-                <Input value={form.coin_token ?? ''} list="inst-list" placeholder="e.g. EURUSD"
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('coin_token', e.target.value || null)} />
-                <datalist id="inst-list">{INSTRUMENTS.map(i => <option key={i} value={i} />)}</datalist>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1">
-                  <Label className="text-xs">Side</Label>
-                  <Select value={form.direction} onChange={e => set('direction', e.target.value)}>
-                    <option value="Long">Long ▲</option>
-                    <option value="Short">Short ▼</option>
-                  </Select>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <Label className="text-xs">Entry Type</Label>
-                  <Select value={form.entry_type ?? ''} onChange={e => set('entry_type', e.target.value || null)}>
-                    <option value="">Select…</option>
-                    {ENTRY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                  </Select>
-                </div>
-              </div>
+              </FieldRow>
+              <NumField label="Trade #" {...numField('trade_number')} step={1} min={1} />
+              <FieldRow label="Pair">
+                <>
+                  <Input value={form.coin_token ?? ''} list="inst-list" placeholder="e.g. EURUSD"
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('coin_token', e.target.value || null)} />
+                  <datalist id="inst-list">{INSTRUMENTS.map(i => <option key={i} value={i} />)}</datalist>
+                </>
+              </FieldRow>
+              <FieldRow label="Side">
+                <Select value={form.direction} onChange={e => set('direction', e.target.value)}>
+                  <option value="Long">Long ▲</option>
+                  <option value="Short">Short ▼</option>
+                </Select>
+              </FieldRow>
+              <FieldRow label="Entry Type">
+                <Select value={form.entry_type ?? ''} onChange={e => set('entry_type', e.target.value || null)}>
+                  <option value="">Select…</option>
+                  {ENTRY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </Select>
+              </FieldRow>
             </Section>
 
             <Section title="Entry">
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Date Placed</Label>
+              <FieldRow label="Date Placed">
                 <Input type="date" value={form.trade_placed_at ?? ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('trade_placed_at', e.target.value || null)} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Execution Time</Label>
+              </FieldRow>
+              <FieldRow label="Execution Time">
                 <Input type="time" value={form.trade_executed_at ?? ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('trade_executed_at', e.target.value || null)} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Session</Label>
+              </FieldRow>
+              <FieldRow label="Session">
                 <Select value={form.session_in ?? ''} onChange={e => set('session_in', e.target.value || null)}>
                   <option value="">Select…</option>
                   {SESSIONS.map(s => <option key={s} value={s}>{s}</option>)}
                 </Select>
-              </div>
-              <NumField label="Entry Price" field="entry_price" step={0.00001} placeholder="e.g. 1.0842" />
+              </FieldRow>
+              <NumField label="Entry Price" {...numField('entry_price')} step={0.00001} placeholder="e.g. 1.0842" />
             </Section>
 
             <Section title="Stop Loss / Take Profit">
-              <NumField label="SL Price" field="sl_price" step={0.00001} placeholder="e.g. 1.0810" />
-              <NumField label="TP Price" field="tp_price" step={0.00001} placeholder="e.g. 1.0910" />
-              <NumField label="SL Distance (pips)" field="sl_pips" step={0.1} min={0} placeholder="e.g. 18" />
+              <NumField label="SL Price" {...numField('sl_price')} step={0.00001} placeholder="e.g. 1.0810" />
+              <NumField label="TP Price" {...numField('tp_price')} step={0.00001} placeholder="e.g. 1.0910" />
+              <NumField label="SL Distance (pips)" {...numField('sl_pips')} step={0.1} min={0} placeholder="e.g. 18" />
             </Section>
 
             <Section title="Exit">
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Date Closed</Label>
+              <FieldRow label="Date Closed">
                 <Input type="date" value={form.date_closed ?? ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('date_closed', e.target.value || null)} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Time Closed</Label>
+              </FieldRow>
+              <FieldRow label="Time Closed">
                 <Input type="time" value={form.time_closed ?? ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('time_closed', e.target.value || null)} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Closed Session</Label>
+              </FieldRow>
+              <FieldRow label="Closed Session">
                 <Select value={form.closed_session ?? ''} onChange={e => set('closed_session', e.target.value || null)}>
                   <option value="">Select…</option>
                   {SESSIONS.map(s => <option key={s} value={s}>{s}</option>)}
                 </Select>
-              </div>
+              </FieldRow>
             </Section>
 
             <Section title="Result">
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs">Result</Label>
+              <FieldRow label="Result">
                 <Select value={form.profit_loss ?? ''} onChange={e => set('profit_loss', e.target.value || null)}>
                   <option value="">Select…</option>
                   <option value="Profit">✅ Profit</option>
                   <option value="Loss">❌ Loss</option>
                   <option value="Breakeven">➖ Breakeven</option>
                 </Select>
-              </div>
-              <NumField label="RR Achieved" field="rr" step={0.1} min={0} placeholder="e.g. 3" />
-              <NumField label="Position Size (% of capital)" field="position_size" step={0.01} min={0} placeholder="e.g. 0.5" />
+              </FieldRow>
+              <NumField label="RR Achieved" {...numField('rr')} step={0.1} min={0} placeholder="e.g. 3" />
+              <NumField label="Position Size (% of capital)" {...numField('position_size')} step={0.01} min={0} placeholder="e.g. 0.5" />
 
               {sizing && form.position_size != null && form.sl_pips != null && form.sl_pips > 0 && (
                 <div className="rounded-lg border border-border bg-muted/30 p-3">
@@ -514,9 +538,9 @@ export default function TradeDetailPanel({
               <StructureSelect label="15M Structure" value={form.structure_15m} onChange={v => set('structure_15m', v)} />
               <StructureSelect label="1M WR" value={form.wr_1m} onChange={v => set('wr_1m', v)} />
               <StructureSelect label="1M Before Chart" value={form.before_chart_1m} onChange={v => set('before_chart_1m', v)} />
-              <NumField label="Partial 1 (RR)" field="partial_1" step={0.1} min={0} />
-              <NumField label="Partial 2 (RR)" field="partial_2" step={0.1} min={0} />
-              <NumField label="Max RR Reached" field="max_rr" step={0.1} min={0} />
+              <NumField label="Partial 1 (RR)" {...numField('partial_1')} step={0.1} min={0} />
+              <NumField label="Partial 2 (RR)" {...numField('partial_2')} step={0.1} min={0} />
+              <NumField label="Max RR Reached" {...numField('max_rr')} step={0.1} min={0} />
             </CollapsibleSection>
 
             <CollapsibleSection
@@ -525,8 +549,7 @@ export default function TradeDetailPanel({
               subtitle={customColumns.length ? `${customColumns.length} custom field${customColumns.length === 1 ? '' : 's'}` : 'Add your own fields for anything else you track'}
             >
               {customColumns.length > 0 && customColumns.map(col => (
-                <div key={col.col_key} className="flex flex-col gap-1">
-                  <Label className="text-xs">{col.name}</Label>
+                <FieldRow key={col.col_key} label={col.name}>
                   <Input
                     type={col.data_type === 'number' ? 'number' : 'text'}
                     value={String(form.extra_data[col.col_key] ?? '')}
@@ -534,7 +557,7 @@ export default function TradeDetailPanel({
                       setExtra(col.col_key, col.data_type === 'number' ? Number(e.target.value) : e.target.value)
                     }
                   />
-                </div>
+                </FieldRow>
               ))}
 
               {!addingField ? (
@@ -585,8 +608,7 @@ export default function TradeDetailPanel({
               {form.checklist_enabled && (
                 checklists.length > 0 ? (
                   <>
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-xs">Checklist</Label>
+                    <FieldRow label="Checklist">
                       <Select
                         value={form.checklist_id ?? ''}
                         onChange={e => set('checklist_id', e.target.value ? Number(e.target.value) : null)}
@@ -594,7 +616,7 @@ export default function TradeDetailPanel({
                         <option value="">Select a checklist…</option>
                         {checklists.map(cl => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
                       </Select>
-                    </div>
+                    </FieldRow>
 
                     {activeChecklist && (
                       activeChecklist.items.length > 0 ? (
