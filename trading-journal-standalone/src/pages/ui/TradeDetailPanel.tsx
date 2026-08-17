@@ -25,7 +25,7 @@ function pairCurrencies(pair: string | null): string[] {
 
 type NewsDayStatus = 'unknown' | 'no-data' | 'clear' | 'news-day';
 
-// The economic-calendar feed only ever covers "this week" (see
+// The economic-calendar feed only ever covers "this week" (see 
 // api/summary/index.ts) — there's no historical archive behind it. So for
 // a trade placed outside that window, the honest answer is "no data",
 // never "no news" (which would be a guess dressed up as a fact).
