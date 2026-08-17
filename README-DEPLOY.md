@@ -1,32 +1,62 @@
-# ForexForge — re-fix: Strategy "Applies To" still not saving
+# ForexForge — found the real Strategy bug + Checklist account scoping
 
-Your Neon screenshot confirms the `account_ids` column exists on `strategies` and every row is stuck at `[]` — and the dialog reverts to "All Accounts" even for a brand new strategy. That combination (column exists, but a save into it never sticks, and no error appears) points at one specific thing: **the version of `api/strategies.ts` actually live on your Vercel deployment doesn't have the account-scoping code in it.** The version in front of you locally looks right, but the file that runs on the server is the one that was uploaded to GitHub — and it's easy for one file to get missed when several were uploaded together in the very first "Risk Guardrail + Strategy scoping" batch.
+## The actual root cause of "Applies To" not showing up
 
-## Quick way to confirm this before doing anything else
+Your screenshot was the key: strategies scoped to a specific account were saving correctly in the database (the `account_ids` column really did hold `[2]` etc.) but **never appeared on any account's Summary page — not even the one they were scoped to.** That's a different, more specific bug than a stale deployment, and I found it: `api/summary/index.ts` was building the account filter like this:
 
-Open this file directly on GitHub:
-`https://github.com/MSKTrades/Tradingjournal/blob/main/trading-journal-standalone/api/strategies.ts`
+```js
+[JSON.stringify([accountId])]
+```
 
-Press Ctrl+F (or Cmd+F) and search for `account_ids`. If it's **not** there, that's the whole bug — the server has never known this column exists, so every save just leaves it at its default. If it **is** there already, tell me and we'll look somewhere else (most likely a stale Vercel deployment that needs a manual redeploy).
+`sql.unsafe(...)` already serializes values bound to a `::jsonb`-cast placeholder — so wrapping the array in `JSON.stringify()` first serialized it a *second* time. Instead of sending the JSON array `[2]`, it sent the JSON *string* `"[2]"` (the six characters `[`, `2`, `]` quoted as text). Postgres's `@>` containment check against a string never matches an array, so **every account-scoped strategy silently vanished from every account's Summary page**, no matter which account you'd scoped it to. Unscoped ("All Accounts") strategies were unaffected, which is exactly why some strategies worked fine and others just disappeared.
 
-## What's in this delivery
+The exact same bug was sitting in the new Checklist-scoping code I was about to ship you — caught and fixed before it ever reached you, so you never saw that one. I checked every other place in the codebase that binds a value to a `::jsonb` placeholder, and these were the only two.
 
-Only 3 files this time — no schema changes needed, the column is already there:
+**Bottom line: your earlier "select an account, hit Save, doesn't stick" report was two things layered together** — a save/reload issue that the visible-error-banner fix from before addresses, and this Summary-page display bug that made even a successfully-saved scope look broken. Both are now fixed.
+
+## New: Checklists can now be scoped to specific accounts too
+
+Same "Applies To" picker as Strategies, right on each checklist card:
+
+- **All Accounts** (default) — shows up everywhere, including new accounts.
+- Pick one or more specific accounts — the checklist only shows up in that account's grading picker (on the trade screen) and in that account's Checklist Compliance stats on the Summary page.
+- Renaming a checklist doesn't touch its scoping, and vice versa — each saves independently the moment you click it, no separate Save button.
+
+## Files changed
 
 ```
 trading-journal-standalone/
-├── api/strategies.ts                   (the file that actually saves account_ids — most likely the missing piece)
-├── src/pages/ui/StrategyDialog.tsx     (re-sent for safety, includes the save-error banner from last time)
-└── src/pages/Strategies.tsx            (re-sent for safety, unchanged logic)
+├── schema.sql                     (checklists gets an account_ids column, same shape as strategies)
+├── api/checklist.ts               (checklist list now filters by account when asked; scoping is saved/read)
+├── api/summary/index.ts           (THE FIX — removed the double JSON-encoding that hid scoped strategies)
+├── src/pages/data/types.ts        (Checklist type gains account_ids)
+├── src/pages/Checklists.tsx       (new "Applies To" pills on every checklist card)
+├── src/pages/Journal.tsx          (trade-grading checklist picker now scoped to the active account)
+├── src/pages/StrategyDetail.tsx   (same scoping applied here too, for consistency)
+└── src/pages/Summary.tsx          (Checklist Compliance widget now scoped to the active account)
 ```
 
 ## Apply
 
-1. On GitHub, go into `MSKTrades/Tradingjournal` → `trading-journal-standalone/api/` → open `strategies.ts` → click the pencil (edit) icon → select all, delete, paste in the new content → commit directly to `main`.
-2. Do the same for `src/pages/ui/StrategyDialog.tsx` and `src/pages/Strategies.tsx`.
-3. No `schema.sql` step this time.
-4. Go to your Vercel dashboard → the project → **Deployments** and confirm a new deployment kicks off automatically after the GitHub commits (it should, if GitHub is connected). If nothing starts within a minute or two, click the "..." on the latest deployment and **Redeploy** manually.
+GitHub's "Add files via upload" into `MSKTrades/Tradingjournal`, inside `trading-journal-standalone/`, preserving every folder path above — **all 8 files this time**, including the two nested ones (`api/summary/index.ts` and `src/pages/data/types.ts`) since it's easy to only grab the top-level ones by accident.
 
-## How to know it's actually fixed
+## Re-run schema.sql in Neon
 
-Once the new deployment is live: open Strategies, edit any strategy, click a specific account under "Applies To", hit **Save Strategy**, then **refresh the whole page** (not just reopen the dialog) and check that account again. If it's still checked after a hard refresh, it's fixed. If it reverts again, or if you now see a red error message in the dialog when you save, send me a screenshot of that error — it'll tell us exactly what's failing server-side.
+One new column, safe to re-run:
+
+```sql
+ALTER TABLE checklists ADD COLUMN IF NOT EXISTS account_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+```
+
+## Redeploy on Vercel
+
+Same as always — no new function added, still under the 12-function cap.
+
+## How to confirm both fixes actually landed
+
+1. Go to Strategies, open the strategy you scoped to a specific account earlier (or scope one now), Save, then go to **Summary** on that same account. It should now show up in the strategy performance table instead of "No active strategies found."
+2. Go to Checklists, pick a specific account on any checklist's "Applies To" row, then switch to a *different* account in the sidebar and confirm that checklist no longer shows up in that account's grading picker or Checklist Compliance section — switch back and confirm it's still there.
+
+## Verified
+
+Reproduced the exact bug against a real Postgres database before fixing it (confirmed `$1::jsonb` was arriving as the string `"[2]"` instead of the array `[2]`), then confirmed the fix with the same query returning the correct rows. Re-tested the whole flow end-to-end afterward: scoped a checklist to one account, confirmed it disappeared from a different account's fetch and stayed visible on its own; renamed it and confirmed the scoping wasn't wiped by the rename; and confirmed the Strategy summary bug fix the same way, checking the account it was scoped to now actually shows it.
