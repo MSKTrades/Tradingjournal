@@ -79,8 +79,27 @@ export async function recalcAccountCapital(sql, accountId) {
   for (const t of trades) {
     const startCap = running;
     const dollarRisk = startCap * (Number(t.position_size) || 0) / 100;
-    const gainLoss = t.profit_loss === 'Profit' ? dollarRisk * (Number(t.rr) || 0)
-                    : t.profit_loss === 'Loss' ? -dollarRisk : 0;
+    // A Loss used to always be counted as a flat -1x dollarRisk here,
+    // ignoring whatever RR was actually entered - so a trade you closed
+    // early at -0.6R (or one that slipped past your stop to -1.4R) showed
+    // up everywhere as exactly -1R. Now that RR Achieved can be a precise
+    // number (typed directly, derived from Partial 1/2, or derived from
+    // real $ P/L in the trade panel), a Loss uses that real magnitude
+    // instead. It's wrapped in -Math.abs(...) rather than trusting rr's own
+    // sign: existing trades logged before this feature typed RR Achieved as
+    // an unsigned magnitude on losses too (e.g. "1.5" meaning "I lost
+    // 1.5R", not "-1.5") - checked against real data, this is in fact how
+    // every existing Loss row here is stored. -Math.abs(...) gives the
+    // correct negative dollar result either way, whether rr came in signed
+    // (the new $-P/L-derived flow) or unsigned (everything before it). The
+    // flat -dollarRisk fallback only kicks in when rr was never filled in
+    // at all (rr === null), so a Loss that's never had an RR value keeps
+    // computing exactly as it always did.
+    const rrVal = t.rr != null ? Number(t.rr) : null;
+    const gainLoss = t.profit_loss === 'Breakeven' ? 0
+                    : t.profit_loss === 'Loss' ? (rrVal != null ? -Math.abs(dollarRisk * rrVal) : -dollarRisk)
+                    : t.profit_loss === 'Profit' ? dollarRisk * (rrVal ?? 0)
+                    : 0;
     const gainLossPct = startCap !== 0 ? (gainLoss / startCap * 100) : 0;
     const endCap = startCap + gainLoss;
 
