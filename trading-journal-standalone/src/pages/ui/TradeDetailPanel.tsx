@@ -25,7 +25,7 @@ function pairCurrencies(pair: string | null): string[] {
 
 type NewsDayStatus = 'unknown' | 'no-data' | 'clear' | 'news-day';
 
-// The economic-calendar feed only ever covers "this week" (see 
+// The economic-calendar feed only ever covers "this week" (see
 // api/summary/index.ts) — there's no historical archive behind it. So for
 // a trade placed outside that window, the honest answer is "no data",
 // never "no news" (which would be a guess dressed up as a fact).
@@ -84,6 +84,7 @@ function empty(accountId: number, tradeNumber: number): TradePayload {
     cisd_break: null, total_inverse_candles: null, inverse_candle_size: null,
     sl_pips: null, position_size: null,
     profit_loss: null, rr: null,
+    gross_profit: null, commission: null, net_profit: null,
     entry_price: null, tp_price: null, sl_price: null,
     coin_token: null,
     trade_placed_at: new Date().toISOString().split('T')[0] ?? '',
@@ -216,12 +217,27 @@ export default function TradeDetailPanel({
   // from the raw price difference the instant the panel opened, even if the
   // real distance included spread/slippage the naive calc can't see.
   const skipNextAutoSlPips = useRef(true);
+  // Same idea as skipNextAutoSlPips, for the Gross/Commission/Partials ->
+  // RR Achieved / Result auto-calc effect further down: without this, every
+  // trade you opened would have its saved RR Achieved and Result silently
+  // recomputed the instant the panel loaded, since loading a trade sets
+  // form.gross_profit etc. all at once and looks identical to the user
+  // having just typed them in.
+  const skipNextAutoResult = useRef(true);
+  // Whether Partial 1 / Partial 2 are shown at all - off by default so the
+  // common case (one clean exit) only shows the four $ fields. Reopening a
+  // trade that already has a partial filled in switches this on automatically
+  // so that data isn't hidden.
+  const [exitInPartials, setExitInPartials] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setForm(trade ? fromTrade(trade) : empty(activeAccountId ?? 0, nextTradeNumber));
+      const nextForm = trade ? fromTrade(trade) : empty(activeAccountId ?? 0, nextTradeNumber);
+      setForm(nextForm);
       setSaveError(null);
+      setExitInPartials(nextForm.partial_1 != null || nextForm.partial_2 != null);
       skipNextAutoSlPips.current = true;
+      skipNextAutoResult.current = true;
     }
   }, [open, trade, activeAccountId, nextTradeNumber]);
 
@@ -286,29 +302,71 @@ export default function TradeDetailPanel({
     });
   }, [accountBalanceForSizing, form.position_size, form.sl_pips, form.coin_token, form.entry_price]);
 
+  // Dollar risk for THIS trade specifically, used to back RR Achieved out of
+  // a $ P/L instead of the other way around. For a trade that's already
+  // saved, its own start_capital (the server's sequential snapshot at the
+  // point it happened) is the correct, precise base - using today's live
+  // balance instead would be wrong for anything but the most recent trade.
+  // For a brand-new unsaved trade there's no start_capital yet, so this
+  // falls back to the same live-balance estimate the Position Size
+  // calculator above already shows you.
+  const riskBaseCapital = trade?.start_capital != null ? Number(trade.start_capital) : accountBalanceForSizing;
+  const riskDollar = riskBaseCapital != null && form.position_size != null
+    ? Math.round(riskBaseCapital * (form.position_size / 100) * 100) / 100
+    : null;
+
   function set<K extends keyof TradePayload>(k: K, v: TradePayload[K]) {
     setForm(p => ({ ...p, [k]: v }));
   }
   function setExtra(key: string, value: unknown) {
     setForm(p => ({ ...p, extra_data: { ...p.extra_data, [key]: value } }));
   }
-  // Partial 1 / Partial 2 are the RR multiples where you took partial profit
-  // (e.g. closed half the position at 1.5R, the rest at 3R). Most trades
-  // don't need that much granularity - you can just type the final RR
-  // Achieved directly - but if you DO fill in both partials, we auto-fill RR
-  // Achieved as their average (equal-size close assumption) so you don't
-  // have to do the math yourself. Auto-fill only fires the moment both
-  // partials become present; it doesn't fight you if you edit RR Achieved
-  // by hand afterwards - only changing a partial again will recompute it.
-  function setPartial(key: 'partial_1' | 'partial_2', v: number | null) {
-    setForm(p => {
-      const next = { ...p, [key]: v };
-      if (next.partial_1 != null && next.partial_2 != null) {
-        next.rr = Math.round(((next.partial_1 + next.partial_2) / 2) * 100) / 100;
-      }
-      return next;
-    });
-  }
+  // The whole Result section funnels into RR Achieved + Result, from
+  // whichever of two sources you actually filled in:
+  //  1. Gross Profit/Loss ($) and Commissions ($) - the normal path. Net
+  //     Profit = Gross - Commissions, and RR Achieved = Net Profit / this
+  //     trade's dollar risk (needs Position Size % filled in above).
+  //  2. Partial 1 (RR) + Partial 2 (RR), if you turn that toggle on - for
+  //     when you scaled out at two distinct RR levels and want that exact
+  //     precision rather than a blended $ result. When both are filled in,
+  //     their average WINS over the $-derived RR, since it's a more precise,
+  //     price-based fact about exactly where you exited.
+  // Either way, Result (Profit/Loss/Breakeven) follows the sign of whichever
+  // number won. You can still hand-edit RR Achieved or Result afterward -
+  // since this effect only reacts to the inputs, not to rr/profit_loss
+  // themselves, a manual edit sticks until you change one of the inputs again.
+  useEffect(() => {
+    if (skipNextAutoResult.current) {
+      skipNextAutoResult.current = false;
+      return;
+    }
+    const netProfit = form.gross_profit != null
+      ? Math.round((form.gross_profit - (form.commission ?? 0)) * 100) / 100
+      : null;
+
+    let nextRr: number | null = null;
+    let signSource: number | null = null; // whichever number's sign decides Result
+    if (exitInPartials && form.partial_1 != null && form.partial_2 != null) {
+      nextRr = Math.round(((form.partial_1 + form.partial_2) / 2) * 100) / 100;
+      signSource = nextRr;
+    } else if (netProfit != null && riskDollar != null && riskDollar > 0) {
+      nextRr = Math.round((netProfit / riskDollar) * 100) / 100;
+      signSource = netProfit;
+    } else if (netProfit != null) {
+      signSource = netProfit; // can't derive RR yet (no Position Size %), but Result can still follow the $ result
+    }
+
+    if (netProfit != null || nextRr != null) {
+      setForm(p => ({
+        ...p,
+        net_profit: netProfit,
+        ...(nextRr != null ? { rr: nextRr } : {}),
+        ...(signSource != null ? { profit_loss: signSource > 0 ? 'Profit' : signSource < 0 ? 'Loss' : 'Breakeven' } : {}),
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.gross_profit, form.commission, form.partial_1, form.partial_2, exitInPartials, riskDollar]);
+
   function setChecklistResult(itemId: number, value: boolean) {
     setForm(p => ({ ...p, checklist_results: { ...p.checklist_results, [String(itemId)]: value } }));
   }
@@ -532,12 +590,42 @@ export default function TradeDetailPanel({
                   <option value="Breakeven">➖ Breakeven</option>
                 </Select>
               </FieldRow>
-              <NumField label="RR Achieved" {...numField('rr')} step={0.1} min={0} placeholder="e.g. 3" />
-              <NumField label="Partial 1 (RR)" value={form.partial_1} onChange={v => setPartial('partial_1', v)} step={0.1} min={0} />
-              <NumField label="Partial 2 (RR)" value={form.partial_2} onChange={v => setPartial('partial_2', v)} step={0.1} min={0} />
+
+              <NumField label="Gross Profit/Loss ($)" {...numField('gross_profit')} step={0.01} placeholder="e.g. 120 or -80" />
+              <NumField label="Commissions ($)" {...numField('commission')} step={0.01} min={0} placeholder="e.g. 4.50" />
+
+              <FieldRow label="Net Profit ($)">
+                <div className={cn(
+                  'h-9 flex items-center px-3 rounded-md border border-border bg-muted/30 text-sm font-mono',
+                  form.net_profit == null
+                    ? 'text-muted-foreground'
+                    : cn('font-bold', form.net_profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')
+                )}>
+                  {form.net_profit != null ? fmtMoney(form.net_profit) : 'Enter Gross Profit/Loss above'}
+                </div>
+              </FieldRow>
+
+              <NumField label="RR Achieved" {...numField('rr')} step={0.1} placeholder="e.g. 3 or -1" />
               <p className="text-xs text-muted-foreground -mt-2">
-                Enter RR Achieved directly, or fill in both Partials and it'll be calculated for you.
+                {riskDollar != null
+                  ? `Auto-calculated as Net Profit ÷ your ${fmtMoney(riskDollar)} risk on this trade. Edit it directly any time.`
+                  : 'Fill in Position Size % above to have this calculated from Net Profit automatically — or just type it in directly.'}
               </p>
+
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">I exited in partials (two RR levels)</Label>
+                <Switch checked={exitInPartials} onCheckedChange={setExitInPartials} />
+              </div>
+              {exitInPartials && (
+                <>
+                  <NumField label="Partial 1 (RR)" {...numField('partial_1')} step={0.1} min={0} />
+                  <NumField label="Partial 2 (RR)" {...numField('partial_2')} step={0.1} min={0} />
+                  <p className="text-xs text-muted-foreground -mt-2">
+                    Once both are filled in, their average overrides RR Achieved above.
+                  </p>
+                </>
+              )}
+
               <NumField label="Max RR Reached" {...numField('max_rr')} step={0.1} min={0} />
 
               <div>
