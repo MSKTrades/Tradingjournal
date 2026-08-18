@@ -522,8 +522,8 @@ ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT
 -- multi-tenant system with per-user data partitioning, so `users` isn't
 -- referenced by `accounts`/`trades`/etc. It just gates who can reach the app
 -- at all. password_hash is a bcrypt hash, never a plaintext password - and
--- is NULL for accounts created via Google/Facebook (OAuth-only accounts
--- never get a local password unless the person later sets one).
+-- is NULL for accounts created via Google (OAuth-only accounts never get a
+-- local password unless the person later sets one).
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS users (
   id             SERIAL PRIMARY KEY,
