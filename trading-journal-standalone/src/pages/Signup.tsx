@@ -35,8 +35,8 @@ export default function Signup() {
         <Link to="/" className="flex items-center gap-2.5 justify-center mb-8">
           <LogoMark size={32} />
           <span className="font-bold tracking-tight text-xl leading-none">
-            <span className="text-foreground">Forex</span>
-            <span className="text-primary">Forge</span>
+            <span className="text-foreground">Pip</span>
+            <span className="text-primary">Echo</span>
           </span>
         </Link>
 

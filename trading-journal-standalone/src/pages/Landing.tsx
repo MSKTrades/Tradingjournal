@@ -64,7 +64,7 @@ const FEATURES = [
   {
     icon: BookOpen,
     title: 'Trade Journal',
-    desc: 'Log every trade with full context — entry/exit, R:R, screenshots, and notes — and let ForexForge compute your running equity curve automatically.',
+    desc: 'Log every trade with full context — entry/exit, R:R, screenshots, and notes — and let PipEcho compute your running equity curve automatically.',
   },
   {
     icon: History,
@@ -101,8 +101,8 @@ export default function Landing() {
           <Link to="/" className="flex items-center gap-2.5">
             <LogoMark size={28} />
             <span className="font-bold tracking-tight text-[17px] leading-none">
-              <span className="text-foreground">Forex</span>
-              <span className="text-primary">Forge</span>
+              <span className="text-foreground">Pip</span>
+              <span className="text-primary">Echo</span>
             </span>
           </Link>
           <div className="flex items-center gap-2">
@@ -126,7 +126,7 @@ export default function Landing() {
             Trade with data, not guesswork.
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto mt-5">
-            ForexForge is a trading journal and backtesting workspace — log every trade,
+            PipEcho is a trading journal and backtesting workspace — log every trade,
             replay historical price action, and see exactly which setups are actually
             making you money.
           </p>
@@ -178,9 +178,9 @@ export default function Landing() {
         <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <LogoMark size={18} />
-            <span>ForexForge</span>
+            <span>PipEcho</span>
           </div>
-          <p className="text-xs text-muted-foreground">© {new Date().getFullYear()} ForexForge. All rights reserved.</p>
+          <p className="text-xs text-muted-foreground">© {new Date().getFullYear()} PipEcho. All rights reserved.</p>
         </div>
       </footer>
     </div>
