@@ -13,7 +13,11 @@ const NAV_ITEMS = [
   { to: '/performance',  label: 'Performance', icon: TrendingUp },
   { to: '/strategies',   label: 'Strategies',  icon: Settings   },
   { to: '/checklists',   label: 'Checklists',  icon: ListChecks },
-  { to: '/backtest',     label: 'Backtest',    icon: History    },
+  // Disabled until the TradingView Advanced Charts library is approved —
+  // the tab stays visible (so the feature doesn't come out of nowhere once
+  // it ships) but isn't a real link; see `disabled` handling below and the
+  // /backtest route in App.tsx, which renders a matching placeholder page.
+  { to: '/backtest',     label: 'Backtest',    icon: History, disabled: true },
 ];
 
 const COLLAPSE_KEY = 'forexforge_sidebar_collapsed';
@@ -50,8 +54,33 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <AccountSwitcher collapsed={collapsed} />
 
         <nav className="flex-1 py-4 px-3 space-y-1">
-          {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
-            const active = pathname === to;
+          {NAV_ITEMS.map(({ to, label, icon: Icon, disabled }) => {
+            const active = !disabled && pathname === to;
+
+            if (disabled) {
+              return (
+                <div
+                  key={to}
+                  title={collapsed ? `${label} (Coming soon)` : undefined}
+                  aria-disabled="true"
+                  className={cn(
+                    'flex items-center gap-3 rounded-md text-sm font-medium relative cursor-not-allowed text-sidebar-muted/50',
+                    collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
+                  )}
+                >
+                  <Icon className="w-[18px] h-[18px] shrink-0" />
+                  {!collapsed && (
+                    <span className="flex items-center gap-1.5 truncate">
+                      {label}
+                      <span className="text-[10px] font-semibold uppercase tracking-wide bg-sidebar-muted/15 text-sidebar-muted/70 rounded px-1.5 py-0.5">
+                        Soon
+                      </span>
+                    </span>
+                  )}
+                </div>
+              );
+            }
+
             return (
               <Link
                 key={to}

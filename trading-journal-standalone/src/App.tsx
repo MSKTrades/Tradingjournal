@@ -4,6 +4,9 @@ import { ThemeProvider } from './lib/theme';
 import { AccountProvider } from './lib/accounts';
 import { AuthProvider, useAuth } from './lib/auth';
 import Landing from './pages/Landing';
+import Pricing from './pages/Pricing';
+import Blog from './pages/Blog';
+import BlogPost from './pages/BlogPost';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Summary from './pages/Summary';
@@ -12,7 +15,12 @@ import Performance from './pages/Performance';
 import Strategies from './pages/Strategies';
 import StrategyDetail from './pages/StrategyDetail';
 import Checklists from './pages/Checklists';
-import Backtest from './pages/Backtest';
+import BacktestComingSoon from './pages/BacktestComingSoon';
+// NOTE: the real Backtest page (Chart Replay & Backtesting) is on hold until
+// the TradingView Advanced Charts library is approved — see BacktestComingSoon.
+// The /backtest route below intentionally renders the placeholder instead of
+// importing/mounting the real `./pages/Backtest` component, so it can't be
+// reached by a direct link either. Swap the element back once ready.
 
 /** Splash shown while the very first /columns?resource=auth check is in
  * flight, so logged-in visitors don't see a flash of the landing page (and
@@ -74,6 +82,9 @@ export default function App() {
         <AuthProvider>
           <Routes>
             <Route path="/" element={<RootRoute />} />
+            <Route path="/pricing" element={<Pricing />} />
+            <Route path="/blog" element={<Blog />} />
+            <Route path="/blog/:slug" element={<BlogPost />} />
             <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
             <Route path="/signup" element={<PublicOnly><Signup /></PublicOnly>} />
 
@@ -82,7 +93,7 @@ export default function App() {
             <Route path="/strategies" element={<Protected><AuthedShell><Strategies /></AuthedShell></Protected>} />
             <Route path="/strategies/:id" element={<Protected><AuthedShell><StrategyDetail /></AuthedShell></Protected>} />
             <Route path="/checklists" element={<Protected><AuthedShell><Checklists /></AuthedShell></Protected>} />
-            <Route path="/backtest" element={<Protected><AuthedShell><Backtest /></AuthedShell></Protected>} />
+            <Route path="/backtest" element={<Protected><AuthedShell><BacktestComingSoon /></AuthedShell></Protected>} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>

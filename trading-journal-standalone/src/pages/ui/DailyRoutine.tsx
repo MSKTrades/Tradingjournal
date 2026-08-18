@@ -172,7 +172,7 @@ export default function DailyRoutine() {
             <Input
               autoFocus
               value={newPointValue}
-              placeholder="e.g. Checked EU/GU/UJ for CISD"
+              placeholder="e.g. Checked EU/GU/UJ for confirmation"
               className="h-7 text-xs flex-1"
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPointValue(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && handleAddPoint(section)}
@@ -205,7 +205,7 @@ export default function DailyRoutine() {
           <CardTitle className="text-base font-bold">Daily Routine</CardTitle>
         </div>
         <p className="text-xs text-muted-foreground mt-0.5">
-          What you check before trading today — pairs scanned, whether CISD's formed, daily bias, anything else worth remembering, one point at a time.
+          What you check before trading today — pairs scanned, whether your setup has confirmed, daily bias, anything else worth remembering, one point at a time.
         </p>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 pt-0">

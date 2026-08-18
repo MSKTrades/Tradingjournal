@@ -292,7 +292,7 @@ export default function Checklists() {
                   <Input
                     autoFocus
                     value={newItemText}
-                    placeholder="Rule, e.g. Waited for CISD break"
+                    placeholder="Rule, e.g. Waited for confirmation candle"
                     className="text-xs"
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewItemText(e.target.value)}
                     onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && handleAddItem(cl.id)}

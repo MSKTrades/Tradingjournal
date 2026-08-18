@@ -1,7 +1,12 @@
 import { Link } from 'react-router-dom';
-import { BarChart2, BookOpen, History, ListChecks, TrendingUp, Settings2, ShieldCheck } from 'lucide-react';
-import { LogoMark } from '../components/Logo';
+import {
+  BarChart2, BookOpen, History, ListChecks, TrendingUp, Settings2, ShieldCheck,
+  AlertTriangle, FileSpreadsheet, Layers, Check, X, Clock3, ArrowRight,
+} from 'lucide-react';
 import { Button } from '../lib/ui/button';
+import { Badge } from '../lib/ui/form';
+import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
+import { BLOG_POSTS } from './data/blogPosts';
 
 // Decorative ascending-bar heights behind the hero headline — hand-picked
 // (not random) so the pattern is stable across renders and reads as a
@@ -87,34 +92,58 @@ const FEATURES = [
     desc: 'Enforce your own rules before every entry — a simple guardrail against revenge trading and FOMO.',
   },
   {
+    icon: AlertTriangle,
+    title: 'Risk Guardrail',
+    desc: 'A live warning the moment a daily or weekly loss limit is breached — visible on your dashboard, not just in your head.',
+  },
+  {
+    icon: Layers,
+    title: 'Custom Fields & Tags',
+    desc: 'Track the specific things your strategy cares about — confirmation candles, liquidity swept, session structure — without fighting a rigid template.',
+  },
+  {
+    icon: FileSpreadsheet,
+    title: 'Excel Import',
+    desc: 'Already tracking trades in a spreadsheet? Import your history in one pass instead of re-typing months of trades by hand.',
+  },
+  {
     icon: ShieldCheck,
     title: 'Your Data, Your Rules',
     desc: 'Multiple accounts, custom columns, and tags — built to match how you actually trade, not a rigid template.',
   },
 ];
 
+type ComparisonValue = boolean | 'manual';
+const COMPARISON: { label: string; spreadsheet: ComparisonValue; notes: ComparisonValue; pipecho: ComparisonValue }[] = [
+  { label: 'Automatic equity curve & running balance', spreadsheet: false, notes: false, pipecho: true },
+  { label: 'Win rate, profit factor, R-multiple breakdowns', spreadsheet: 'manual', notes: false, pipecho: true },
+  { label: 'Bar-by-bar backtesting on real historical data', spreadsheet: false, notes: false, pipecho: true },
+  { label: 'Pre-trade checklist enforcement', spreadsheet: false, notes: false, pipecho: true },
+  { label: 'Live risk-limit warnings', spreadsheet: false, notes: false, pipecho: true },
+  { label: 'Custom fields for your exact strategy', spreadsheet: 'manual', notes: true, pipecho: true },
+];
+
+function ComparisonCell({ value }: { value: boolean | 'manual' }) {
+  if (value === true) return <Check className="w-4 h-4 text-primary mx-auto" />;
+  if (value === 'manual') return <span className="text-xs text-muted-foreground">Manual</span>;
+  return <X className="w-4 h-4 text-muted-foreground/40 mx-auto" />;
+}
+
+const SCREENSHOTS = [
+  { src: '/screenshots/summary.png', alt: 'PipEcho Summary dashboard showing trading sessions, strategy stats, and daily quote', title: 'Summary', desc: 'Your trading day at a glance — sessions, strategy performance, and market news in one dashboard.' },
+  { src: '/screenshots/journal.png', alt: 'PipEcho Trade Journal table showing 150 logged trades with P/L, RR, and running capital', title: 'Trade Journal', desc: 'Every trade logged with full context, filterable by asset, side, outcome, tag, and date range.' },
+  { src: '/screenshots/performance.png', alt: 'PipEcho Performance page showing profit factor, drawdown chart, and win/loss breakdown', title: 'Performance', desc: 'Expectancy, profit factor, drawdown, and winners/losers breakdown — computed automatically.' },
+  { src: '/screenshots/strategies.png', alt: 'PipEcho Strategies page showing two defined strategy playbooks with filter rules', title: 'Strategy Playbooks', desc: 'Define a setup once — filters, TP rules, applicable accounts — and track it forever after.' },
+];
+
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 export default function Landing() {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5">
-            <LogoMark size={28} />
-            <span className="font-bold tracking-tight text-[17px] leading-none">
-              <span className="text-foreground">Pip</span>
-              <span className="text-primary">Echo</span>
-            </span>
-          </Link>
-          <div className="flex items-center gap-2">
-            <Link to="/login">
-              <Button variant="ghost" size="sm">Log in</Button>
-            </Link>
-            <Link to="/signup">
-              <Button size="sm">Sign up free</Button>
-            </Link>
-          </div>
-        </div>
-      </header>
+      <MarketingHeader />
 
       <section className="relative px-6 pt-20 pb-16 text-center overflow-hidden">
         <HeroBackground />
@@ -161,6 +190,91 @@ export default function Landing() {
         </div>
       </section>
 
+      <section className="px-6 py-20">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-2xl font-semibold tracking-tight">See it before you sign up</h2>
+            <p className="text-muted-foreground mt-2">Real screens from the actual app — not mockups.</p>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {SCREENSHOTS.map(s => (
+              <div key={s.title} className="rounded-xl border border-border bg-card overflow-hidden">
+                <img src={s.src} alt={s.alt} className="w-full h-auto border-b border-border" loading="lazy" />
+                <div className="p-5">
+                  <h3 className="font-semibold mb-1">{s.title}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{s.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-y border-border bg-card/50">
+        <div className="max-w-4xl mx-auto px-6 py-20">
+          <div className="text-center mb-12">
+            <h2 className="text-2xl font-semibold tracking-tight">Why not just use a spreadsheet?</h2>
+            <p className="text-muted-foreground mt-2">Plenty of traders start there. Here's where it stops being enough.</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left font-medium text-muted-foreground py-3 px-5">Feature</th>
+                  <th className="font-medium text-muted-foreground py-3 px-3 w-28">Spreadsheet</th>
+                  <th className="font-medium text-muted-foreground py-3 px-3 w-28">Notes app</th>
+                  <th className="font-semibold text-primary py-3 px-3 w-28">PipEcho</th>
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARISON.map(row => (
+                  <tr key={row.label} className="border-b border-border last:border-b-0">
+                    <td className="py-3.5 px-5 text-foreground/90">{row.label}</td>
+                    <td className="text-center px-3"><ComparisonCell value={row.spreadsheet} /></td>
+                    <td className="text-center px-3"><ComparisonCell value={row.notes} /></td>
+                    <td className="text-center px-3"><ComparisonCell value={row.pipecho} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-6 py-20">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-end justify-between mb-10">
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight">From the blog</h2>
+              <p className="text-muted-foreground mt-2">Strategy, risk, and the process behind trading with data.</p>
+            </div>
+            <Link to="/blog" className="hidden sm:flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+              View all posts <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            {BLOG_POSTS.slice(-3).reverse().map(post => (
+              <Link
+                key={post.slug}
+                to={`/blog/${post.slug}`}
+                className="rounded-lg border border-border bg-card p-6 hover:border-primary/50 transition-colors flex flex-col"
+              >
+                <Badge variant="outline" className="w-fit mb-3">{post.tag}</Badge>
+                <h3 className="font-semibold leading-snug mb-2">{post.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed flex-1 line-clamp-3">{post.excerpt}</p>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground mt-5 pt-4 border-t border-border">
+                  <span>{fmtDate(post.date)}</span>
+                  <span className="flex items-center gap-1"><Clock3 className="w-3 h-3" />{post.readTime}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+          <Link to="/blog" className="sm:hidden flex items-center justify-center gap-1.5 text-sm font-medium text-primary hover:underline mt-8">
+            View all posts <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      </section>
+
       <section className="max-w-6xl mx-auto px-6 py-20">
         <div className="rounded-2xl bg-sidebar text-sidebar-foreground px-8 py-14 text-center">
           <BarChart2 className="w-8 h-8 text-sidebar-active mx-auto mb-4" />
@@ -174,15 +288,7 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="border-t border-border">
-        <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <LogoMark size={18} />
-            <span>PipEcho</span>
-          </div>
-          <p className="text-xs text-muted-foreground">© {new Date().getFullYear()} PipEcho. All rights reserved.</p>
-        </div>
-      </footer>
+      <MarketingFooter />
     </div>
   );
 }
