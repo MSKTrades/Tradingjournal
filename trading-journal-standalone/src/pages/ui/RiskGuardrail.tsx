@@ -67,7 +67,7 @@ export default function RiskGuardrail({ account, trades }: { account: Account | 
         <CardContent className="pt-4 pb-4">
           {breached && (
             <p className="text-xs font-medium text-red-500 mb-3">
-              A limit below has been reached. This is a warning only — ForexForge doesn't block trades — but check
+              A limit below has been reached. This is a warning only — PipEcho doesn't block trades — but check
               your challenge/account rules before placing another one today.
             </p>
           )}
