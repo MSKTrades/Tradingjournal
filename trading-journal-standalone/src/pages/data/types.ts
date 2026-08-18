@@ -42,6 +42,16 @@ export type Trade = {
   position_size: number | null;
   profit_loss: string | null;
   rr: number | null;
+  // $-based P/L entry: gross_profit and commission are what you type in
+  // (straight off your broker statement); net_profit is server-computed
+  // from the two (gross_profit - commission), never trusted from the
+  // client - same reasoning as gain_loss below. RR Achieved (`rr` above)
+  // and `profit_loss` are then derived client-side from net_profit and
+  // this trade's dollar risk before saving (or from Partial 1/2 when
+  // that toggle is on instead) - see TradeDetailPanel.tsx.
+  gross_profit: number | null;
+  commission: number | null;
+  net_profit: number | null;
   entry_price: number | null;
   tp_price: number | null;
   sl_price: number | null;
