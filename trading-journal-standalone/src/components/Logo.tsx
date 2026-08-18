@@ -1,9 +1,9 @@
-/** ForexForge brand mark: a rounded badge with three ascending bars (a minimal
+/** PipEcho brand mark: a rounded badge with three ascending bars (a minimal
  * candlestick/bar-chart glyph) on an amber gradient, paired with a two-tone
  * wordmark. Pure inline SVG + text - no image assets to manage, and it scales
  * cleanly at any size or theme. */
 export function LogoMark({ size = 28 }: { size?: number }) {
-  const id = 'ff-mark-grad';
+  const id = 'pe-mark-grad';
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
@@ -26,8 +26,8 @@ export function Logo({ size = 28, collapsed = false, className = '' }: { size?: 
       <LogoMark size={size} />
       {!collapsed && (
         <span className="font-bold tracking-tight text-[17px] leading-none whitespace-nowrap">
-          <span className="text-sidebar-foreground">Forex</span>
-          <span className="text-sidebar-active">Forge</span>
+          <span className="text-sidebar-foreground">Pip</span>
+          <span className="text-sidebar-active">Echo</span>
         </span>
       )}
     </div>
