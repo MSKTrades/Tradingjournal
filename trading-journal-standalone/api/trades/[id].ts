@@ -54,6 +54,10 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     // recomputed below via recalcAccountCapital, never trusted from the client.
     const trade_duration = calcDuration(p.trade_placed_at, p.trade_executed_at, p.date_closed, p.time_closed);
     const { comments, screenshots } = deriveFromNotesBlocks(p.notes_blocks);
+    // net_profit is computed here, not trusted from the client, same reasoning
+    // as start_capital/end_capital/gain_loss above - it's a derived number
+    // (gross_profit - commission), not a fact being reported.
+    const netProfit = p.gross_profit != null ? Math.round((Number(p.gross_profit) - Number(p.commission ?? 0)) * 100) / 100 : null;
 
     await sql.unsafe(
       `UPDATE trades SET
@@ -67,8 +71,9 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         date_closed=$25, time_closed=$26, closed_session=$27, trade_duration=$28,
         partial_1=$29, partial_2=$30, reached_1r2=$31, reached_1r3=$32, reached_1r4=$33, reached_1r5=$34,
         max_rr=$35, comments=$36, extra_data=$37::jsonb, screenshots=$38::jsonb, notes_blocks=$39::jsonb,
-        checklist_enabled=$40, checklist_id=$41, checklist_results=$42::jsonb, tags=$43::jsonb, tag_selections=$44::jsonb
-      WHERE id=$45`,
+        checklist_enabled=$40, checklist_id=$41, checklist_results=$42::jsonb, tags=$43::jsonb, tag_selections=$44::jsonb,
+        gross_profit=$45, commission=$46, net_profit=$47
+      WHERE id=$48`,
       [
         newAccountId,
         p.trade_number,
@@ -81,7 +86,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.partial_1, p.partial_2,
         p.reached_1r2 ?? false, p.reached_1r3 ?? false, p.reached_1r4 ?? false, p.reached_1r5 ?? false,
         p.max_rr, comments, p.extra_data ?? {}, screenshots, p.notes_blocks ?? [],
-        p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, p.tags ?? [], p.tag_selections ?? {}, id,
+        p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, p.tags ?? [], p.tag_selections ?? {},
+        p.gross_profit ?? null, p.commission ?? null, netProfit, id,
       ]
     );
 
