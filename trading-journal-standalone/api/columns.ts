@@ -90,7 +90,7 @@ async function getUserFromRequest(req: VercelRequest, sql: ReturnType<typeof db>
 }
 
 // ---------------------------------------------------------------------------
-// Google / Facebook sign-in ("Continue with ___" buttons). This is a plain
+// Google sign-in ("Continue with Google" button). This is a plain
 // server-side OAuth 2.0 authorization-code flow — no SDK needed, since it's
 // just two HTTPS calls (exchange code -> token, then token -> profile) that
 // `fetch` (built into the Vercel Node runtime) handles fine.
@@ -108,8 +108,13 @@ async function getUserFromRequest(req: VercelRequest, sql: ReturnType<typeof db>
 // purely as CSRF protection (proves the person completing the callback is
 // the same one who started it on this browser) — it is not a chosen
 // abbreviation for anything, just the OAuth spec's standard name for this.
+//
+// (Facebook login was removed - Google + email/password only now. The
+// provider parameter/type below is kept as a single-member union rather
+// than collapsed away entirely, since it keeps this code shaped the same
+// as before in case another provider is ever added back.)
 // ---------------------------------------------------------------------------
-type OAuthProvider = 'google' | 'facebook';
+type OAuthProvider = 'google';
 
 const OAUTH_STATE_COOKIE = 'ff_oauth_state';
 
@@ -125,7 +130,7 @@ function oauthStateCookie(state: string | null) {
   return parts.join('; ');
 }
 
-// Redirect URIs must exactly match what's registered in the Google/Facebook
+// Redirect URIs must exactly match what's registered in the Google
 // developer console, so this deliberately prefers an explicit APP_URL env
 // var (set this to your real production URL) over trusting request headers,
 // which can't be registered in advance and would make the redirect_uri
@@ -148,7 +153,7 @@ function redirectTo(res: VercelResponse, url: string, extraCookies: string[] = [
 }
 
 async function oauthStart(req: VercelRequest, res: VercelResponse, provider: OAuthProvider) {
-  const clientId = provider === 'google' ? process.env.GOOGLE_CLIENT_ID : process.env.FACEBOOK_APP_ID;
+  const clientId = process.env.GOOGLE_CLIENT_ID;
   const appUrl = getAppUrl(req);
   if (!clientId) {
     redirectTo(res, `${appUrl}/login?error=${provider}_not_configured`);
@@ -157,15 +162,10 @@ async function oauthStart(req: VercelRequest, res: VercelResponse, provider: OAu
   const state = randomBytes(24).toString('base64url');
   const redirectUri = oauthRedirectUri(appUrl, provider);
 
-  const authUrl = provider === 'google'
-    ? `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
-        client_id: clientId, redirect_uri: redirectUri, response_type: 'code',
-        scope: 'openid email profile', state, prompt: 'select_account',
-      })}`
-    : `https://www.facebook.com/v19.0/dialog/oauth?${new URLSearchParams({
-        client_id: clientId, redirect_uri: redirectUri, response_type: 'code',
-        scope: 'email,public_profile', state,
-      })}`;
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
+    client_id: clientId, redirect_uri: redirectUri, response_type: 'code',
+    scope: 'openid email profile', state, prompt: 'select_account',
+  })}`;
 
   redirectTo(res, authUrl, [oauthStateCookie(state)]);
 }
@@ -196,29 +196,6 @@ async function fetchGoogleProfile(code: string, redirectUri: string) {
   };
 }
 
-async function fetchFacebookProfile(code: string, redirectUri: string) {
-  const tokenParams = new URLSearchParams({
-    code, redirect_uri: redirectUri,
-    client_id: process.env.FACEBOOK_APP_ID!, client_secret: process.env.FACEBOOK_APP_SECRET!,
-  });
-  const tokenRes = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?${tokenParams}`);
-  if (!tokenRes.ok) throw new Error(`Facebook token exchange failed: ${await tokenRes.text()}`);
-  const tokens = await tokenRes.json();
-
-  const profileRes = await fetch(
-    `https://graph.facebook.com/me?fields=id,name,email,picture&access_token=${encodeURIComponent(tokens.access_token)}`
-  );
-  if (!profileRes.ok) throw new Error(`Facebook profile fetch failed: ${await profileRes.text()}`);
-  const profile = await profileRes.json();
-
-  return {
-    email: String(profile.email ?? '').toLowerCase(),
-    name: profile.name ?? null,
-    providerId: String(profile.id ?? ''),
-    avatarUrl: profile.picture?.data?.url ?? null,
-  };
-}
-
 async function oauthCallback(req: VercelRequest, res: VercelResponse, sql: ReturnType<typeof db>, provider: OAuthProvider) {
   const appUrl = getAppUrl(req);
   const clearState = oauthStateCookie(null);
@@ -234,9 +211,7 @@ async function oauthCallback(req: VercelRequest, res: VercelResponse, sql: Retur
 
   try {
     const redirectUri = oauthRedirectUri(appUrl, provider);
-    const profile = provider === 'google'
-      ? await fetchGoogleProfile(String(code), redirectUri)
-      : await fetchFacebookProfile(String(code), redirectUri);
+    const profile = await fetchGoogleProfile(String(code), redirectUri);
 
     if (!profile.email) throw new Error(`${provider} did not return an email address`);
 
@@ -276,13 +251,11 @@ async function handleAuth(req: VercelRequest, res: VercelResponse, sql: ReturnTy
   if (req.method === 'GET') {
     const action = req.query.action;
     // The OAuth start/callback legs are real browser navigations (the user
-    // is redirected to Google/Facebook and back), not fetch() calls, so they
-    // arrive as GET requests on this same ?resource=auth endpoint rather
-    // than through the POST action dispatch below.
+    // is redirected to Google and back), not fetch() calls, so they arrive
+    // as GET requests on this same ?resource=auth endpoint rather than
+    // through the POST action dispatch below.
     if (action === 'google_start') { await oauthStart(req, res, 'google'); return; }
-    if (action === 'facebook_start') { await oauthStart(req, res, 'facebook'); return; }
     if (action === 'google_callback') { await oauthCallback(req, res, sql, 'google'); return; }
-    if (action === 'facebook_callback') { await oauthCallback(req, res, sql, 'facebook'); return; }
 
     const user = await getUserFromRequest(req, sql);
     res.status(200).json({ user });
@@ -331,7 +304,7 @@ async function handleAuth(req: VercelRequest, res: VercelResponse, sql: ReturnTy
     const rows = await sql.unsafe('SELECT * FROM users WHERE email = $1', [email]);
     const row = rows[0];
     // Deliberately identical error for "no such user", "wrong password", and
-    // "this account only has Google/Facebook, no password" - distinguishing
+    // "this account only has Google, no password" - distinguishing
     // them tells an attacker (or just confuses a person) which emails have
     // accounts and how they signed up.
     if (!row || !row.password_hash || !(await bcrypt.compare(password, row.password_hash))) {
