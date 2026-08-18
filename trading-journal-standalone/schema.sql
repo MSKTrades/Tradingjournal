@@ -387,6 +387,20 @@ WHERE starting_balance IS NULL
 -- Idempotent column addition for the Entry Type field (Market / Limit / Stop).
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_type TEXT;
 
+-- Idempotent column additions for the Result section's $-based P/L entry.
+-- gross_profit / commission are what you actually type in (straight off
+-- your broker statement); net_profit is server-computed from the two
+-- (gross_profit - commission) rather than trusted from the client, same
+-- reasoning as start_capital/end_capital/gain_loss below - it's a derived
+-- number, not a fact you're reporting, so the server is the one source of
+-- truth for it. RR Achieved (the existing `rr` column) is then derived
+-- client-side from net_profit and this trade's dollar risk (or from
+-- Partial 1 / Partial 2 when you toggle those on instead) before saving -
+-- see TradeDetailPanel.tsx.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS gross_profit NUMERIC;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS commission NUMERIC;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS net_profit NUMERIC;
+
 -- Idempotent column addition for custom, user-defined tags on trades.
 -- Stored as a plain JSONB array of tag NAME strings directly on the trade
 -- (like screenshots/notes_blocks) rather than a normalized join table -
