@@ -33,9 +33,44 @@ export default function BlogPost() {
           </div>
 
           <div className="mt-8 space-y-5">
-            {post.body.map((para, i) => (
-              <p key={i} className="text-[15px] leading-relaxed text-foreground/90">{para}</p>
-            ))}
+            {post.body.map((block, i) => {
+              switch (block.type) {
+                case 'h2':
+                  return (
+                    <h2 key={i} className="text-xl font-semibold tracking-tight pt-3">
+                      {block.text}
+                    </h2>
+                  );
+                case 'example':
+                  return (
+                    <div key={i} className="rounded-lg border border-border bg-card/60 p-5">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-primary mb-2">{block.title}</p>
+                      <p className="text-[15px] leading-relaxed text-foreground/90">{block.text}</p>
+                    </div>
+                  );
+                case 'image':
+                  return (
+                    <figure key={i} className="pt-2">
+                      <img
+                        src={block.src}
+                        alt={block.alt}
+                        loading="lazy"
+                        className="w-full rounded-lg border border-border shadow-sm"
+                      />
+                      <figcaption className="text-xs text-muted-foreground mt-2.5 text-center leading-relaxed">
+                        {block.caption}
+                      </figcaption>
+                    </figure>
+                  );
+                case 'p':
+                default:
+                  return (
+                    <p key={i} className="text-[15px] leading-relaxed text-foreground/90">
+                      {block.text}
+                    </p>
+                  );
+              }
+            })}
           </div>
 
           <div className="mt-12 rounded-lg border border-border bg-card p-6">

@@ -18,8 +18,11 @@ const PLANS = [
     cta: 'Sign up free',
     features: [
       '1 trading account',
+      '1 strategy playbook',
       'Unlimited trade logging',
       'Core performance analytics',
+      'Risk Guardrail (daily/weekly loss limits)',
+      'Custom fields & tags',
       'Pre-trade checklists',
       'Excel import',
     ],
@@ -34,10 +37,8 @@ const PLANS = [
     features: [
       'Everything in Free',
       'Unlimited trading accounts',
+      'Unlimited strategy playbooks',
       'Chart Replay & Backtesting (coming soon)',
-      'Strategy Playbooks with auto-tracked performance',
-      'Custom fields & tags',
-      'Risk Guardrail (daily/weekly loss limits)',
       'Priority support',
     ],
   },

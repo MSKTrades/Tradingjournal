@@ -2,66 +2,22 @@
  * Blog) so nav links stay consistent across pages instead of copy-pasted
  * per-page and drifting out of sync. Not used inside the authenticated app —
  * that has its own sidebar (components/Layout.tsx). */
-import { useLayoutEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { LogoMark } from '../../components/Logo';
 import { Button } from '../../lib/ui/button';
-import { useTheme } from '../../lib/theme';
+import { useForceDarkTheme } from '../../lib/theme';
 
 const NAV_LINKS = [
   { to: '/pricing', label: 'Pricing' },
   { to: '/blog', label: 'Blog' },
 ];
 
-/** The public marketing site always shows dark — it's the site's visual
- * identity (same as every trading-tool marketing page and the app's own
- * dark-first default), not something that should flicker to light just
- * because a visitor's OS or browser is set to a light color scheme.
- *
- * This forces the `dark` class onto <html> for as long as a marketing page
- * is mounted, without touching the ThemeProvider's own `theme` state — so
- * it never overwrites a logged-in user's actual light/dark preference for
- * the app itself (important: a logged-in user CAN land on /pricing or
- * /blog, since those routes aren't auth-gated, and if we wrote through
- * ThemeProvider's state here it would persist "dark" to localStorage and
- * could clobber their real preference for the whole app if they close the
- * tab before this unmounts). On unmount it puts the class back to whatever
- * that real preference currently is.
- *
- * Just adding the class once isn't enough: ThemeProvider's own effect
- * (which reflects the real, possibly-light preference) sometimes mounts in
- * the very same commit as this one — e.g. on /pricing, which renders
- * immediately, unlike Landing which mounts a beat later behind the
- * logged-in/out check — and React always runs an ancestor's effects after
- * its descendants', so ThemeProvider's effect can strip the class back off
- * right after this hook sets it. A MutationObserver re-asserts it the
- * instant that happens instead of relying on winning that ordering race. */
-function useForceDarkMarketingTheme() {
-  const { theme } = useTheme();
-  const themeRef = useRef(theme);
-  themeRef.current = theme;
-
-  useLayoutEffect(() => {
-    const root = document.documentElement;
-    const ensureDark = () => {
-      if (!root.classList.contains('dark')) root.classList.add('dark');
-    };
-    ensureDark();
-
-    const observer = new MutationObserver(ensureDark);
-    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
-
-    return () => {
-      observer.disconnect();
-      if (themeRef.current === 'dark') root.classList.add('dark');
-      else root.classList.remove('dark');
-    };
-  }, []);
-}
-
 export function MarketingHeader() {
   const location = useLocation();
-  useForceDarkMarketingTheme();
+  // See useForceDarkTheme in lib/theme.tsx — the whole logged-out site
+  // (this header appears on Landing/Pricing/Blog/BlogPost) always renders
+  // dark, same as Login/Signup.
+  useForceDarkTheme();
   return (
     <header className="border-b border-border sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">

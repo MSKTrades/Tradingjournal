@@ -3,9 +3,14 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { LogoMark } from '../components/Logo';
 import { Button } from '../lib/ui/button';
 import { useAuth } from '../lib/auth';
+import { useForceDarkTheme } from '../lib/theme';
 import { OAuthButtons, Divider, oauthErrorMessage } from './ui/OAuthButtons';
 
 export default function Login() {
+  // Login/Signup are logged-out pages, same as Landing/Pricing/Blog —
+  // always dark, independent of the visitor's OS/browser preference. See
+  // useForceDarkTheme in lib/theme.tsx.
+  useForceDarkTheme();
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation() as { state?: { from?: string } };
