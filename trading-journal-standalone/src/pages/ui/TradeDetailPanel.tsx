@@ -582,15 +582,6 @@ export default function TradeDetailPanel({
             </Section>
 
             <Section title="Result">
-              <FieldRow label="Result">
-                <Select value={form.profit_loss ?? ''} onChange={e => set('profit_loss', e.target.value || null)}>
-                  <option value="">Select…</option>
-                  <option value="Profit">✅ Profit</option>
-                  <option value="Loss">❌ Loss</option>
-                  <option value="Breakeven">➖ Breakeven</option>
-                </Select>
-              </FieldRow>
-
               <NumField label="Gross Profit/Loss ($)" {...numField('gross_profit')} step={0.01} placeholder="e.g. 120 or -80" />
               <NumField label="Commissions ($)" {...numField('commission')} step={0.01} min={0} placeholder="e.g. 4.50" />
 
@@ -611,6 +602,15 @@ export default function TradeDetailPanel({
                   ? `Auto-calculated as Net Profit ÷ your ${fmtMoney(riskDollar)} risk on this trade. Edit it directly any time.`
                   : 'Fill in Position Size % above to have this calculated from Net Profit automatically — or just type it in directly.'}
               </p>
+
+              <FieldRow label="Result">
+                <Select value={form.profit_loss ?? ''} onChange={e => set('profit_loss', e.target.value || null)}>
+                  <option value="">Select…</option>
+                  <option value="Profit">✅ Profit</option>
+                  <option value="Loss">❌ Loss</option>
+                  <option value="Breakeven">➖ Breakeven</option>
+                </Select>
+              </FieldRow>
 
               <div className="flex items-center justify-between">
                 <Label className="text-xs">I exited in partials (two RR levels)</Label>
