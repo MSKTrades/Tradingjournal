@@ -3,11 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../lib/ui/card';
 import { Badge, Switch } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
-import { TrendingUp, TrendingDown, Target, RefreshCw, ListChecks, Newspaper, Globe, ExternalLink, Clock3, Gauge } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, RefreshCw, ListChecks, Newspaper, Globe, ExternalLink, Clock3 } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { useTheme } from '../lib/theme';
 import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney } from './data/types';
 import CurrencyFlag from './ui/CurrencyFlag';
 import RiskGuardrail from './ui/RiskGuardrail';
@@ -560,98 +559,6 @@ function SessionsWidget() {
   );
 }
 
-// Free, no-API-key TradingView "Screener" widget - a single embed that
-// lists many symbols in one compact, non-scrolling table (Symbol +
-// Technical Rating columns, plus whatever other columns TradingView's
-// default "overview" column set includes), instead of one
-// Technical-Analysis gauge widget per pair. This directly answers the
-// "don't want scrollable per-card widgets, want to fit more pairs at
-// once" feedback: it's ONE widget instance regardless of how many pairs
-// it lists, so there's no more one-scrollbar-per-card problem, and it can
-// show far more symbols in the same vertical space than 6-8 separate
-// cards could.
-//
-// Caveat (disclosed honestly, same as every other TradingView embed this
-// session): this sandbox's network can't load the live TradingView
-// script to screenshot the real rendering, so whether the Technical
-// Rating column actually renders as a colored bar (like the reference
-// screenshot) vs. plain text/arrow, and the exact row height/density, is
-// unconfirmed from here. TradingView's docs confirm this is a real
-// widget (embed-widget-screener.js) with a "market" field that takes one
-// discrete market (here: "forex") and a "defaultColumn" that controls
-// which metric columns show - "overview" was the closest documented
-// preset to a simple rating view. If the live render doesn't match what
-// you're after, the next screenshot will tell us exactly what to adjust
-// (defaultColumn, showToolbar, height, etc).
-function TradingViewScreener({ theme }: { theme: 'light' | 'dark' }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    container.innerHTML = '';
-
-    const widgetDiv = document.createElement('div');
-    widgetDiv.className = 'tradingview-widget-container__widget';
-    container.appendChild(widgetDiv);
-
-    const script = document.createElement('script');
-    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-screener.js';
-    script.async = true;
-    script.type = 'text/javascript';
-    script.text = JSON.stringify({
-      width: '100%',
-      // ~6 rows' worth of height (toolbar + column header + 6 data rows)
-      // rather than tall enough to show all 49 matches at once - the
-      // widget's own row list scrolls internally past that, so this still
-      // reaches every pair, it just doesn't take over the whole page to do
-      // it. Was 560 (showed all matches unscrolled, per feedback this made
-      // the whole section "too big").
-      height: 340,
-      defaultColumn: 'overview',
-      defaultScreen: 'general',
-      market: 'forex',
-      showToolbar: true,
-      locale: 'en',
-      colorTheme: theme,
-      isTransparent: true,
-    });
-    script.onerror = () => {
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '<p style="font-size:12px;color:var(--muted-foreground,#888);padding:12px">Sentiment screener unavailable (couldn\'t load TradingView script).</p>';
-      }
-    };
-    container.appendChild(script);
-  }, [theme]);
-
-  return <div className="tradingview-widget-container" ref={containerRef} />;
-}
-
-// Sentiment here means TradingView's free technical-indicator rating
-// (moving averages + oscillators rolled into Buy/Sell/Neutral): one
-// compact Screener widget covering forex pairs (no more per-pair cards,
-// no more per-card scrollbar), plus small supplementary cards for the
-// commodities the screener can't include.
-function MarketSentiment() {
-  const { theme } = useTheme();
-
-  return (
-    <div className="mb-6">
-      <div className="flex items-center gap-2 mb-1">
-        <Gauge className="w-4 h-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">Market Sentiment</h2>
-      </div>
-      <p className="text-xs text-muted-foreground mb-3">
-        Technical indicator sentiment (moving averages &amp; oscillators) via TradingView &middot; not retail positioning data
-      </p>
-      <Card>
-        <CardContent className="pt-3 pb-3">
-          <TradingViewScreener theme={theme} />
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
 
 // 30 original lines, one per rotation - deliberately not attributed to any
 // real trader (misattributing a paraphrased/invented line to a real named
@@ -816,8 +723,6 @@ export default function Summary() {
       <RiskGuardrail account={activeAccount} trades={trades} />
 
       <ChecklistCompliance trades={trades} checklists={checklists} />
-
-      <MarketSentiment />
 
       <NewsWidget />
 
