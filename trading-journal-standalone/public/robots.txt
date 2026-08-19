@@ -1,0 +1,15 @@
+User-agent: *
+Allow: /
+Allow: /pricing
+Allow: /blog
+
+# The authenticated app has nothing worth indexing (private trade data
+# behind a login) and would just waste crawl budget — steer crawlers away
+# from it explicitly rather than relying on the login redirect alone.
+Disallow: /journal
+Disallow: /performance
+Disallow: /strategies
+Disallow: /checklists
+Disallow: /backtest
+
+Sitemap: https://pipecho.com/sitemap.xml

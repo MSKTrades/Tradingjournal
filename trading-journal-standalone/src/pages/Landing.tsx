@@ -7,6 +7,7 @@ import { Button } from '../lib/ui/button';
 import { Badge } from '../lib/ui/form';
 import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
 import { BLOG_POSTS } from './data/blogPosts';
+import { useDocumentMeta } from '../lib/useDocumentMeta';
 
 // Decorative ascending-bar heights behind the hero headline — hand-picked
 // (not random) so the pattern is stable across renders and reads as a
@@ -141,6 +142,20 @@ function fmtDate(iso: string) {
 }
 
 export default function Landing() {
+  useDocumentMeta({
+    title: 'PipEcho — Trading Journal, Backtesting & Session Analytics for Forex Traders',
+    description: 'A trading journal, backtesting and session-analytics workspace built for forex traders — Strategy Playbooks, Risk Guardrail, and pre-trade checklists included free.',
+    jsonLd: {
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'PipEcho',
+      applicationCategory: 'FinanceApplication',
+      operatingSystem: 'Web',
+      description: 'A trading journal, backtesting and session-analytics workspace built for forex traders.',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      url: 'https://pipecho.com/',
+    },
+  });
   return (
     <div className="min-h-screen bg-background text-foreground">
       <MarketingHeader />

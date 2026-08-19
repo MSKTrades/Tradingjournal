@@ -4,6 +4,7 @@ import { Badge } from '../lib/ui/form';
 import { Button } from '../lib/ui/button';
 import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
 import { getBlogPost } from './data/blogPosts';
+import { useDocumentMeta } from '../lib/useDocumentMeta';
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
@@ -12,6 +13,27 @@ function fmtDate(iso: string) {
 export default function BlogPost() {
   const { slug } = useParams<{ slug: string }>();
   const post = slug ? getBlogPost(slug) : undefined;
+
+  // Called unconditionally (Rules of Hooks) even though the !post branch
+  // below navigates away before ever rendering with these values — falls
+  // back to the site default so there's nothing meaningful to set in that
+  // case anyway.
+  useDocumentMeta({
+    title: post ? `${post.title} — PipEcho` : 'PipEcho Blog',
+    description: post ? post.excerpt : 'Notes on strategy, risk management, and backtesting for forex traders.',
+    jsonLd: post
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'Article',
+          headline: post.title,
+          description: post.excerpt,
+          datePublished: post.date,
+          author: { '@type': 'Organization', name: 'PipEcho' },
+          publisher: { '@type': 'Organization', name: 'PipEcho' },
+          url: `https://pipecho.com/blog/${post.slug}`,
+        }
+      : undefined,
+  });
 
   if (!post) return <Navigate to="/blog" replace />;
 

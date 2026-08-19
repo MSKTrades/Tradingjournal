@@ -4,6 +4,7 @@ import { Check } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { Switch } from '../lib/ui/form';
 import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
+import { useDocumentMeta } from '../lib/useDocumentMeta';
 
 // Pricing display only — no payment processing wired up yet (deliberate,
 // see the delivery README). Numbers here are a starting proposal, not
@@ -68,6 +69,10 @@ function formatPrice(n: number) {
 }
 
 export default function Pricing() {
+  useDocumentMeta({
+    title: 'Pricing — PipEcho',
+    description: 'Free forever for a single account with 1 strategy playbook, Risk Guardrail, and custom fields. Upgrade to Pro for unlimited accounts and strategies, starting at $12/month.',
+  });
   const [annual, setAnnual] = useState(true);
 
   return (

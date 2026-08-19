@@ -4,6 +4,7 @@ import { LogoMark } from '../components/Logo';
 import { Button } from '../lib/ui/button';
 import { useAuth } from '../lib/auth';
 import { useForceDarkTheme } from '../lib/theme';
+import { useDocumentMeta } from '../lib/useDocumentMeta';
 import { OAuthButtons, Divider, oauthErrorMessage } from './ui/OAuthButtons';
 
 export default function Login() {
@@ -11,6 +12,7 @@ export default function Login() {
   // always dark, independent of the visitor's OS/browser preference. See
   // useForceDarkTheme in lib/theme.tsx.
   useForceDarkTheme();
+  useDocumentMeta({ title: 'Log in — PipEcho', description: 'Log in to your PipEcho trading journal.' });
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation() as { state?: { from?: string } };

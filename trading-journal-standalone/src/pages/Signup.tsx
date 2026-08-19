@@ -4,6 +4,7 @@ import { LogoMark } from '../components/Logo';
 import { Button } from '../lib/ui/button';
 import { useAuth } from '../lib/auth';
 import { useForceDarkTheme } from '../lib/theme';
+import { useDocumentMeta } from '../lib/useDocumentMeta';
 import { OAuthButtons, Divider } from './ui/OAuthButtons';
 
 export default function Signup() {
@@ -11,6 +12,7 @@ export default function Signup() {
   // always dark, independent of the visitor's OS/browser preference. See
   // useForceDarkTheme in lib/theme.tsx.
   useForceDarkTheme();
+  useDocumentMeta({ title: 'Sign up — PipEcho', description: 'Create your free PipEcho account and start journaling in minutes.' });
   const { signup } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState('');
