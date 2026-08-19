@@ -271,13 +271,27 @@ export const FIELD_LABELS: Record<string, string> = {
   partial_2: 'Partial 2 (%)',
 };
 
-// The built-in numeric fields every trade always has, regardless of which
-// custom fields the user has added. These read straight off the trades
-// table server-side (see getFieldValue in api/summary/index.ts).
+// The built-in numeric fields every trade always has, for every account,
+// regardless of which custom fields that particular user has added. These
+// read straight off the trades table server-side (see getFieldValue in
+// api/summary/index.ts).
+//
+// The three original SMC/ICT fields (CISD Break, Inverse Candle Size,
+// Distance from Asia H/L) used to be hardcoded in this list too, which
+// meant every new signup saw them in the Filter Conditions dropdown even
+// though they're specific to the strategy they were originally built
+// around and stay NULL for anyone who's never used them - confusing noise,
+// and not actually "built-in" the way rr/entry price/etc. are. They're
+// real columns on the trades table (kept for backward compatibility - see
+// the "SMC fields became custom columns" migration in schema.sql), but
+// they only belong in this dropdown for accounts that actually have data
+// in them, exactly like any other custom field - so they've been dropped
+// from here and now flow in below purely from the per-account
+// `custom_columns` merge in StrategyDialog.tsx (that migration already
+// creates a custom_columns row for cisd_break/inverse_candle_size/
+// distance_from_asia on any account with non-null trade data in them, and
+// none at all for an account that's never touched them).
 export const CONDITION_FIELDS = [
-  { key: 'cisd_break',      label: 'CISD Break (candles)' },
-  { key: 'inverse_candles', label: 'Inverse Candle Size' },
-  { key: 'gap_from_asia_h', label: 'Distance from Asia H/L' },
   { key: 'rr',              label: 'Risk:Reward (R)' },
   { key: 'max_rr',          label: 'Max R Reached' },
   { key: 'entry_price',     label: 'Entry Price' },
@@ -289,15 +303,6 @@ export const CONDITION_FIELDS = [
   { key: 'partial_1',       label: 'Partial 1 (%)' },
   { key: 'partial_2',       label: 'Partial 2 (%)' },
 ];
-
-// col_keys already covered by the three legacy CONDITION_FIELDS entries
-// above (cisd_break/inverse_candles/gap_from_asia_h predate the "SMC
-// fields became custom columns" migration and keep their original
-// display names for strategies saved before that migration) - any custom
-// column with one of these underlying keys is skipped when merging the
-// user's live custom fields into the strategy-condition picker, so it
-// doesn't show up twice under two different labels for the same data.
-export const CONDITION_FIELD_DUPLICATE_KEYS = new Set(['cisd_break', 'inverse_candle_size', 'distance_from_asia']);
 
 export const OPS = ['<', '<=', '>', '>=', '=', '!='];
 

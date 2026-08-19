@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Button } from '../../lib/ui/button';
 import { Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trash2, Plus } from 'lucide-react';
-import { Strategy, Condition, CustomColumn, CONDITION_FIELDS, CONDITION_FIELD_DUPLICATE_KEYS, OPS, WEEKDAYS } from '../data/types';
+import { Strategy, Condition, CustomColumn, CONDITION_FIELDS, OPS, WEEKDAYS } from '../data/types';
 import { useFetch } from '../../lib/api';
 import { useAccount } from '../../lib/accounts';
 
@@ -72,15 +72,18 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   const [error, setError] = useState<string | null>(null);
 
   // Filter conditions can compare against ANY numeric field logged on a
-  // trade, not just the three original SMC-specific ones - so besides the
-  // fixed built-in fields (rr, entry price, etc.), pull in whatever custom
-  // fields the user has actually added (Journal > Manage Columns) and
-  // offer the numeric ones here too. The three legacy fields are skipped
-  // from this dynamic list since they're already covered by their own
-  // CONDITION_FIELDS entry above (same underlying data, kept under its
-  // original label so strategies saved before custom columns existed
-  // still show the field they were built with).
-  // Custom fields are scoped per account now, so this pulls in whichever
+  // trade - so besides the small set of truly universal built-in fields
+  // (rr, entry price, etc. - every account has these), pull in whatever
+  // custom fields this user has actually added (Journal > Manage Columns)
+  // and offer the numeric ones here too. This is also how the three
+  // original SMC-specific fields (CISD Break, Inverse Candle Size,
+  // Distance from Asia H/L) show up now - they're no longer hardcoded into
+  // CONDITION_FIELDS (see the comment there for why: they used to appear
+  // for every new signup even though they're always empty for anyone who
+  // didn't build their journal around that original strategy), so an
+  // account only sees them here if it actually has a matching
+  // custom_columns row - same as any other custom field.
+  // Custom fields are scoped per account, so this pulls in whichever
   // account is currently active in the account switcher - matches how the
   // rest of the app (Journal, Strategy Detail) already scopes custom
   // columns, and means a condition field only shows up here if it's
@@ -89,7 +92,7 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   const { data: rawCols } = useFetch<CustomColumn[]>(`/columns?account_id=${activeAccountId ?? ''}`);
   const allFields = useMemo(() => {
     const custom = (rawCols ?? [])
-      .filter(c => c.data_type === 'number' && !CONDITION_FIELD_DUPLICATE_KEYS.has(c.col_key))
+      .filter(c => c.data_type === 'number')
       .map(c => ({ key: c.col_key, label: c.name }));
     return [...CONDITION_FIELDS, ...custom];
   }, [rawCols]);
