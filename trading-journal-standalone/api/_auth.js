@@ -121,3 +121,25 @@ const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'manjyot1537@gmail.com').toLower
 export function isAdminEmail(email) {
   return typeof email === 'string' && email.toLowerCase() === ADMIN_EMAIL;
 }
+
+// Vercel injects these geolocation headers into every request that hits a
+// serverless function — no third-party IP-lookup API, no extra network
+// call, works the same as it would for an Edge function. Only populated on
+// real Vercel deployments; locally (vercel dev, or this project's
+// dev-server.mjs stand-in) they're simply absent, so every field below
+// comes back null, which callers already treat as "unknown, fill in
+// later" rather than an error.
+export function getRequestGeo(req) {
+  const h = req.headers || {};
+  const get = (name) => {
+    const v = h[name];
+    return Array.isArray(v) ? v[0] : (v || null);
+  };
+  return {
+    country: get('x-vercel-ip-country'),
+    city: get('x-vercel-ip-city') ? decodeURIComponent(get('x-vercel-ip-city')) : null,
+    // x-forwarded-for can carry a comma-separated proxy chain; the client's
+    // own address is always the first entry.
+    ip: (get('x-forwarded-for') || '').split(',')[0].trim() || null,
+  };
+}

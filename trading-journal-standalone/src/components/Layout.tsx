@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Mail } from 'lucide-react';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTheme } from '../lib/theme';
 import { useAuth } from '../lib/auth';
@@ -9,8 +9,7 @@ import Logo from './Logo';
 import AccountSwitcher from './AccountSwitcher';
 import PromoReminderModal from './PromoReminderModal';
 import FeedbackDialog from './FeedbackDialog';
-
-const SUPPORT_EMAIL = 'support@pipecho.com';
+import ContactDialog from './ContactDialog';
 
 const NAV_ITEMS = [
   { to: '/',             label: 'Summary',     icon: BarChart2  },
@@ -128,17 +127,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             {!collapsed && <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>}
           </button>
           <FeedbackDialog collapsed={collapsed} />
-          <a
-            href={`mailto:${SUPPORT_EMAIL}`}
-            title={collapsed ? `Contact us (${SUPPORT_EMAIL})` : undefined}
-            className={cn(
-              'flex items-center gap-3 rounded-md text-sm font-medium text-sidebar-muted hover:text-sidebar-foreground hover:bg-white/5 transition-colors w-full',
-              collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
-            )}
-          >
-            <Mail className="w-[18px] h-[18px] shrink-0" />
-            {!collapsed && <span>Contact us</span>}
-          </a>
+          <ContactDialog collapsed={collapsed} />
           <button
             onClick={() => setAndPersistCollapsed(!collapsed)}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}

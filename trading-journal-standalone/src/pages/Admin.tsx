@@ -1,14 +1,29 @@
-import { Users, MessageSquare } from 'lucide-react';
+import { Users, MessageSquare, Mail } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '../lib/ui/card';
 import { Badge } from '../lib/ui/form';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../lib/ui/table';
 import { useFetch } from '../lib/api';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
+
+type AdminUser = {
+  id: number;
+  email: string;
+  name: string | null;
+  created_at: string;
+  signup_country: string | null;
+  signup_city: string | null;
+  login_count: number;
+  last_login_at: string | null;
+  last_seen_at: string | null;
+};
 
 type AdminStats = {
   total_users: number;
   daily_signups: { day: string; signups: number }[];
   feedback: { id: number; category: string; message: string; created_at: string; email: string }[];
+  users: AdminUser[];
+  contact_messages: { id: number; email: string; message: string; created_at: string }[];
 };
 
 function fmtDay(iso: string) {
@@ -20,18 +35,50 @@ function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-/** Admin-only view — registered users, signup growth, and submitted
- * feedback. Gated two ways: the sidebar link only renders for the admin
+// "3h ago" / "2d ago" / "just now" — used for last_seen_at, where relative
+// recency ("still active recently?") reads faster than an absolute
+// timestamp would.
+function fmtAgo(iso: string | null) {
+  if (!iso) return '—';
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function fmtLocation(u: AdminUser) {
+  if (!u.signup_country) return '—';
+  return u.signup_city ? `${u.signup_city}, ${u.signup_country}` : u.signup_country;
+}
+
+/** Admin-only view — registered users (with signup location and login
+ * frequency), signup growth, submitted feedback, and contact-form
+ * messages. Gated two ways: the sidebar link only renders for the admin
  * email (Layout.tsx), and the API itself independently checks the same
  * email server-side (api/columns.ts, ?resource=admin_stats) and 404s
  * everyone else — the nav link being hidden is a UX nicety, not the actual
  * access control, since a hidden link is still just a client-side string.
- * This covers "how many users have registered" and "is that growing"
- * directly from the database. Session duration and returning-vs-new visitor
- * breakdowns aren't here on purpose — that needs real session-level
- * tracking (see the PostHog wiring in lib/analytics.ts), which this app's
- * database was never built to capture; that data lives in your PostHog
- * dashboard instead, not duplicated here. */
+ *
+ * The users table's "Location" column comes from Vercel's own geolocation
+ * headers at signup/login time (zero third-party API calls — see
+ * getRequestGeo in api/_auth.js), and "Logins" / "Last active" come from
+ * real login events plus a throttled last-seen bump on each session check
+ * (see the schema.sql comment on users.login_count etc. for the full
+ * reasoning). Both are NULL for any account that registered before this
+ * was added — there's no way to retroactively know where a signup that
+ * already happened came from, so those rows just show "—".
+ *
+ * What's deliberately NOT here: true per-visit session duration ("how long
+ * was this person actually using the app in one sitting"). A login-event
+ * log can tell you IF and HOW OFTEN someone comes back, not how long they
+ * stayed each time — that needs real client-side activity tracking, which
+ * is exactly what PostHog (lib/analytics.ts) is for. Once that's set up,
+ * session length and engagement live in your PostHog dashboard instead of
+ * being duplicated here. */
 export default function Admin() {
   useDocumentMeta({ title: 'Admin — PipEcho', description: 'Internal stats.' });
   const { data, loading, error } = useFetch<AdminStats>('/columns?resource=admin_stats');
@@ -93,6 +140,68 @@ export default function Admin() {
               </BarChart>
             </ResponsiveContainer>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="w-4 h-4" /> Registered users
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table containerClassName="max-h-[420px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="bg-card">Email</TableHead>
+                <TableHead className="bg-card">Signed up</TableHead>
+                <TableHead className="bg-card">Location</TableHead>
+                <TableHead className="bg-card text-right">Logins</TableHead>
+                <TableHead className="bg-card">Last active</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.users.map(u => (
+                <TableRow key={u.id}>
+                  <TableCell className="font-medium">{u.email}</TableCell>
+                  <TableCell className="text-muted-foreground">{fmtDateTime(u.created_at)}</TableCell>
+                  <TableCell className="text-muted-foreground">{fmtLocation(u)}</TableCell>
+                  <TableCell className="text-right">{u.login_count}</TableCell>
+                  <TableCell className="text-muted-foreground">{fmtAgo(u.last_seen_at)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <p className="text-xs text-muted-foreground mt-3">
+            Location and login counts only track from when this was added — accounts registered before
+            then show "—" until they log in again. Real session-length/engagement metrics live in
+            PostHog once that's configured, not here.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Mail className="w-4 h-4" /> Contact messages
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.contact_messages.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nothing submitted yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {data.contact_messages.map(m => (
+                <div key={m.id} className="border-b border-border pb-3 last:border-b-0 last:pb-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-medium">{m.email}</span>
+                    <span className="text-xs text-muted-foreground">· {fmtDateTime(m.created_at)}</span>
+                  </div>
+                  <p className="text-sm text-foreground/90 whitespace-pre-wrap">{m.message}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 

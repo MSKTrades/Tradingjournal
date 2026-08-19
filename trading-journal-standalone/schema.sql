@@ -813,3 +813,57 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 
 CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback (created_at DESC);
+
+-- ============================================================================
+-- Contact Us — submitted from the in-app Contact form (sidebar, and the
+-- logged-out marketing pages' header/footer). Unlike feedback, this is
+-- unauthenticated: a logged-out visitor on the landing page can send one
+-- too, so there's no user_id here, just whatever email they typed in.
+-- Every submission is stored here regardless of whether email delivery
+-- (see RESEND_API_KEY in api/columns.ts) is configured or succeeds, so a
+-- message is never silently lost even if Resend isn't set up yet — the
+-- admin can always read it back via GET /api/columns?resource=admin_stats.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS contact_messages (
+  id          SERIAL PRIMARY KEY,
+  email       TEXT NOT NULL,
+  message     TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_messages_created ON contact_messages (created_at DESC);
+
+-- ============================================================================
+-- Lightweight "who registered, from where, how often are they coming back"
+-- signals for the admin page — answers a real question ("is anyone actually
+-- using this") without standing up a full analytics pipeline for it.
+--
+-- signup_country / signup_city / signup_ip are read straight off Vercel's
+-- own geolocation headers (x-vercel-ip-country / -city, injected by Vercel
+-- on every serverless function request, no third-party IP lookup needed —
+-- see getRequestGeo in api/_auth.js) at signup time, and backfilled from a
+-- later login for any account that signed up before this column existed
+-- (so it fills in over time rather than staying NULL forever). Locally
+-- (this dev-server.mjs stand-in, not real Vercel) those headers don't
+-- exist, so they'll just stay NULL — expected, not a bug.
+--
+-- login_count / last_login_at track actual login EVENTS (password login,
+-- Google OAuth) - deliberately not "every page load", since the session
+-- cookie can keep someone logged in across visits for weeks without ever
+-- hitting the login endpoint again, so this undercounts total usage on its
+-- own. last_seen_at fixes that gap: it's bumped (throttled to at most once
+-- per 15 minutes per user) on the session-check that fires on every app
+-- load, so it reflects real recency of use, not just explicit logins.
+--
+-- What this deliberately does NOT give you: true per-visit session
+-- duration (how long someone was actually active in one sitting). That
+-- needs client-side activity tracking, which is exactly what PostHog
+-- (lib/analytics.ts) is already wired up for — this table answers "how
+-- often" and "from where", PostHog's dashboard answers "how long".
+-- ============================================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_country TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_city TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_ip TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;

@@ -6,13 +6,12 @@ import { Link, useLocation } from 'react-router-dom';
 import { LogoMark } from '../../components/Logo';
 import { Button } from '../../lib/ui/button';
 import { useForceDarkTheme } from '../../lib/theme';
+import ContactDialog from '../../components/ContactDialog';
 
 const NAV_LINKS = [
   { to: '/pricing', label: 'Pricing' },
   { to: '/blog', label: 'Blog' },
 ];
-
-const SUPPORT_EMAIL = 'support@pipecho.com';
 
 export function MarketingHeader() {
   const location = useLocation();
@@ -44,12 +43,7 @@ export function MarketingHeader() {
               {link.label}
             </Link>
           ))}
-          <a
-            href={`mailto:${SUPPORT_EMAIL}`}
-            className="px-3 py-2 rounded-md text-sm font-medium transition-colors text-muted-foreground hover:text-foreground hover:bg-accent"
-          >
-            Contact us
-          </a>
+          <ContactDialog variant="nav" />
         </nav>
         <div className="flex items-center gap-2">
           <Link to="/login">
@@ -89,7 +83,7 @@ export function MarketingFooter() {
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Resources</h4>
           <ul className="space-y-2 text-sm">
             <li><Link to="/blog" className="text-muted-foreground hover:text-foreground">Blog</Link></li>
-            <li><a href={`mailto:${SUPPORT_EMAIL}`} className="text-muted-foreground hover:text-foreground">Contact us</a></li>
+            <li><ContactDialog variant="footer" /></li>
           </ul>
         </div>
         <div>

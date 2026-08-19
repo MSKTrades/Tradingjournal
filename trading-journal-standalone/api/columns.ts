@@ -4,7 +4,57 @@ import { randomBytes } from 'node:crypto';
 import { db, withApi } from './_db.js';
 import {
   parseCookies, sessionCookie, createSessionToken, getUserFromRequest, requireUserId, ownsTagGroup, isAdminEmail,
+  getRequestGeo,
 } from './_auth.js';
+
+// ---------------------------------------------------------------------------
+// Contact form email delivery. Best-effort: every submission is stored in
+// contact_messages regardless (see the POST resource === 'contact' handler
+// below), so a missing/misconfigured RESEND_API_KEY never loses a message —
+// it just means the admin has to check the Admin page instead of an inbox.
+//
+// Uses Resend's plain HTTP API (no SDK dependency) - https://resend.com.
+// Setup: create a free Resend account, verify the pipecho.com domain (adds
+// a couple of DNS records - Resend walks you through it), then set these
+// two env vars in Vercel:
+//   RESEND_API_KEY = re_xxxxx
+//   RESEND_FROM    = "PipEcho <contact@pipecho.com>"  (must be on the
+//                     verified domain - Resend rejects anything else)
+// CONTACT_TO_EMAIL defaults to support@pipecho.com if not set.
+//
+// Important: Resend's sandbox "from" address (onboarding@resend.dev) can
+// ONLY deliver to the email address on your own Resend account - sending to
+// support@pipecho.com specifically requires domain verification first.
+// Until RESEND_API_KEY is set, this function is a silent no-op.
+async function sendContactEmail(fromEmail: string, message: string) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return;
+  const from = process.env.RESEND_FROM || 'PipEcho <onboarding@resend.dev>';
+  const to = process.env.CONTACT_TO_EMAIL || 'support@pipecho.com';
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from,
+        to,
+        // Reply-To is the whole point here - it means hitting "Reply" in a
+        // normal inbox goes straight back to the person who wrote in,
+        // without them ever seeing an internal pipecho.com address.
+        reply_to: fromEmail,
+        subject: `PipEcho contact form — ${fromEmail}`,
+        text: `From: ${fromEmail}\n\n${message}`,
+      }),
+    });
+    if (!res.ok) {
+      console.error('Resend send failed:', res.status, await res.text().catch(() => ''));
+    }
+  } catch (err) {
+    // Never let an email-provider hiccup fail the request - the message is
+    // already safely in contact_messages by the time this is called.
+    console.error('Resend send threw:', err);
+  }
+}
 
 // Also handles the reusable Tags list (?resource=tags), Tag Groups
 // (?resource=tag_groups / tag_group_options), and Auth (?resource=auth)
@@ -169,24 +219,34 @@ async function oauthCallback(req: VercelRequest, res: VercelResponse, sql: Retur
 
     if (!profile.email) throw new Error(`${provider} did not return an email address`);
 
+    const geo = getRequestGeo(req);
     const existing = await sql.unsafe('SELECT * FROM users WHERE email = $1', [profile.email]);
     let user;
     if (existing.length > 0) {
       // Same email already has an account (maybe signed up with a password
       // originally) - just link this provider onto it rather than making a
-      // second account, and log in as that existing row.
+      // second account, and log in as that existing row. This is a real
+      // login event too, same as the password path above - bump the same
+      // counters, and backfill signup geo if this account predates it.
       user = existing[0];
       await sql.unsafe(
         `UPDATE users SET oauth_provider = COALESCE(oauth_provider, $2), oauth_id = COALESCE(oauth_id, $3),
-                          avatar_url = COALESCE(avatar_url, $4), name = COALESCE(name, $5)
+                          avatar_url = COALESCE(avatar_url, $4), name = COALESCE(name, $5),
+                          login_count = login_count + 1, last_login_at = now(), last_seen_at = now(),
+                          signup_country = COALESCE(signup_country, $6),
+                          signup_city = COALESCE(signup_city, $7),
+                          signup_ip = COALESCE(signup_ip, $8)
          WHERE id = $1`,
-        [user.id, provider, profile.providerId, profile.avatarUrl, profile.name]
+        [user.id, provider, profile.providerId, profile.avatarUrl, profile.name, geo.country, geo.city, geo.ip]
       );
     } else {
       const rows = await sql.unsafe(
-        `INSERT INTO users (email, password_hash, name, oauth_provider, oauth_id, avatar_url)
-         VALUES ($1, NULL, $2, $3, $4, $5) RETURNING *`,
-        [profile.email, profile.name, provider, profile.providerId, profile.avatarUrl]
+        `INSERT INTO users (
+           email, password_hash, name, oauth_provider, oauth_id, avatar_url,
+           signup_country, signup_city, signup_ip, login_count, last_login_at, last_seen_at
+         )
+         VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, 1, now(), now()) RETURNING *`,
+        [profile.email, profile.name, provider, profile.providerId, profile.avatarUrl, geo.country, geo.city, geo.ip]
       );
       user = rows[0];
       await createStarterAccount(sql, user.id);
@@ -213,6 +273,26 @@ async function handleAuth(req: VercelRequest, res: VercelResponse, sql: ReturnTy
     if (action === 'google_callback') { await oauthCallback(req, res, sql, 'google'); return; }
 
     const user = await getUserFromRequest(req, sql);
+    if (user) {
+      // This fires on every app load (AuthProvider's session-check), which
+      // is exactly why it's throttled server-side via the WHERE clause
+      // rather than in JS - most calls become a no-op UPDATE (matches zero
+      // rows) instead of a real write, so an active user browsing for an
+      // hour doesn't generate dozens of writes, but last_seen_at still
+      // reflects real recency of use rather than only explicit logins.
+      // Awaited (not fire-and-forget) on purpose - a serverless function can
+      // be frozen the moment the response is sent, so an un-awaited write
+      // here could just never actually happen. Wrapped in try/catch so a
+      // failure here never fails the session check itself.
+      try {
+        await sql.unsafe(
+          `UPDATE users SET last_seen_at = now() WHERE id = $1 AND (last_seen_at IS NULL OR last_seen_at < now() - INTERVAL '15 minutes')`,
+          [user.id]
+        );
+      } catch (err) {
+        console.error('last_seen_at update failed:', err);
+      }
+    }
     res.status(200).json({ user });
     return;
   }
@@ -242,9 +322,11 @@ async function handleAuth(req: VercelRequest, res: VercelResponse, sql: ReturnTy
     if (existing.length > 0) { res.status(409).json({ error: 'An account with that email already exists.' }); return; }
 
     const passwordHash = await bcrypt.hash(password, 10);
+    const geo = getRequestGeo(req);
     const rows = await sql.unsafe(
-      `INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id, email, name, created_at`,
-      [email, passwordHash, name]
+      `INSERT INTO users (email, password_hash, name, signup_country, signup_city, signup_ip, login_count, last_login_at, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 1, now(), now()) RETURNING id, email, name, created_at`,
+      [email, passwordHash, name, geo.country, geo.city, geo.ip]
     );
     const user = rows[0];
     await createStarterAccount(sql, user.id);
@@ -269,6 +351,22 @@ async function handleAuth(req: VercelRequest, res: VercelResponse, sql: ReturnTy
     }
     const token = await createSessionToken(row.id, row.email);
     res.setHeader('Set-Cookie', sessionCookie(token));
+    // Fire-and-record: a real login event (not just a session-check) always
+    // bumps login_count/last_login_at, and backfills signup_country/city/ip
+    // from THIS login's geo if the account predates those columns and never
+    // got one - best-effort, not meant to be a precise "where they signed up
+    // from" for every pre-existing account, just better than staying NULL
+    // forever.
+    const geo = getRequestGeo(req);
+    await sql.unsafe(
+      `UPDATE users SET
+         login_count = login_count + 1, last_login_at = now(), last_seen_at = now(),
+         signup_country = COALESCE(signup_country, $2),
+         signup_city = COALESCE(signup_city, $3),
+         signup_ip = COALESCE(signup_ip, $4)
+       WHERE id = $1`,
+      [row.id, geo.country, geo.city, geo.ip]
+    );
     res.status(200).json({ user: { id: row.id, email: row.email, name: row.name, created_at: row.created_at } });
     return;
   }
@@ -283,6 +381,26 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     // Auth itself is the one thing here that must NOT require a session —
     // it's how you get one. Everything below this point does require it.
     await handleAuth(req, res, sql);
+    return;
+  }
+
+  // Contact form is the other deliberate exception - it has to work for a
+  // logged-out visitor on the public landing page, not just inside the app,
+  // so it's handled here too, before requireUserId. No rate limiting on
+  // this yet (same known gap as login/signup - see the security review),
+  // worth revisiting if it ever gets abused since it's a public endpoint.
+  if (req.method === 'POST' && req.body?.resource === 'contact') {
+    const email = String(req.body.email ?? '').trim();
+    const message = String(req.body.message ?? '').trim();
+    if (!EMAIL_RE.test(email)) { res.status(400).json({ error: 'Enter a valid email address.' }); return; }
+    if (!message) { res.status(400).json({ error: 'Message is required.' }); return; }
+    if (message.length > 4000) { res.status(400).json({ error: 'Message is too long.' }); return; }
+
+    await sql.unsafe(`INSERT INTO contact_messages (email, message) VALUES ($1, $2)`, [email, message.slice(0, 4000)]);
+    // Best-effort - never lets a Resend hiccup fail the request, the
+    // message above is already safely stored either way.
+    await sendContactEmail(email, message);
+    res.status(200).json({ ok: true });
     return;
   }
 
@@ -308,7 +426,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       const requester = await getUserFromRequest(req, sql);
       if (!requester || !isAdminEmail(requester.email)) { res.status(404).json({ error: 'Not found' }); return; }
 
-      const [totalRows, dailyRows, feedbackRows] = await Promise.all([
+      const [totalRows, dailyRows, feedbackRows, userRows, contactRows] = await Promise.all([
         sql.unsafe('SELECT COUNT(*)::int AS count FROM users'),
         // Signups per day, last 30 days — the simplest honest answer to
         // "how many users have registered" and "is that number growing".
@@ -325,12 +443,27 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
           ORDER BY f.created_at DESC
           LIMIT 50
         `),
+        // Per-user detail: who registered, from where (Vercel geolocation,
+        // see getRequestGeo), and how often they're actually coming back
+        // (login_count / last_login_at / last_seen_at - see the schema.sql
+        // comment on these columns for why "session duration" isn't here:
+        // that needs PostHog, not this table).
+        sql.unsafe(`
+          SELECT id, email, name, created_at, signup_country, signup_city,
+                 login_count, last_login_at, last_seen_at
+          FROM users
+          ORDER BY created_at DESC
+          LIMIT 200
+        `),
+        sql.unsafe(`SELECT id, email, message, created_at FROM contact_messages ORDER BY created_at DESC LIMIT 50`),
       ]);
 
       res.status(200).json({
         total_users: totalRows[0]?.count ?? 0,
         daily_signups: dailyRows,
         feedback: feedbackRows,
+        users: userRows,
+        contact_messages: contactRows,
       });
       return;
     }
