@@ -1,101 +1,49 @@
-# PipEcho — Technical SEO fix (per-page titles, sitemap, robots.txt, OG image)
+# PipEcho — multi-tenancy / data-isolation fix (apply before any real signups)
 
-This is the fix I flagged in the growth plan: every page was shipping the
-same `<title>` and description, there was no sitemap/robots.txt, and shared
-links had no preview image. Fixed below, verified end-to-end.
+## What this fixes
+Every signed-up user was reading and writing the exact same shared data. `accounts`, `trades`, `strategies`, `tags`, `tag_groups`, `custom_columns`, `checklists`, and `daily_routine_notes` had no owner column at all, and no API handler checked who was logged in before touching them. `GET /api/accounts` was a plain `SELECT * FROM accounts` — no `WHERE`, no auth check. This wasn't a subtle edge case: it meant the very first Discord signup would land in the same account/trade data as every other user, including yours, and could edit or delete it.
+
+This is now fixed. Every table that holds personal data has a real owner, every API handler checks the logged-in session and rejects (401) or filters (404 on a foreign id) anything that isn't the caller's own, and I verified it end-to-end against a real second account, not just by reading the code — see "Verified" below.
 
 ## How to apply
-Upload these files via GitHub "Add files via upload," preserving folder
-structure (the new `public/`, `scripts/`, and `src/lib/` paths already
-exist from earlier deliveries, so this just adds/overwrites files inside
-them):
 
-- `index.html` (overwrite)
-- `package.json` (overwrite — one line changed: `build` script now runs a
-  sitemap-generation step first)
-- `public/robots.txt` (new)
-- `public/sitemap.xml` (new — also auto-regenerated on every `npm run
-  build`, see below)
-- `public/og-image.png` (new — the social-preview image)
-- `scripts/generate-sitemap.mjs` (new)
-- `src/lib/useDocumentMeta.ts` (new)
-- `src/pages/Landing.tsx`, `Pricing.tsx`, `Blog.tsx`, `BlogPost.tsx`,
-  `Login.tsx`, `Signup.tsx` (overwrite)
+**1. Run the schema migration FIRST**, against your production Neon database, before deploying the new code. Open Neon's SQL console (or `psql`) and run the entirety of `schema.sql` — it's the same idempotent full-schema file you've always run, just with a new migration block appended at the end. It's safe to run against your existing database: it adds `user_id` columns, backfills every existing row to your account (the oldest registered user), and only locks columns as `NOT NULL` once every row has a value. Read the comment block at the top of that new section in the file — it explains the backfill assumption explicitly. **If more than one real user has already signed up in production, stop and tell me before running this** — the backfill assigns every existing row to a single account, which is only correct if that account is still the only one with real data in it.
 
-Commit, redeploy on Vercel. Nothing here touches `api/` — still exactly 12
-serverless functions, no change to your Hobby-plan headroom.
+**2. Then upload the code files** via GitHub "Add files via upload," preserving folder structure:
 
-## What was actually wrong (verified, not assumed)
-I checked the live site's HTML before touching anything: every route —
-Landing, Pricing, Blog, all three blog posts — served the identical
-`<title>PipEcho</title>` and one generic description. No Open Graph or
-Twitter Card tags at all, no `sitemap.xml`, no `robots.txt`.
+- `api/_auth.js` (new — shared session/ownership helpers)
+- `api/_db.js` (overwrite — one change: generic error messages instead of leaking raw DB errors to the client)
+- `api/accounts.ts`, `api/columns.ts`, `api/strategies.ts`, `api/checklist.ts` (overwrite)
+- `api/trades/index.ts`, `api/trades/[id].ts`, `api/trades/bulk-add.ts`, `api/trades/bulk-delete.ts`, `api/trades/performance.ts` (overwrite)
+- `api/summary/index.ts` (overwrite)
 
-Concretely, that meant: Google saw four+ pages with identical titles
-(reads as duplicate/low-quality content, not four distinct useful
-articles); any link to a blog post shared on Reddit/Discord/X showed no
-preview at all — just a bare link; and there was nothing telling search
-engines your blog posts exist beyond them stumbling onto internal links.
+Commit, redeploy. No new serverless functions added (`_auth.js` is a shared module, not a route) — still exactly 12.
 
-## What's fixed now
+## What actually changed
 
-**Per-page titles and descriptions.** Every public page — Landing,
-Pricing, Blog, each blog post, Login, Signup — now sets its own
-`<title>` and meta description via a small shared hook
-(`useDocumentMeta`), and restores the site default when you navigate away.
-Verified this works both on a fresh page load and on in-app client-side
-navigation (clicking between pages doesn't leave a stale title behind).
+**Every account, strategy, checklist, tag, tag group, and daily-routine note now belongs to exactly one user** (`user_id` column, backfilled and enforced `NOT NULL`). Trades, custom fields, checklist items, and tag-group options don't get their own `user_id` — they're owned transitively through the account/checklist/tag-group they belong to, checked via a join at read/write time.
 
-**Structured data (JSON-LD).** The homepage now carries `SoftwareApplication`
-schema, and every blog post carries `Article` schema (headline, description,
-publish date). This is what lets Google show richer results — an article
-card with your date, for instance — instead of a bare blue link.
+**Every API endpoint now requires a valid session before doing anything**, via a new shared `requireUserId()` helper — a request with no cookie, or an expired one, gets a flat 401. Beyond that, every endpoint that receives an id from the client (an account_id, a trade id, a checklist_id, a strategy id) verifies that id actually belongs to the logged-in user before reading or writing it. An id that belongs to someone else behaves exactly like an id that doesn't exist — a 404, not a 403 — so there's no way to even confirm another user's data exists by probing ids.
 
-**Sitemap + robots.txt.** `robots.txt` points crawlers at the public pages
-and explicitly tells them not to bother crawling the authenticated app
-(nothing there is indexable behind a login anyway — no point wasting crawl
-budget on it). `sitemap.xml` lists every public page and every blog post.
+**New signups get their own starter "Default" account automatically** (both password signup and first-time Google sign-in) — this used to happen once, globally, for the single pre-existing install; now every new user needs their own.
 
-Importantly, the sitemap is **not hand-maintained** — `npm run build` now
-runs `scripts/generate-sitemap.mjs` first, which reads the live list of
-blog post slugs straight out of `blogPosts.ts` and regenerates
-`sitemap.xml` from it automatically. Write your 5th blog post, run a
-build, and it's in the sitemap with zero extra steps — no separate file to
-remember to update.
+**Tag names and daily-routine note dates were globally unique** (one "A+ Setup" tag for the whole app, one note per calendar date, for everyone) — now they're unique per-user, so two different traders can each have their own "A+ Setup" tag without colliding.
 
-**A real Open Graph image.** `public/og-image.png` — on-brand (dark
-background, the actual PipEcho gradient mark, matching the site's now-dark
-look), sized correctly for link previews (1200×630). Every shared link now
-shows a proper branded card instead of nothing.
+**Error responses no longer leak internals.** A failed request used to return the raw database error message (`err.message`) straight to the client — could include table/column names or query fragments. Now the client gets a generic message and the real error is still logged server-side for you to debug from Vercel's logs.
 
-## One honest limitation, worth understanding
-The per-page titles/descriptions above are set with client-side
-JavaScript. Google renders JavaScript before indexing, so it sees these —
-that part's fully fixed for search. But most link-preview bots (Twitter,
-Discord, Slack, Facebook) do **not** run JavaScript — they only ever read
-whatever's already in the raw HTML response. Since this is a single-page
-app with one static `index.html`, that raw HTML is the same for every
-route, which means: a shared link to a specific blog post will show the
-new branded OG image and the site-wide title/description — a real
-upgrade from showing nothing — but not yet that specific post's own title
-and excerpt in the preview card.
+## Verified before sending — not just read, actually run
+I stood up a local copy of the schema and API, ran the migration against it, then drove the real HTTP endpoints with two separate logged-in users (one your existing `bugtest@example.com` account with real trade/strategy/checklist data, one a brand-new signup) and confirmed:
 
-Fixing that properly needs actual per-route HTML — either a small Vercel
-Edge Middleware that rewrites the title/meta tags per-path before serving
-(doesn't cost one of your 12 serverless function slots, since Middleware
-is a separate Vercel primitive), or prerendering the public routes to
-static HTML at build time. I didn't build either of those in this pass —
-middleware in particular isn't something I can safely verify works
-without a real Vercel deployment to test against, and shipping unverified
-routing logic risks breaking the site rather than improving it. Worth
-doing as a deliberate next step once you want it; flagging now so it's a
-known, chosen gap rather than a surprise.
+- The new signup landed with only their own starter account — none of the existing account's trades, strategies, or tags were visible to them.
+- The new user's attempt to `PUT` (rename) and `DELETE` the existing user's account by id both returned 404, and the existing account's data was confirmed untouched afterward.
+- A request with no session cookie at all got 401 on `/api/accounts`.
+- Both users creating a tag with the identical name ("A+ Setup") succeeded independently — confirms the per-user uniqueness fix works, not just the isolation.
+- Custom fields, checklists, and daily-routine notes all round-tripped correctly for the existing account after the migration — same data, same behavior, no regression.
+- Full app smoke test (logged in as your existing account, dark mode, Summary/Journal/Strategies pages) — real trade data, real strategies, all rendering exactly as before. `tsc --noEmit` and `npm run build` both clean.
 
-## Verified before sending
-- `tsc --noEmit` and `npm run build` — clean, sitemap generation step runs
-  correctly and produces valid XML
-- Confirmed `robots.txt` and `sitemap.xml` serve correctly
-- Headless-browser check of `/`, `/pricing`, `/blog`, a blog post, `/login`,
-  `/signup` — each shows its own correct title/description/JSON-LD
-- Confirmed titles update correctly on in-app navigation between pages, not
-  just on a fresh page load, and restore properly when leaving a page
+## What this does NOT cover (deliberately, not silently)
+`api/backtest.ts` and the `chart_datasets`/`backtest_trades` tables were left untouched — Chart Replay & Backtesting is already disabled in the UI (the nav tab and route both show "Coming soon"), so there's no live user-facing surface pointing at it. It'll need the same ownership treatment before it ships, whenever that is — flagging it now so it doesn't get missed later, not because it's fine to skip.
+
+The wildcard CORS header (`Access-Control-Allow-Origin: *`) is still there. It's lower-risk now than before this fix, since every data endpoint requires a valid session and browsers already block credentialed cross-origin requests against a wildcard origin — but tightening it to your real domain is still worth doing as a later polish pass.
+
+A 401 from an expired session currently just surfaces as an error message in the UI rather than redirecting to `/login` automatically — minor UX gap, not a security one, worth a follow-up.

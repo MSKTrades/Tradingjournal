@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db, withApi, recalcAccountCapital } from '../_db.js';
+import { requireUserId, ownsAccount } from '../_auth.js';
 
 // `comments` and `screenshots` are derived from notes_blocks server-side so
 // they can never drift out of sync with what's actually in the editor —
@@ -123,15 +124,28 @@ async function addTrade(p: any) {
 }
 
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
+  const sql = db();
+  const userId = await requireUserId(req, res, sql);
+  if (!userId) return;
+
   if (req.method === 'GET') {
     // Tolerant of a missing/invalid account_id (e.g. during the first render
     // before the account context has resolved) — return an empty list rather
     // than erroring, since the frontend will refetch once it has a real id.
+    // An account_id that doesn't belong to this user gets the same
+    // empty-list treatment — no need to distinguish "doesn't exist" from
+    // "isn't yours" for a GET.
     const accountIdParam = req.query.account_id;
     const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
-    if (!accountId || isNaN(accountId)) { res.status(200).json([]); return; }
+    if (!accountId || isNaN(accountId) || !(await ownsAccount(sql, accountId, userId))) {
+      res.status(200).json([]);
+      return;
+    }
     res.status(200).json(await listTrades(accountId));
   } else if (req.method === 'POST') {
+    const accountId = Number(req.body?.account_id);
+    if (!accountId || isNaN(accountId)) { res.status(400).json({ error: 'account_id is required' }); return; }
+    if (!(await ownsAccount(sql, accountId, userId))) { res.status(404).json({ error: 'Account not found' }); return; }
     res.status(200).json(await addTrade(req.body));
   } else {
     res.status(405).json({ error: 'Method not allowed' });

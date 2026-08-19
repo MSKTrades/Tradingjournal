@@ -1,8 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import bcrypt from 'bcryptjs';
-import { SignJWT, jwtVerify } from 'jose';
 import { randomBytes } from 'node:crypto';
 import { db, withApi } from './_db.js';
+import {
+  parseCookies, sessionCookie, createSessionToken, getUserFromRequest, requireUserId, ownsTagGroup,
+} from './_auth.js';
 
 // Also handles the reusable Tags list (?resource=tags), Tag Groups
 // (?resource=tag_groups / tag_group_options), and Auth (?resource=auth)
@@ -14,79 +16,31 @@ import { db, withApi } from './_db.js';
 // `resource` (query param on GET/DELETE, body field on POST) defaults to
 // `columns` since that's the original/more common caller. Auth doesn't
 // really fit that CRUD shape, but it's the only file left with headroom.
-async function getTagGroups(sql: ReturnType<typeof db>) {
-  const groups = await sql.unsafe('SELECT * FROM tag_groups ORDER BY sort_order ASC, id ASC');
-  const options = await sql.unsafe('SELECT * FROM tag_group_options ORDER BY sort_order ASC, id ASC');
+//
+// Session/JWT helpers used to live here as private functions; they're now
+// shared via api/_auth.js so accounts.ts, trades/*, strategies.ts, and
+// checklist.ts can all check "who is this?" too, not just this file.
+async function getTagGroups(sql: ReturnType<typeof db>, userId: number) {
+  const groups = await sql.unsafe('SELECT * FROM tag_groups WHERE user_id = $1 ORDER BY sort_order ASC, id ASC', [userId]);
+  const groupIds = groups.map((g: any) => g.id);
+  const options = groupIds.length
+    ? await sql.unsafe('SELECT * FROM tag_group_options WHERE group_id = ANY($1::int[]) ORDER BY sort_order ASC, id ASC', [groupIds])
+    : [];
   return groups.map((g: any) => ({ ...g, options: options.filter((o: any) => o.group_id === g.id) }));
 }
 
-// ---------------------------------------------------------------------------
-// Auth helpers. Sessions are a signed JWT (HS256 via `jose`) stored in an
-// httpOnly cookie — never readable/tamperable from client JS, and since the
-// app is same-origin, the browser attaches it to every /api request
-// automatically with no change needed to src/lib/api.ts's fetch wrapper.
-// ---------------------------------------------------------------------------
-const SESSION_COOKIE = 'ff_session';
-const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
-
-function getSecretKey() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error('JWT_SECRET environment variable is not set');
-  return new TextEncoder().encode(secret);
-}
-
-function parseCookies(req: VercelRequest): Record<string, string> {
-  const header = req.headers.cookie;
-  if (!header) return {};
-  const out: Record<string, string> = {};
-  for (const part of header.split(';')) {
-    const idx = part.indexOf('=');
-    if (idx === -1) continue;
-    const key = part.slice(0, idx).trim();
-    const val = part.slice(idx + 1).trim();
-    if (key) out[key] = decodeURIComponent(val);
-  }
-  return out;
-}
-
-function sessionCookie(token: string | null) {
-  // Empty value + Max-Age=0 clears the cookie (used on logout).
-  const parts = [
-    `${SESSION_COOKIE}=${token ?? ''}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    token ? `Max-Age=${SESSION_MAX_AGE_SECONDS}` : 'Max-Age=0',
-  ];
-  // Only set Secure in production — a local `vite dev` / `vercel dev` server
-  // over plain http would otherwise have the cookie silently rejected by
-  // the browser.
-  if (process.env.NODE_ENV === 'production') parts.push('Secure');
-  return parts.join('; ');
-}
-
-async function createSessionToken(userId: number, email: string) {
-  return new SignJWT({ email })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setSubject(String(userId))
-    .setIssuedAt()
-    .setExpirationTime(`${SESSION_MAX_AGE_SECONDS}s`)
-    .sign(getSecretKey());
-}
-
-async function getUserFromRequest(req: VercelRequest, sql: ReturnType<typeof db>) {
-  const token = parseCookies(req)[SESSION_COOKIE];
-  if (!token) return null;
-  try {
-    const { payload } = await jwtVerify(token, getSecretKey());
-    const userId = Number(payload.sub);
-    if (!userId || isNaN(userId)) return null;
-    const rows = await sql.unsafe('SELECT id, email, name, created_at FROM users WHERE id = $1', [userId]);
-    return rows[0] ?? null;
-  } catch {
-    // Expired, malformed, or signed with an old/rotated secret — treat as logged out.
-    return null;
-  }
+// Every brand-new account (password signup, or the first time someone signs
+// in with a given Google account) needs at least one trading account to
+// exist — the account switcher, Journal, Summary, etc. all assume there's
+// something to select. This used to be handled once, globally, by a
+// fresh-install migration in schema.sql (back when there was only ever one
+// person's data); now that each signup gets its own isolated data, each
+// signup creates its own starter account instead.
+async function createStarterAccount(sql: ReturnType<typeof db>, userId: number) {
+  await sql.unsafe(
+    `INSERT INTO accounts (name, type, sort_order, user_id) VALUES ('Default', 'Live', 0, $1)`,
+    [userId]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +189,7 @@ async function oauthCallback(req: VercelRequest, res: VercelResponse, sql: Retur
         [profile.email, profile.name, provider, profile.providerId, profile.avatarUrl]
       );
       user = rows[0];
+      await createStarterAccount(sql, user.id);
     }
 
     const token = await createSessionToken(user.id, user.email);
@@ -292,6 +247,7 @@ async function handleAuth(req: VercelRequest, res: VercelResponse, sql: ReturnTy
       [email, passwordHash, name]
     );
     const user = rows[0];
+    await createStarterAccount(sql, user.id);
     const token = await createSessionToken(user.id, user.email);
     res.setHeader('Set-Cookie', sessionCookie(token));
     res.status(200).json({ user });
@@ -324,31 +280,41 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
 
   if (req.query.resource === 'auth' || (req.method === 'POST' && req.body?.resource === 'auth')) {
+    // Auth itself is the one thing here that must NOT require a session —
+    // it's how you get one. Everything below this point does require it.
     await handleAuth(req, res, sql);
     return;
   }
 
+  const userId = await requireUserId(req, res, sql);
+  if (!userId) return;
+
   if (req.method === 'GET') {
     if (req.query.resource === 'tags') {
-      const rows = await sql.unsafe('SELECT * FROM tags ORDER BY sort_order ASC, id ASC');
+      const rows = await sql.unsafe('SELECT * FROM tags WHERE user_id = $1 ORDER BY sort_order ASC, id ASC', [userId]);
       res.status(200).json(rows);
       return;
     }
     if (req.query.resource === 'tag_groups') {
-      res.status(200).json(await getTagGroups(sql));
+      res.status(200).json(await getTagGroups(sql, userId));
       return;
     }
     // Custom fields are scoped to a single account (see schema.sql's
     // account-scoping migration) — tolerant of a missing/invalid account_id
     // the same way GET /trades is, since this fires before the account
     // context has resolved on first render; an empty list there just means
-    // "nothing to show yet", not an error.
+    // "nothing to show yet", not an error. An account_id that doesn't belong
+    // to this user gets the same empty-list treatment, not a 403 — no need
+    // to reveal whether that id exists at all.
     const accountIdParam = req.query.account_id;
     const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
     if (!accountId || isNaN(accountId)) { res.status(200).json([]); return; }
     const rows = await sql.unsafe(
-      'SELECT * FROM custom_columns WHERE account_id = $1 ORDER BY sort_order ASC, id ASC',
-      [accountId]
+      `SELECT cc.* FROM custom_columns cc
+       JOIN accounts a ON a.id = cc.account_id
+       WHERE cc.account_id = $1 AND a.user_id = $2
+       ORDER BY cc.sort_order ASC, cc.id ASC`,
+      [accountId, userId]
     );
     res.status(200).json(rows);
   } else if (req.method === 'POST') {
@@ -356,17 +322,17 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     if (p.resource === 'tags') {
       const name = String(p.name ?? '').trim();
       if (!name) { res.status(400).json({ error: 'name is required' }); return; }
-      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM tags');
+      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM tags WHERE user_id = $1', [userId]);
       const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
-      // A tag someone already created (case-insensitive) just returns the
+      // A tag this user already created (case-insensitive) just returns the
       // existing row instead of erroring on the UNIQUE constraint — the
       // picker calls this optimistically whenever a not-yet-known name is
       // typed, so "already exists" should be a silent no-op, not a failure.
-      const existing = await sql.unsafe('SELECT * FROM tags WHERE lower(name) = lower($1)', [name]);
+      const existing = await sql.unsafe('SELECT * FROM tags WHERE user_id = $1 AND lower(name) = lower($2)', [userId, name]);
       if (existing.length > 0) { res.status(200).json(existing[0]); return; }
       const rows = await sql.unsafe(
-        `INSERT INTO tags (name, color, sort_order) VALUES ($1, $2, $3) RETURNING *`,
-        [name, p.color ?? '#f59e0b', nextOrder]
+        `INSERT INTO tags (name, color, sort_order, user_id) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [name, p.color ?? '#f59e0b', nextOrder, userId]
       );
       res.status(200).json(rows[0]);
       return;
@@ -374,13 +340,13 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     if (p.resource === 'tag_groups') {
       const name = String(p.name ?? '').trim();
       if (!name) { res.status(400).json({ error: 'name is required' }); return; }
-      const existing = await sql.unsafe('SELECT * FROM tag_groups WHERE lower(name) = lower($1)', [name]);
+      const existing = await sql.unsafe('SELECT * FROM tag_groups WHERE user_id = $1 AND lower(name) = lower($2)', [userId, name]);
       if (existing.length > 0) { res.status(200).json({ ...existing[0], options: [] }); return; }
-      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM tag_groups');
+      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM tag_groups WHERE user_id = $1', [userId]);
       const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
       const rows = await sql.unsafe(
-        `INSERT INTO tag_groups (name, sort_order) VALUES ($1, $2) RETURNING *`,
-        [name, nextOrder]
+        `INSERT INTO tag_groups (name, sort_order, user_id) VALUES ($1, $2, $3) RETURNING *`,
+        [name, nextOrder, userId]
       );
       res.status(200).json({ ...rows[0], options: [] });
       return;
@@ -389,6 +355,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       const groupId = Number(p.group_id);
       const name = String(p.name ?? '').trim();
       if (!groupId || isNaN(groupId) || !name) { res.status(400).json({ error: 'group_id and name are required' }); return; }
+      if (!(await ownsTagGroup(sql, groupId, userId))) { res.status(404).json({ error: 'Tag group not found' }); return; }
       const existing = await sql.unsafe(
         'SELECT * FROM tag_group_options WHERE group_id = $1 AND lower(name) = lower($2)',
         [groupId, name]
@@ -405,6 +372,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     }
     const accountId = Number(p.account_id);
     if (!accountId || isNaN(accountId)) { res.status(400).json({ error: 'account_id is required' }); return; }
+    const ownRows = await sql.unsafe('SELECT 1 FROM accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
+    if (!ownRows[0]) { res.status(404).json({ error: 'Account not found' }); return; }
     const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM custom_columns WHERE account_id = $1', [accountId]);
     const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
     // Same col_key derived on this account before (e.g. two fields that both
@@ -422,21 +391,29 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const id = Number(req.query.id);
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
     if (req.query.resource === 'tags') {
-      await sql.unsafe('DELETE FROM tags WHERE id = $1', [id]);
+      await sql.unsafe('DELETE FROM tags WHERE id = $1 AND user_id = $2', [id, userId]);
       res.status(200).json({ deleted: 1 });
       return;
     }
     if (req.query.resource === 'tag_groups') {
-      await sql.unsafe('DELETE FROM tag_groups WHERE id = $1', [id]); // cascades to tag_group_options
+      await sql.unsafe('DELETE FROM tag_groups WHERE id = $1 AND user_id = $2', [id, userId]); // cascades to tag_group_options
       res.status(200).json({ deleted: 1 });
       return;
     }
     if (req.query.resource === 'tag_group_options') {
-      await sql.unsafe('DELETE FROM tag_group_options WHERE id = $1', [id]);
+      await sql.unsafe(
+        `DELETE FROM tag_group_options o USING tag_groups g
+         WHERE o.id = $1 AND g.id = o.group_id AND g.user_id = $2`,
+        [id, userId]
+      );
       res.status(200).json({ deleted: 1 });
       return;
     }
-    await sql.unsafe('DELETE FROM custom_columns WHERE id = $1', [id]);
+    await sql.unsafe(
+      `DELETE FROM custom_columns cc USING accounts a
+       WHERE cc.id = $1 AND a.id = cc.account_id AND a.user_id = $2`,
+      [id, userId]
+    );
     res.status(200).json({ deleted: 1 });
   } else {
     res.status(405).json({ error: 'Method not allowed' });

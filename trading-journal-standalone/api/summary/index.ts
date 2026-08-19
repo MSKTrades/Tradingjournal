@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db, withApi } from '../_db.js';
+import { requireUserId, ownsAccount } from '../_auth.js';
 
 type Trade = {
   id: number;
@@ -307,13 +308,16 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
 
   try {
     const sql = db();
+    const userId = await requireUserId(req, res, sql);
+    if (!userId) return;
 
     // Tolerant of a missing/invalid account_id (e.g. before the account
     // context has resolved on first render) — return empty results rather
     // than erroring, since the frontend refetches once it has a real id.
+    // An account_id that isn't this user's own gets the same treatment.
     const accountIdParam = req.query.account_id;
     const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
-    if (!accountId || isNaN(accountId)) {
+    if (!accountId || isNaN(accountId) || !(await ownsAccount(sql, accountId, userId))) {
       res.status(200).json([]);
       return;
     }
@@ -344,10 +348,10 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       // accounts as intended.
       sql.unsafe(`
         SELECT * FROM strategies
-        WHERE active = true
-          AND (account_ids = '[]'::jsonb OR account_ids @> $1::jsonb)
+        WHERE active = true AND user_id = $1
+          AND (account_ids = '[]'::jsonb OR account_ids @> $2::jsonb)
         ORDER BY sort_order ASC, id ASC
-      `, [[accountId]]),
+      `, [userId, [accountId]]),
     ]);
 
     const trades = tradesRaw as Trade[];
@@ -425,7 +429,11 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
 
     res.status(200).json(results);
   } catch (err: any) {
+    // Logged in full server-side; the client only gets a generic message —
+    // a raw DB/driver error can leak internal details (table/column names,
+    // query fragments) that are more useful to an attacker than to a user
+    // seeing an error toast.
     console.error('Summary error:', err);
-    res.status(500).json({ error: err.message || 'Unknown error' });
+    res.status(500).json({ error: 'Something went wrong loading your summary. Please try again.' });
   }
 });

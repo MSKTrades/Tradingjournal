@@ -1,11 +1,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db, withApi } from './_db.js';
+import { requireUserId } from './_auth.js';
 
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
+  const userId = await requireUserId(req, res, sql);
+  if (!userId) return;
 
   if (req.method === 'GET') {
-    const rows = await sql.unsafe('SELECT * FROM strategies ORDER BY sort_order ASC, id ASC');
+    const rows = await sql.unsafe('SELECT * FROM strategies WHERE user_id = $1 ORDER BY sort_order ASC, id ASC', [userId]);
     const normalized = rows.map((s: any) => ({
       ...s,
       conditions: typeof s.conditions === 'string' ? JSON.parse(s.conditions || '[]') : s.conditions ?? [],
@@ -22,8 +25,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const p = req.body;
     const rows = await sql.unsafe(
       `INSERT INTO strategies
-         (name, conditions, days, time_start, time_end, tp1_rr, tp2_rr, split_percent, sort_order, active, account_ids)
-       VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+         (name, conditions, days, time_start, time_end, tp1_rr, tp2_rr, split_percent, sort_order, active, account_ids, user_id)
+       VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
        RETURNING id`,
       [
         p.name,
@@ -40,25 +43,30 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.sort_order ?? 0,
         p.active ?? true,
         p.account_ids ?? [],
+        userId,
       ]
     );
     res.status(200).json(rows[0]);
     return;
   }
 
-  // PUT and DELETE both operate on a single strategy, identified by ?id=
+  // PUT and DELETE both operate on a single strategy, identified by ?id= —
+  // scoped WHERE ... AND user_id = $userId so an id that belongs to someone
+  // else's strategy behaves like it doesn't exist (0 rows affected), not
+  // like it was found and quietly edited/removed.
   const id = Number(req.query.id);
   if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
 
   if (req.method === 'PUT') {
     const p = req.body;
-    await sql.unsafe(
+    const rows = await sql.unsafe(
       `UPDATE strategies SET
          name = $1, conditions = $2::jsonb, days = $3::jsonb,
          time_start = $4, time_end = $5,
          tp1_rr = $6, tp2_rr = $7, split_percent = $8, active = $9, sort_order = $10,
          account_ids = $11::jsonb
-       WHERE id = $12`,
+       WHERE id = $12 AND user_id = $13
+       RETURNING id`,
       [
         p.name,
         p.conditions ?? [],
@@ -72,11 +80,13 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.sort_order ?? 0,
         p.account_ids ?? [],
         id,
+        userId,
       ]
     );
+    if (!rows[0]) { res.status(404).json({ error: 'Strategy not found' }); return; }
     res.status(200).json({ id });
   } else if (req.method === 'DELETE') {
-    await sql.unsafe('DELETE FROM strategies WHERE id = $1', [id]);
+    await sql.unsafe('DELETE FROM strategies WHERE id = $1 AND user_id = $2', [id, userId]);
     res.status(200).json({ deleted: 1 });
   } else {
     res.status(405).json({ error: 'Method not allowed' });

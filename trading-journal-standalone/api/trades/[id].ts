@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db, withApi, recalcAccountCapital } from '../_db.js';
+import { requireUserId, ownsAccount } from '../_auth.js';
 
 // IMPORTANT: values bound to a `::jsonb`-cast parameter below must be passed
 // as raw JS objects/arrays, NOT pre-stringified with JSON.stringify(). The
@@ -40,15 +41,34 @@ function calcDuration(
 
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
+  const userId = await requireUserId(req, res, sql);
+  if (!userId) return;
+
   const id = Number(req.query.id);
+  if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
+
+  // Ownership is checked through the trade's OWNING account, not a user_id
+  // column on trades itself (trades don't have one — they're owned
+  // transitively through account_id, same as custom_columns). A trade id
+  // that doesn't exist, or whose account belongs to someone else, is treated
+  // identically: 404, not "found but not yours" — no need to confirm to a
+  // caller that a given trade id exists at all if it isn't theirs.
+  const priorRows = await sql.unsafe(
+    `SELECT t.account_id FROM trades t JOIN accounts a ON a.id = t.account_id WHERE t.id = $1 AND a.user_id = $2`,
+    [id, userId]
+  );
+  if (!priorRows[0]) { res.status(404).json({ error: 'Trade not found' }); return; }
+  const priorAccountId = priorRows[0].account_id;
 
   if (req.method === 'PUT') {
     const p = req.body;
     const newAccountId = Number(p.account_id);
     if (!newAccountId || isNaN(newAccountId)) { res.status(400).json({ error: 'account_id is required' }); return; }
-
-    const priorRows = await sql.unsafe('SELECT account_id FROM trades WHERE id = $1', [id]);
-    const priorAccountId = priorRows[0]?.account_id ?? null;
+    // Reassigning the trade to a different account is only allowed if that
+    // account is also this user's own — otherwise someone could move their
+    // own trade into another user's account (or, combined with the check
+    // above, move a trade they don't even own in the first place).
+    if (!(await ownsAccount(sql, newAccountId, userId))) { res.status(404).json({ error: 'Account not found' }); return; }
 
     // start_capital / end_capital / gain_loss / gain_loss_pct are always
     // recomputed below via recalcAccountCapital, never trusted from the client.
@@ -100,10 +120,11 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
 
     res.status(200).json({ id });
   } else if (req.method === 'DELETE') {
-    const priorRows = await sql.unsafe('SELECT account_id FROM trades WHERE id = $1', [id]);
-    const accountId = priorRows[0]?.account_id ?? null;
+    // Ownership of `id` was already confirmed above (priorRows), so this
+    // DELETE is safe to run unscoped by user_id — there's nothing to
+    // additionally filter by, since trades has no user_id column of its own.
     await sql.unsafe('DELETE FROM trades WHERE id = $1', [id]);
-    if (accountId) await recalcAccountCapital(sql, accountId);
+    await recalcAccountCapital(sql, priorAccountId);
     res.status(200).json({ deleted: 1 });
   } else {
     res.status(405).json({ error: 'Method not allowed' });

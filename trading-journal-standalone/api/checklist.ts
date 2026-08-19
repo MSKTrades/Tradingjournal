@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db, withApi } from './_db.js';
+import { requireUserId, ownsChecklist } from './_auth.js';
 
 // Handles checklists (named rule sets, e.g. "London Reversal"),
 // checklist_items (the individual rules inside one), AND Daily Routine
@@ -12,10 +13,12 @@ import { db, withApi } from './_db.js';
 // the more common read.
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
+  const userId = await requireUserId(req, res, sql);
+  if (!userId) return;
 
   if (req.method === 'GET') {
     if (req.query.resource === 'daily_routine') {
-      const rows = await sql.unsafe('SELECT * FROM daily_routine_notes ORDER BY note_date DESC');
+      const rows = await sql.unsafe('SELECT * FROM daily_routine_notes WHERE user_id = $1 ORDER BY note_date DESC', [userId]);
       const normalized = rows.map((r: any) => ({
         ...r,
         points: typeof r.points === 'string' ? JSON.parse(r.points || '[]') : r.points ?? [],
@@ -34,7 +37,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     // (Journal's grading picker, Summary's compliance widget) passes the
     // active account so only checklists that apply there come back — same
     // account_ids = '[]' (every account) OR @> containment convention as
-    // strategies.
+    // strategies. Both branches are always scoped to this user's own
+    // checklists first (WHERE user_id = $1), regardless of account_id.
     const accountIdParam = req.query.account_id;
     const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
     const scoped = !!accountId && !isNaN(accountId);
@@ -42,7 +46,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const checklists = scoped
       ? await sql.unsafe(
           `SELECT * FROM checklists
-           WHERE account_ids = '[]'::jsonb OR account_ids @> $1::jsonb
+           WHERE user_id = $1 AND (account_ids = '[]'::jsonb OR account_ids @> $2::jsonb)
            ORDER BY sort_order ASC, id ASC`,
           // Raw array, NOT JSON.stringify()'d - postgres.js serializes a
           // bound value a second time when the placeholder has a ::jsonb
@@ -52,10 +56,13 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
           // checklist would silently vanish from every account, including
           // its own. See the account_ids write path in api/strategies.ts
           // for the same reasoning applied to INSERT/UPDATE.
-          [[accountId]]
+          [userId, [accountId]]
         )
-      : await sql.unsafe('SELECT * FROM checklists ORDER BY sort_order ASC, id ASC');
-    const items = await sql.unsafe('SELECT * FROM checklist_items ORDER BY sort_order ASC, id ASC');
+      : await sql.unsafe('SELECT * FROM checklists WHERE user_id = $1 ORDER BY sort_order ASC, id ASC', [userId]);
+    const checklistIds = checklists.map((c: any) => c.id);
+    const items = checklistIds.length
+      ? await sql.unsafe('SELECT * FROM checklist_items WHERE checklist_id = ANY($1::int[]) ORDER BY sort_order ASC, id ASC', [checklistIds])
+      : [];
     const byChecklist = new Map<number, any[]>();
     for (const item of items) {
       const list = byChecklist.get(item.checklist_id) ?? [];
@@ -76,33 +83,32 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const resource = p.resource ?? 'checklist';
 
     if (resource === 'daily_routine') {
-      // Upsert by date — saving today's points again overwrites the same
-      // row (note_date is UNIQUE) instead of creating a duplicate for the
-      // day. The whole array is written each time (add/edit/delete a point
-      // all recompute the full list client-side and POST it here) rather
-      // than exposing per-point CRUD endpoints, since a day's points are
-      // few and this keeps the API surface — and the Vercel Hobby function
-      // count — small.
+      // Upsert by (user, date) — saving today's points again overwrites the
+      // same row instead of creating a duplicate for the day. The whole
+      // array is written each time (add/edit/delete a point all recompute
+      // the full list client-side and POST it here) rather than exposing
+      // per-point CRUD endpoints, since a day's points are few and this
+      // keeps the API surface — and the Vercel Hobby function count — small.
       const noteDate = String(p.note_date ?? '').trim();
       if (!noteDate) { res.status(400).json({ error: 'note_date is required' }); return; }
       const points = Array.isArray(p.points) ? p.points : [];
       const rows = await sql.unsafe(
-        `INSERT INTO daily_routine_notes (note_date, points)
-         VALUES ($1, $2::jsonb)
-         ON CONFLICT (note_date) DO UPDATE SET points = EXCLUDED.points, updated_at = now()
+        `INSERT INTO daily_routine_notes (note_date, points, user_id)
+         VALUES ($1, $2::jsonb, $3)
+         ON CONFLICT (user_id, note_date) DO UPDATE SET points = EXCLUDED.points, updated_at = now()
          RETURNING *`,
-        [noteDate, points]
+        [noteDate, points, userId]
       );
       res.status(200).json(rows[0]);
       return;
     }
 
     if (resource === 'checklist') {
-      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM checklists');
+      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM checklists WHERE user_id = $1', [userId]);
       const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
       const rows = await sql.unsafe(
-        `INSERT INTO checklists (name, sort_order, account_ids) VALUES ($1, $2, $3::jsonb) RETURNING *`,
-        [p.name, nextOrder, p.account_ids ?? []]
+        `INSERT INTO checklists (name, sort_order, account_ids, user_id) VALUES ($1, $2, $3::jsonb, $4) RETURNING *`,
+        [p.name, nextOrder, p.account_ids ?? [], userId]
       );
       res.status(200).json({ ...rows[0], items: [] });
       return;
@@ -111,6 +117,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     if (resource === 'item') {
       const checklistId = Number(p.checklist_id);
       if (!checklistId || isNaN(checklistId)) { res.status(400).json({ error: 'checklist_id is required' }); return; }
+      if (!(await ownsChecklist(sql, checklistId, userId))) { res.status(404).json({ error: 'Checklist not found' }); return; }
       const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM checklist_items WHERE checklist_id = $1', [checklistId]);
       const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
       const rows = await sql.unsafe(
@@ -138,11 +145,12 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       // defaulting a missing `account_ids` to '[]' and silently wiping out
       // scoping every time someone renames a checklist.
       const p = req.body;
+      if (!(await ownsChecklist(sql, id, userId))) { res.status(404).json({ error: 'Checklist not found' }); return; }
       if (p.name !== undefined) {
-        await sql.unsafe('UPDATE checklists SET name = $1 WHERE id = $2', [p.name, id]);
+        await sql.unsafe('UPDATE checklists SET name = $1 WHERE id = $2 AND user_id = $3', [p.name, id, userId]);
       }
       if (p.account_ids !== undefined) {
-        await sql.unsafe('UPDATE checklists SET account_ids = $1::jsonb WHERE id = $2', [p.account_ids, id]);
+        await sql.unsafe('UPDATE checklists SET account_ids = $1::jsonb WHERE id = $2 AND user_id = $3', [p.account_ids, id, userId]);
       }
       res.status(200).json({ id });
       return;
@@ -151,7 +159,14 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     if (resource === 'item') {
       const text = String(req.body?.text ?? '').trim();
       if (!text) { res.status(400).json({ error: 'text is required' }); return; }
-      await sql.unsafe('UPDATE checklist_items SET text = $1 WHERE id = $2', [text, id]);
+      const rows = await sql.unsafe(
+        `UPDATE checklist_items ci SET text = $1
+         FROM checklists c
+         WHERE ci.id = $2 AND c.id = ci.checklist_id AND c.user_id = $3
+         RETURNING ci.id`,
+        [text, id, userId]
+      );
+      if (!rows[0]) { res.status(404).json({ error: 'Checklist item not found' }); return; }
       res.status(200).json({ id });
       return;
     }
@@ -160,7 +175,11 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       // Editing a past day's points directly by id (the "today" editor uses
       // the POST upsert above instead, keyed by date rather than id).
       const points = Array.isArray(req.body?.points) ? req.body.points : [];
-      await sql.unsafe('UPDATE daily_routine_notes SET points = $1::jsonb, updated_at = now() WHERE id = $2', [points, id]);
+      const rows = await sql.unsafe(
+        'UPDATE daily_routine_notes SET points = $1::jsonb, updated_at = now() WHERE id = $2 AND user_id = $3 RETURNING id',
+        [points, id, userId]
+      );
+      if (!rows[0]) { res.status(404).json({ error: 'Daily routine note not found' }); return; }
       res.status(200).json({ id });
       return;
     }
@@ -175,7 +194,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
 
     if (resource === 'daily_routine') {
-      await sql.unsafe('DELETE FROM daily_routine_notes WHERE id = $1', [id]);
+      await sql.unsafe('DELETE FROM daily_routine_notes WHERE id = $1 AND user_id = $2', [id, userId]);
       res.status(200).json({ deleted: 1 });
       return;
     }
@@ -186,13 +205,17 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       // was graded against this checklist rather than orphaning a dangling
       // reference — those trades' checklist_results stay as a historical
       // record even though the checklist itself is gone.
-      await sql.unsafe('DELETE FROM checklists WHERE id = $1', [id]);
+      await sql.unsafe('DELETE FROM checklists WHERE id = $1 AND user_id = $2', [id, userId]);
       res.status(200).json({ deleted: 1 });
       return;
     }
 
     if (resource === 'item') {
-      await sql.unsafe('DELETE FROM checklist_items WHERE id = $1', [id]);
+      await sql.unsafe(
+        `DELETE FROM checklist_items ci USING checklists c
+         WHERE ci.id = $1 AND c.id = ci.checklist_id AND c.user_id = $2`,
+        [id, userId]
+      );
       res.status(200).json({ deleted: 1 });
       return;
     }

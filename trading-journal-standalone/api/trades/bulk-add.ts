@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db, withApi, recalcAccountCapital } from '../_db.js';
+import { requireUserId, ownsAccount } from '../_auth.js';
 
 function sanitizeDate(val: string | null | undefined): string | null {
   if (!val) return null;
@@ -57,13 +58,17 @@ function computeDuration(
 
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
+  const sql = db();
+  const userId = await requireUserId(req, res, sql);
+  if (!userId) return;
+
   const rows: any[] = req.body.trades ?? [];
   if (rows.length === 0) { res.status(200).json({ inserted: 0, skipped: 0 }); return; }
 
   const accountId = Number(req.body.account_id);
   if (!accountId || isNaN(accountId)) { res.status(400).json({ error: 'account_id is required' }); return; }
+  if (!(await ownsAccount(sql, accountId, userId))) { res.status(404).json({ error: 'Account not found' }); return; }
 
-  const sql = db();
   let inserted = 0, skipped = 0;
 
   for (const p of rows) {

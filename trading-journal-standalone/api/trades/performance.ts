@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db, withApi } from '../_db.js';
+import { requireUserId, ownsAccount } from '../_auth.js';
 
 const WEEKDAY_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -137,12 +138,15 @@ function computeAdvancedStats(list: any[]) {
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   if (req.method !== 'GET') { res.status(405).json({ error: 'Method not allowed' }); return; }
   const sql = db();
+  const userId = await requireUserId(req, res, sql);
+  if (!userId) return;
 
   // Tolerant of a missing/invalid account_id (e.g. before the account context
   // has resolved on first render) — return empty results instead of erroring.
+  // An account_id that isn't this user's own gets the same treatment.
   const accountIdParam = req.query.account_id;
   const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
-  if (!accountId || isNaN(accountId)) {
+  if (!accountId || isNaN(accountId) || !(await ownsAccount(sql, accountId, userId))) {
     res.status(200).json({ monthly: [], yearly: [], weekday: [], daily: [], hourly: [], session: [], stats: undefined });
     return;
   }
@@ -161,7 +165,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const strategyIdParam = req.query.strategy_id;
   if (strategyIdParam) {
     const strategyId = Number(Array.isArray(strategyIdParam) ? strategyIdParam[0] : strategyIdParam);
-    const strategyRows = await sql.unsafe('SELECT * FROM strategies WHERE id = $1', [strategyId]);
+    const strategyRows = await sql.unsafe('SELECT * FROM strategies WHERE id = $1 AND user_id = $2', [strategyId, userId]);
     const s = strategyRows[0];
     if (!s) { res.status(404).json({ error: 'Strategy not found' }); return; }
 

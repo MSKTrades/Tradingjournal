@@ -139,10 +139,13 @@ export function withApi(fn) {
     try {
       await fn(req, res);
     } catch (err) {
+      // Full error goes to the server log; the client gets a generic
+      // message. Returning err.message directly used to leak internal
+      // details (DB error text can include table/column names or query
+      // fragments) to anyone who could trigger a 500, which is more useful
+      // to an attacker probing the API than to a real user seeing an error.
       console.error(err);
-      res.status(500).json({
-        error: err instanceof Error ? err.message : 'Internal error',
-      });
+      res.status(500).json({ error: 'Something went wrong. Please try again.' });
     }
   };
 }
