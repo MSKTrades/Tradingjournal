@@ -12,6 +12,8 @@ const NAV_LINKS = [
   { to: '/blog', label: 'Blog' },
 ];
 
+const SUPPORT_EMAIL = 'support@pipecho.com';
+
 export function MarketingHeader() {
   const location = useLocation();
   // See useForceDarkTheme in lib/theme.tsx — the whole logged-out site
@@ -42,6 +44,12 @@ export function MarketingHeader() {
               {link.label}
             </Link>
           ))}
+          <a
+            href={`mailto:${SUPPORT_EMAIL}`}
+            className="px-3 py-2 rounded-md text-sm font-medium transition-colors text-muted-foreground hover:text-foreground hover:bg-accent"
+          >
+            Contact us
+          </a>
         </nav>
         <div className="flex items-center gap-2">
           <Link to="/login">
@@ -81,6 +89,7 @@ export function MarketingFooter() {
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Resources</h4>
           <ul className="space-y-2 text-sm">
             <li><Link to="/blog" className="text-muted-foreground hover:text-foreground">Blog</Link></li>
+            <li><a href={`mailto:${SUPPORT_EMAIL}`} className="text-muted-foreground hover:text-foreground">Contact us</a></li>
           </ul>
         </div>
         <div>

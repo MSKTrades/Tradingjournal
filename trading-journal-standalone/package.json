@@ -16,6 +16,7 @@
     "lightweight-charts": "^4.2.3",
     "lucide-react": "^0.427.0",
     "postgres": "^3.4.4",
+    "posthog-js": "^1.418.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.0",

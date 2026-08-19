@@ -1,12 +1,16 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut } from 'lucide-react';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Mail } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTheme } from '../lib/theme';
 import { useAuth } from '../lib/auth';
+import { isAdminEmail } from '../lib/admin';
 import Logo from './Logo';
 import AccountSwitcher from './AccountSwitcher';
 import PromoReminderModal from './PromoReminderModal';
+import FeedbackDialog from './FeedbackDialog';
+
+const SUPPORT_EMAIL = 'support@pipecho.com';
 
 const NAV_ITEMS = [
   { to: '/',             label: 'Summary',     icon: BarChart2  },
@@ -21,6 +25,11 @@ const NAV_ITEMS = [
   { to: '/backtest',     label: 'Backtest',    icon: History, disabled: true },
 ];
 
+// Appended only for the admin account (see lib/admin.ts) — everyone else's
+// sidebar never shows this item at all, not even disabled/greyed out, so
+// its existence isn't hinted at to other users.
+const ADMIN_NAV_ITEM = { to: '/admin', label: 'Admin', icon: ShieldCheck, disabled: false };
+
 const COLLAPSE_KEY = 'forexforge_sidebar_collapsed';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -29,6 +38,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(COLLAPSE_KEY) === '1');
+  const navItems = isAdminEmail(user?.email) ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   async function handleLogout() {
     await logout();
@@ -55,7 +65,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <AccountSwitcher collapsed={collapsed} />
 
         <nav className="flex-1 py-4 px-3 space-y-1">
-          {NAV_ITEMS.map(({ to, label, icon: Icon, disabled }) => {
+          {navItems.map(({ to, label, icon: Icon, disabled }) => {
             const active = !disabled && pathname === to;
 
             if (disabled) {
@@ -117,6 +127,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             {theme === 'dark' ? <Sun className="w-[18px] h-[18px] shrink-0" /> : <Moon className="w-[18px] h-[18px] shrink-0" />}
             {!collapsed && <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>}
           </button>
+          <FeedbackDialog collapsed={collapsed} />
+          <a
+            href={`mailto:${SUPPORT_EMAIL}`}
+            title={collapsed ? `Contact us (${SUPPORT_EMAIL})` : undefined}
+            className={cn(
+              'flex items-center gap-3 rounded-md text-sm font-medium text-sidebar-muted hover:text-sidebar-foreground hover:bg-white/5 transition-colors w-full',
+              collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
+            )}
+          >
+            <Mail className="w-[18px] h-[18px] shrink-0" />
+            {!collapsed && <span>Contact us</span>}
+          </a>
           <button
             onClick={() => setAndPersistCollapsed(!collapsed)}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}

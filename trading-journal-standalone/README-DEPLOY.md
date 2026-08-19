@@ -1,49 +1,131 @@
-# PipEcho — multi-tenancy / data-isolation fix (apply before any real signups)
+# Deploy: Analytics, Admin stats, Feedback, Contact us
 
-## What this fixes
-Every signed-up user was reading and writing the exact same shared data. `accounts`, `trades`, `strategies`, `tags`, `tag_groups`, `custom_columns`, `checklists`, and `daily_routine_notes` had no owner column at all, and no API handler checked who was logged in before touching them. `GET /api/accounts` was a plain `SELECT * FROM accounts` — no `WHERE`, no auth check. This wasn't a subtle edge case: it meant the very first Discord signup would land in the same account/trade data as every other user, including yours, and could edit or delete it.
+This batch covers the three things you asked for: (1) an admin-only stats
+page — visible only to `manjyot1537@gmail.com`, everyone else gets a real
+404 — showing registered users and signup growth, with PostHog wired in for
+the session-level stuff a database can't give you (time on site, returning
+vs. new visitors); (2) a Feedback / feature-request button next to the
+Dark mode toggle in the sidebar; (3) a Contact us link on the landing page
+header/footer and in the app sidebar, both pointing to `support@pipecho.com`.
 
-This is now fixed. Every table that holds personal data has a real owner, every API handler checks the logged-in session and rejects (401) or filters (404 on a foreign id) anything that isn't the caller's own, and I verified it end-to-end against a real second account, not just by reading the code — see "Verified" below.
+Tested end-to-end locally against a real Postgres database with three users
+(one plain user, one made to match your admin email, one anonymous request)
+— login, signup, admin gating (200 for the admin email, 404 for everyone
+else, 401 for logged-out), feedback submit + validation + admin read-back,
+and the UI (sidebar nav, dialog, landing page) all confirmed working before
+this was packaged.
 
-## How to apply
+## 1. Files in this zip
 
-**1. Run the schema migration FIRST**, against your production Neon database, before deploying the new code. Open Neon's SQL console (or `psql`) and run the entirety of `schema.sql` — it's the same idempotent full-schema file you've always run, just with a new migration block appended at the end. It's safe to run against your existing database: it adds `user_id` columns, backfills every existing row to your account (the oldest registered user), and only locks columns as `NOT NULL` once every row has a value. Read the comment block at the top of that new section in the file — it explains the backfill assumption explicitly. **If more than one real user has already signed up in production, stop and tell me before running this** — the backfill assigns every existing row to a single account, which is only correct if that account is still the only one with real data in it.
+Copy these over the matching paths in your GitHub repo (same "Add files via
+upload" flow as last time — GitHub will ask to overwrite the ones that
+already exist, say yes):
 
-**2. Then upload the code files** via GitHub "Add files via upload," preserving folder structure:
+```
+schema.sql                          (append only — see step 2, don't overwrite blindly)
+package.json                        (adds the posthog-js dependency)
+package-lock.json                   (kept in sync with package.json)
+api/_auth.js                        (adds isAdminEmail)
+api/columns.ts                      (adds admin_stats + feedback endpoints)
+src/App.tsx                         (adds /admin route + pageview tracking)
+src/main.tsx                        (starts PostHog on app load)
+src/vite-env.d.ts                   (new — needed for the PostHog env vars to type-check)
+src/lib/admin.ts                    (new — client-side "is this the admin" check, UX only)
+src/lib/analytics.ts                (new — PostHog wrapper)
+src/lib/auth.tsx                    (identifies the user to PostHog on login)
+src/components/Layout.tsx           (adds Admin nav link, Feedback button, Contact us link)
+src/components/FeedbackDialog.tsx   (new — the Feedback popup)
+src/pages/Admin.tsx                 (new — the admin stats page)
+src/pages/ui/MarketingChrome.tsx    (adds Contact us to landing page header/footer)
+```
 
-- `api/_auth.js` (new — shared session/ownership helpers)
-- `api/_db.js` (overwrite — one change: generic error messages instead of leaking raw DB errors to the client)
-- `api/accounts.ts`, `api/columns.ts`, `api/strategies.ts`, `api/checklist.ts` (overwrite)
-- `api/trades/index.ts`, `api/trades/[id].ts`, `api/trades/bulk-add.ts`, `api/trades/bulk-delete.ts`, `api/trades/performance.ts` (overwrite)
-- `api/summary/index.ts` (overwrite)
+**`schema.sql` is the one exception to "just overwrite it"** — your live
+database already has everything from the multi-tenancy fix, and re-running
+that whole file isn't necessary or safe to just overwrite blind. See step 2.
 
-Commit, redeploy. No new serverless functions added (`_auth.js` is a shared module, not a route) — still exactly 12.
+## 2. Database migration — add the `feedback` table
 
-## What actually changed
+Run this once against your **production** Neon database (same way you ran
+the multi-tenancy migration — Neon's SQL editor, or `psql` with your
+production `DATABASE_URL`):
 
-**Every account, strategy, checklist, tag, tag group, and daily-routine note now belongs to exactly one user** (`user_id` column, backfilled and enforced `NOT NULL`). Trades, custom fields, checklist items, and tag-group options don't get their own `user_id` — they're owned transitively through the account/checklist/tag-group they belong to, checked via a join at read/write time.
+```sql
+CREATE TABLE IF NOT EXISTS feedback (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  category    TEXT NOT NULL DEFAULT 'feedback',
+  message     TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-**Every API endpoint now requires a valid session before doing anything**, via a new shared `requireUserId()` helper — a request with no cookie, or an expired one, gets a flat 401. Beyond that, every endpoint that receives an id from the client (an account_id, a trade id, a checklist_id, a strategy id) verifies that id actually belongs to the logged-in user before reading or writing it. An id that belongs to someone else behaves exactly like an id that doesn't exist — a 404, not a 403 — so there's no way to even confirm another user's data exists by probing ids.
+CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback (created_at DESC);
+```
 
-**New signups get their own starter "Default" account automatically** (both password signup and first-time Google sign-in) — this used to happen once, globally, for the single pre-existing install; now every new user needs their own.
+That's it — one new table, nothing else changes. (The full block is also at
+the bottom of the `schema.sql` in this zip, in case you want to diff it
+against what's already in your repo's copy.)
 
-**Tag names and daily-routine note dates were globally unique** (one "A+ Setup" tag for the whole app, one note per calendar date, for everyone) — now they're unique per-user, so two different traders can each have their own "A+ Setup" tag without colliding.
+## 3. Set up PostHog (for time-on-site / returning-user tracking)
 
-**Error responses no longer leak internals.** A failed request used to return the raw database error message (`err.message`) straight to the client — could include table/column names or query fragments. Now the client gets a generic message and the real error is still logged server-side for you to debug from Vercel's logs.
+This is the piece that answers "how much time are people spending" and
+"who's coming back" — the database alone can't tell you that, it only
+knows *that* someone signed up, not what they did afterward.
 
-## Verified before sending — not just read, actually run
-I stood up a local copy of the schema and API, ran the migration against it, then drove the real HTTP endpoints with two separate logged-in users (one your existing `bugtest@example.com` account with real trade/strategy/checklist data, one a brand-new signup) and confirmed:
+1. Go to https://posthog.com, create a free account (free tier covers a
+   small app like this comfortably), create a project.
+2. In the project, go to **Project Settings** and copy the **Project API
+   Key** — starts with `phc_...`. This key is safe to expose in your
+   frontend; it's write-only (sends events in, can't read your data out).
+3. In Vercel: your project → **Settings → Environment Variables** → add
+   `VITE_POSTHOG_KEY` = `phc_xxxxx`. If PostHog put you on the EU cloud
+   during signup, also add `VITE_POSTHOG_HOST` = `https://eu.i.posthog.com`
+   (skip this if you're on US cloud, which is the default).
+4. Redeploy. That's the only setup needed — the app starts sending events
+   automatically once the key is present. Until you do this step, the app
+   behaves exactly as it does today (nothing breaks, PostHog just isn't
+   collecting anything yet).
 
-- The new signup landed with only their own starter account — none of the existing account's trades, strategies, or tags were visible to them.
-- The new user's attempt to `PUT` (rename) and `DELETE` the existing user's account by id both returned 404, and the existing account's data was confirmed untouched afterward.
-- A request with no session cookie at all got 401 on `/api/accounts`.
-- Both users creating a tag with the identical name ("A+ Setup") succeeded independently — confirms the per-user uniqueness fix works, not just the isolation.
-- Custom fields, checklists, and daily-routine notes all round-tripped correctly for the existing account after the migration — same data, same behavior, no regression.
-- Full app smoke test (logged in as your existing account, dark mode, Summary/Journal/Strategies pages) — real trade data, real strategies, all rendering exactly as before. `tsc --noEmit` and `npm run build` both clean.
+Once it's live, PostHog's own dashboard (not this app) is where you'll see
+session duration, returning vs. new visitors, and which pages people
+actually use. Session recording is deliberately turned off by default —
+your trade screenshots/notes are the core content of this product and
+shouldn't go into a third-party replay tool without you deciding that on
+purpose later.
 
-## What this does NOT cover (deliberately, not silently)
-`api/backtest.ts` and the `chart_datasets`/`backtest_trades` tables were left untouched — Chart Replay & Backtesting is already disabled in the UI (the nav tab and route both show "Coming soon"), so there's no live user-facing surface pointing at it. It'll need the same ownership treatment before it ships, whenever that is — flagging it now so it doesn't get missed later, not because it's fine to skip.
+## 4. Registered users / signup growth / feedback — no PostHog needed
 
-The wildcard CORS header (`Access-Control-Allow-Origin: *`) is still there. It's lower-risk now than before this fix, since every data endpoint requires a valid session and browsers already block credentialed cross-origin requests against a wildcard origin — but tightening it to your real domain is still worth doing as a later polish pass.
+This part works immediately after deploy, no external account required.
+Log in with `manjyot1537@gmail.com` and an **"Admin"** item appears at the
+bottom of the sidebar — it takes you to `/admin`, showing total registered
+users, a 30-day signup chart, and everything submitted through the
+Feedback button. No other account can see this page or its data — the API
+checks the logged-in email server-side and returns a plain 404 to anyone
+else, not just a hidden link.
 
-A 401 from an expired session currently just surfaces as an error message in the UI rather than redirecting to `/login` automatically — minor UX gap, not a security one, worth a follow-up.
+If you ever want to change which email is treated as the admin, set
+`ADMIN_EMAIL` in Vercel's environment variables — it falls back to
+`manjyot1537@gmail.com` if that's not set, so you don't have to add it
+right now.
+
+## 5. What to check after deploying
+
+- Log in with a normal account → sidebar shows **Feedback** and
+  **Contact us** near Dark mode, but no **Admin** link.
+- Submit something through Feedback → confirm it doesn't error.
+- Log in with `manjyot1537@gmail.com` → **Admin** link appears, `/admin`
+  shows your real user count and the feedback you just submitted.
+- Visit the logged-out landing page → **Contact us** in the header and
+  footer opens an email to `support@pipecho.com`.
+- (Optional, once PostHog key is set) Check your PostHog project's **Live
+  events** — you should see pageview and identify events within a minute
+  of visiting the site.
+
+## Notes
+
+- `npm install` picks up `posthog-js` automatically on Vercel's build step
+  — nothing manual needed there, just make sure `package.json` and
+  `package-lock.json` both land in the repo (both are in this zip).
+- This does **not** add a new serverless function — `admin_stats` and
+  `feedback` are both handled inside the existing `api/columns.ts`, so
+  you're still at 12/12 functions on the Hobby plan with room for nothing
+  else new without folding it into an existing file the same way.

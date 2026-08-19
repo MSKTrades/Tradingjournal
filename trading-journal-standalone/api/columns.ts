@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { db, withApi } from './_db.js';
 import {
-  parseCookies, sessionCookie, createSessionToken, getUserFromRequest, requireUserId, ownsTagGroup,
+  parseCookies, sessionCookie, createSessionToken, getUserFromRequest, requireUserId, ownsTagGroup, isAdminEmail,
 } from './_auth.js';
 
 // Also handles the reusable Tags list (?resource=tags), Tag Groups
@@ -299,6 +299,41 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(await getTagGroups(sql, userId));
       return;
     }
+    if (req.query.resource === 'admin_stats') {
+      // Gated on email, not just "logged in" — this is the one place in the
+      // app that shows data across every user, so a plain requireUserId()
+      // check isn't enough. Returns 404, not 403, for the same reason ids
+      // return 404 elsewhere in this app: no need to confirm to a
+      // non-admin caller that this resource exists at all.
+      const requester = await getUserFromRequest(req, sql);
+      if (!requester || !isAdminEmail(requester.email)) { res.status(404).json({ error: 'Not found' }); return; }
+
+      const [totalRows, dailyRows, feedbackRows] = await Promise.all([
+        sql.unsafe('SELECT COUNT(*)::int AS count FROM users'),
+        // Signups per day, last 30 days — the simplest honest answer to
+        // "how many users have registered" and "is that number growing".
+        sql.unsafe(`
+          SELECT to_char(d.day, 'YYYY-MM-DD') AS day, COUNT(u.id)::int AS signups
+          FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, INTERVAL '1 day') AS d(day)
+          LEFT JOIN users u ON u.created_at::date = d.day
+          GROUP BY d.day
+          ORDER BY d.day ASC
+        `),
+        sql.unsafe(`
+          SELECT f.id, f.category, f.message, f.created_at, u.email
+          FROM feedback f JOIN users u ON u.id = f.user_id
+          ORDER BY f.created_at DESC
+          LIMIT 50
+        `),
+      ]);
+
+      res.status(200).json({
+        total_users: totalRows[0]?.count ?? 0,
+        daily_signups: dailyRows,
+        feedback: feedbackRows,
+      });
+      return;
+    }
     // Custom fields are scoped to a single account (see schema.sql's
     // account-scoping migration) — tolerant of a missing/invalid account_id
     // the same way GET /trades is, since this fires before the account
@@ -319,6 +354,17 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     res.status(200).json(rows);
   } else if (req.method === 'POST') {
     const p = req.body;
+    if (p.resource === 'feedback') {
+      const message = String(p.message ?? '').trim();
+      if (!message) { res.status(400).json({ error: 'message is required' }); return; }
+      const category = p.category === 'feature_request' ? 'feature_request' : 'feedback';
+      await sql.unsafe(
+        `INSERT INTO feedback (user_id, category, message) VALUES ($1, $2, $3)`,
+        [userId, category, message]
+      );
+      res.status(200).json({ ok: true });
+      return;
+    }
     if (p.resource === 'tags') {
       const name = String(p.name ?? '').trim();
       if (!name) { res.status(400).json({ error: 'name is required' }); return; }

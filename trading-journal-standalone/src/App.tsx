@@ -3,6 +3,8 @@ import Layout from './components/Layout';
 import { ThemeProvider } from './lib/theme';
 import { AccountProvider } from './lib/accounts';
 import { AuthProvider, useAuth } from './lib/auth';
+import { useEffect } from 'react';
+import { capturePageview } from './lib/analytics';
 import Landing from './pages/Landing';
 import Pricing from './pages/Pricing';
 import Blog from './pages/Blog';
@@ -15,6 +17,7 @@ import Performance from './pages/Performance';
 import Strategies from './pages/Strategies';
 import StrategyDetail from './pages/StrategyDetail';
 import Checklists from './pages/Checklists';
+import Admin from './pages/Admin';
 import BacktestComingSoon from './pages/BacktestComingSoon';
 // NOTE: the real Backtest page (Chart Replay & Backtesting) is on hold until
 // the TradingView Advanced Charts library is approved — see BacktestComingSoon.
@@ -28,6 +31,19 @@ import BacktestComingSoon from './pages/BacktestComingSoon';
  * one to render. */
 function AuthSplash() {
   return <div className="min-h-screen bg-background" />;
+}
+
+/** Fires a PostHog pageview on every client-side route change. This is a
+ * separate component (rather than inlined in App) purely so it can sit
+ * inside <BrowserRouter> and call useLocation() — it renders nothing.
+ * See lib/analytics.ts for why this is manual instead of PostHog's
+ * automatic pageview capture (capture_pageview: false). */
+function PageviewTracker() {
+  const location = useLocation();
+  useEffect(() => {
+    capturePageview(location.pathname + location.search);
+  }, [location.pathname, location.search]);
+  return null;
 }
 
 /** Gate for routes that require a signed-in user. Sends unauthenticated
@@ -80,6 +96,7 @@ export default function App() {
     <ThemeProvider>
       <BrowserRouter>
         <AuthProvider>
+          <PageviewTracker />
           <Routes>
             <Route path="/" element={<RootRoute />} />
             <Route path="/pricing" element={<Pricing />} />
@@ -94,6 +111,13 @@ export default function App() {
             <Route path="/strategies/:id" element={<Protected><AuthedShell><StrategyDetail /></AuthedShell></Protected>} />
             <Route path="/checklists" element={<Protected><AuthedShell><Checklists /></AuthedShell></Protected>} />
             <Route path="/backtest" element={<Protected><AuthedShell><BacktestComingSoon /></AuthedShell></Protected>} />
+            {/* No client-side email check here on purpose — the API
+                (?resource=admin_stats) is the real gate and 404s anyone but
+                the admin. Layout.tsx just hides the nav link for everyone
+                else; a person who typed /admin directly would still hit a
+                real 404 from useFetch, not a fake "not authorized" page
+                that confirms the route exists. */}
+            <Route path="/admin" element={<Protected><AuthedShell><Admin /></AuthedShell></Protected>} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>

@@ -795,3 +795,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS tag_groups_user_name_idx ON tag_groups (user_i
 
 ALTER TABLE daily_routine_notes DROP CONSTRAINT IF EXISTS daily_routine_notes_note_date_key;
 CREATE UNIQUE INDEX IF NOT EXISTS daily_routine_notes_user_date_idx ON daily_routine_notes (user_id, note_date);
+
+-- ============================================================================
+-- Feedback / feature requests, submitted from the in-app "Feedback" button
+-- (sidebar, next to the light/dark toggle). One-way: a user submits, only
+-- the admin (see ADMIN_EMAIL in api/_auth.js) can read the list back, via
+-- GET /api/columns?resource=admin_stats. No user_id-based access control
+-- needed here for READS the way accounts/trades/etc. have — this table is
+-- never returned to the user who wrote it, only to the admin.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS feedback (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  category    TEXT NOT NULL DEFAULT 'feedback',  -- 'feedback' | 'feature_request'
+  message     TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback (created_at DESC);

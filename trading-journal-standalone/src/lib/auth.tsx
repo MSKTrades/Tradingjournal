@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api } from './api';
+import { identifyUser, resetAnalytics } from './analytics';
 
 export type User = {
   id: number;
@@ -35,6 +36,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Fires for every path that lands on a real user - initial page-load
+  // session check, password login, signup, and Google OAuth's redirect back
+  // in (that one resolves through the same refresh() call above, not a
+  // separate code path) - so there's exactly one place this needs to be
+  // wired, not one per login method. Cleared on logout so PostHog doesn't
+  // keep attributing a shared/public browser's next session to whoever was
+  // last logged in on it.
+  useEffect(() => {
+    if (user) identifyUser(user.id, user.email);
+    else resetAnalytics();
+  }, [user]);
 
   const login = useCallback(async (email: string, password: string) => {
     const data: { user: User } = await api.post('/columns', { resource: 'auth', action: 'login', email, password });

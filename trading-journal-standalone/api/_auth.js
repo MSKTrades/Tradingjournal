@@ -111,3 +111,13 @@ export async function ownsTagGroup(sql, groupId, userId) {
   const rows = await sql.unsafe('SELECT 1 FROM tag_groups WHERE id = $1 AND user_id = $2', [groupId, userId]);
   return rows.length > 0;
 }
+
+// The one account that can see the admin stats page (registered users,
+// signup growth, submitted feedback). Set ADMIN_EMAIL in Vercel's
+// environment variables — the fallback below only matters for local dev
+// where that env var typically isn't set.
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'manjyot1537@gmail.com').toLowerCase();
+
+export function isAdminEmail(email) {
+  return typeof email === 'string' && email.toLowerCase() === ADMIN_EMAIL;
+}
