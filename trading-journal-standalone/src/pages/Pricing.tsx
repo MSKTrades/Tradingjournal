@@ -5,11 +5,17 @@ import { Button } from '../lib/ui/button';
 import { Switch } from '../lib/ui/form';
 import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
+import { PROMO_END_LABEL } from '../lib/promo';
 
 // Pricing display only — no payment processing wired up yet (deliberate,
 // see the delivery README). Numbers here are a starting proposal, not
 // locked in anywhere else in the codebase; change them freely without
 // touching any other file.
+//
+// Launch promo: every signup gets full Pro-level access free through
+// PROMO_END_LABEL (see src/lib/promo.ts — that's also what drives the
+// in-app reminder popups as the date approaches). Nothing here is enforced
+// in the backend, so this is purely the messaging layer.
 const PLANS = [
   {
     name: 'Free',
@@ -33,7 +39,7 @@ const PLANS = [
     priceMonthly: 15,
     priceAnnual: 12,
     tagline: 'For traders serious about the process.',
-    cta: 'Start free trial',
+    cta: 'Get Pro free',
     highlighted: true,
     features: [
       'Everything in Free',
@@ -47,8 +53,8 @@ const PLANS = [
 
 const FAQS = [
   {
-    q: 'Is there a free trial for Pro?',
-    a: 'Yes — every Pro signup starts with a trial period, no credit card required to get started. You\'ll only be asked for payment details if you decide to continue.',
+    q: 'Is Pro really free right now?',
+    a: `Yes. As a launch offer, every account — Free or Pro — gets full Pro-level access at no cost through ${PROMO_END_LABEL}. No credit card required to get started. You'll get a few reminders in-app as that date approaches, and you can upgrade at any point to keep uninterrupted access afterward.`,
   },
   {
     q: 'Can I switch between monthly and annual billing?',
@@ -79,7 +85,14 @@ export default function Pricing() {
     <div className="min-h-screen bg-background text-foreground">
       <MarketingHeader />
 
-      <section className="px-6 pt-16 pb-8 text-center">
+      <div className="px-6 pt-8">
+        <div className="max-w-3xl mx-auto rounded-lg border border-primary/30 bg-primary/10 px-5 py-3 text-center text-sm text-foreground/90">
+          <span className="font-semibold text-primary">Launch offer:</span> every account gets full Pro
+          access free through <span className="font-semibold">{PROMO_END_LABEL}</span> — no credit card needed.
+        </div>
+      </div>
+
+      <section className="px-6 pt-10 pb-8 text-center">
         <div className="max-w-2xl mx-auto">
           <h1 className="text-4xl font-bold tracking-tight">Simple pricing, no surprises</h1>
           <p className="text-lg text-muted-foreground mt-4">
@@ -113,10 +126,20 @@ export default function Pricing() {
                 )}
                 <h2 className="text-lg font-semibold">{plan.name}</h2>
                 <p className="text-sm text-muted-foreground mt-1">{plan.tagline}</p>
-                <div className="mt-5 flex items-baseline gap-1">
-                  <span className="text-4xl font-bold tracking-tight">{formatPrice(price)}</span>
-                  {price > 0 && <span className="text-muted-foreground text-sm">/ month{annual ? ', billed annually' : ''}</span>}
-                </div>
+                {plan.highlighted ? (
+                  <div className="mt-5">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-4xl font-bold tracking-tight">$0</span>
+                      <span className="text-muted-foreground text-sm line-through">{formatPrice(price)}/mo</span>
+                    </div>
+                    <p className="text-xs text-primary font-medium mt-1">Free through {PROMO_END_LABEL}</p>
+                  </div>
+                ) : (
+                  <div className="mt-5 flex items-baseline gap-1">
+                    <span className="text-4xl font-bold tracking-tight">{formatPrice(price)}</span>
+                    {price > 0 && <span className="text-muted-foreground text-sm">/ month{annual ? ', billed annually' : ''}</span>}
+                  </div>
+                )}
                 <Link to="/signup" className="mt-6">
                   <Button size="default" className="w-full h-10" variant={plan.highlighted ? 'default' : 'outline'}>
                     {plan.cta}

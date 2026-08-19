@@ -6,6 +6,7 @@ import { useTheme } from '../lib/theme';
 import { useAuth } from '../lib/auth';
 import Logo from './Logo';
 import AccountSwitcher from './AccountSwitcher';
+import PromoReminderModal from './PromoReminderModal';
 
 const NAV_ITEMS = [
   { to: '/',             label: 'Summary',     icon: BarChart2  },
@@ -144,6 +145,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 min-w-0 px-6 py-6 lg:px-8 lg:py-8 max-w-[1600px]">
         {children}
       </main>
+
+      <PromoReminderModal />
     </div>
   );
 }
