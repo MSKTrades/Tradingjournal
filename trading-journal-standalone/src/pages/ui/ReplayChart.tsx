@@ -1,6 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, IChartApi, ISeriesApi, IPriceLine, UTCTimestamp } from 'lightweight-charts';
 import { Candle, BacktestTrade } from '../data/types';
+import { computeSMA, computeEMA, computeRSI, IndicatorPoint } from './indicators';
+import { Button } from '../../lib/ui/button';
+import { cn } from '../../lib/utils';
 
 type Props = {
   candles: Candle[];
@@ -8,6 +11,46 @@ type Props = {
   trades: BacktestTrade[];
   height?: number;
 };
+
+// Fixed periods rather than user-adjustable ones - keeps this a "the basics
+// are here" addition rather than a full indicator-configuration feature.
+// These are the standard defaults most traders already expect (EMA 50 as a
+// trend filter, SMA 20 as a faster mean, RSI 14 as the textbook momentum
+// read) - worth revisiting if custom periods ever get asked for.
+const SMA_PERIOD = 20;
+const EMA_PERIOD = 50;
+const RSI_PERIOD = 14;
+
+// Indicator points are aligned to a specific candle index by convention
+// (see indicators.ts) - these offsets convert "how many candles are
+// visible" into "how many indicator points are visible" without
+// recomputing anything.
+const smaVisibleLen = (visibleCount: number) => Math.max(0, visibleCount - (SMA_PERIOD - 1));
+const emaVisibleLen = (visibleCount: number) => Math.max(0, visibleCount - (EMA_PERIOD - 1));
+const rsiVisibleLen = (visibleCount: number) => Math.max(0, visibleCount - RSI_PERIOD);
+
+// Same incremental-vs-reset logic the main candle series uses (see the
+// comment on the candle effect below) - a line series with tens of
+// thousands of points shouldn't get a full setData() on every single-step
+// replay tick, just the one new point via update().
+function pushIncremental(
+  series: ISeriesApi<'Line'>,
+  points: IndicatorPoint[],
+  visibleLen: number,
+  prevLenRef: { current: number },
+) {
+  const clamped = Math.max(0, Math.min(visibleLen, points.length));
+  const prevLen = prevLenRef.current;
+  if (clamped === 0) {
+    series.setData([]);
+  } else if (clamped === prevLen + 1 && prevLen > 0) {
+    const p = points[clamped - 1];
+    series.update({ time: p.time as UTCTimestamp, value: p.value });
+  } else {
+    series.setData(points.slice(0, clamped).map(p => ({ time: p.time as UTCTimestamp, value: p.value })));
+  }
+  prevLenRef.current = clamped;
+}
 
 // Wraps TradingView's lightweight-charts. Kept as its own component so the
 // imperative chart lifecycle (create once, mutate in place afterward) is
@@ -23,6 +66,23 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const prevLenRef = useRef(0);
+
+  const smaSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const emaSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const rsiSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const rsiLinesRef = useRef<IPriceLine[]>([]);
+  const prevSmaLenRef = useRef(0);
+  const prevEmaLenRef = useRef(0);
+  const prevRsiLenRef = useRef(0);
+
+  // Overlay visibility lives here rather than being threaded down from
+  // Backtest.tsx / TradeReplayTab.tsx, so both places that render a replay
+  // chart get the same toggles for free instead of duplicating the control
+  // row in each parent. EMA defaults on (a moving average is the one thing
+  // almost everyone glances for); SMA and RSI are a click away.
+  const [showEma, setShowEma] = useState(true);
+  const [showSma, setShowSma] = useState(false);
+  const [showRsi, setShowRsi] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -62,6 +122,38 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
     seriesRef.current = series;
     prevLenRef.current = 0;
 
+    // SMA/EMA overlay the main price scale directly (same axis as candles).
+    const smaSeries = chart.addLineSeries({
+      color: '#a855f7', lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
+    });
+    const emaSeries = chart.addLineSeries({
+      color: '#3b82f6', lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
+    });
+    smaSeriesRef.current = smaSeries;
+    emaSeriesRef.current = emaSeries;
+
+    // RSI gets its own price scale pinned to the bottom ~22% of the chart -
+    // the standard "indicator pane under the price chart" look, without
+    // needing a second chart instance (lightweight-charts supports multiple
+    // price scales sharing one time axis, which is exactly this case).
+    const rsiSeries = chart.addLineSeries({
+      color: isDark ? '#facc15' : '#b45309', lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
+      priceScaleId: 'rsi',
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+    });
+    chart.priceScale('rsi').applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+      borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+    });
+    rsiLinesRef.current = [
+      rsiSeries.createPriceLine({ price: 70, color: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'RSI 70' }),
+      rsiSeries.createPriceLine({ price: 30, color: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'RSI 30' }),
+    ];
+    rsiSeriesRef.current = rsiSeries;
+    prevSmaLenRef.current = 0;
+    prevEmaLenRef.current = 0;
+    prevRsiLenRef.current = 0;
+
     const resizeObserver = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width;
       if (w) chart.applyOptions({ width: Math.floor(w) });
@@ -74,11 +166,24 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
       chartRef.current = null;
       seriesRef.current = null;
       priceLinesRef.current = [];
+      smaSeriesRef.current = null;
+      emaSeriesRef.current = null;
+      rsiSeriesRef.current = null;
+      rsiLinesRef.current = [];
     };
     // Intentionally created once - candles/visibleCount changes are applied
     // imperatively below, not by tearing down and recreating the chart.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Toggle visibility without touching data - avoids recomputing/resetting
+  // series just because a user clicked a chip.
+  useEffect(() => { smaSeriesRef.current?.applyOptions({ visible: showSma }); }, [showSma]);
+  useEffect(() => { emaSeriesRef.current?.applyOptions({ visible: showEma }); }, [showEma]);
+  useEffect(() => {
+    rsiSeriesRef.current?.applyOptions({ visible: showRsi });
+    rsiLinesRef.current.forEach(l => l.applyOptions({ axisLabelVisible: showRsi }));
+  }, [showRsi]);
 
   // Push new bars into the series: a single-step increment uses .update()
   // (cheap, preserves zoom/pan), anything else (initial load, jump-to-point,
@@ -103,6 +208,25 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
     }
     prevLenRef.current = clamped;
   }, [candles, visibleCount]);
+
+  // Indicators are computed once per dataset (not per replay tick) over the
+  // *full* candle array, since a moving average needs history from before
+  // the visible window - only the reveal is progressive, the math isn't.
+  const smaPoints = useMemo(() => computeSMA(candles, SMA_PERIOD), [candles]);
+  const emaPoints = useMemo(() => computeEMA(candles, EMA_PERIOD), [candles]);
+  const rsiPoints = useMemo(() => computeRSI(candles, RSI_PERIOD), [candles]);
+
+  useEffect(() => {
+    prevSmaLenRef.current = 0;
+    prevEmaLenRef.current = 0;
+    prevRsiLenRef.current = 0;
+  }, [smaPoints, emaPoints, rsiPoints]);
+
+  useEffect(() => {
+    if (smaSeriesRef.current) pushIncremental(smaSeriesRef.current, smaPoints, smaVisibleLen(visibleCount), prevSmaLenRef);
+    if (emaSeriesRef.current) pushIncremental(emaSeriesRef.current, emaPoints, emaVisibleLen(visibleCount), prevEmaLenRef);
+    if (rsiSeriesRef.current) pushIncremental(rsiSeriesRef.current, rsiPoints, rsiVisibleLen(visibleCount), prevRsiLenRef);
+  }, [visibleCount, smaPoints, emaPoints, rsiPoints]);
 
   // Markers (entry/exit arrows) + price lines (entry/SL/TP for any trade
   // still open at the current point in the replay) - recomputed whenever
@@ -162,5 +286,23 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
     }
   }, [trades, candles, visibleCount]);
 
-  return <div ref={containerRef} className="w-full" />;
+  return (
+    <div className="w-full">
+      <div className="flex items-center justify-end gap-1.5 mb-1.5">
+        <IndicatorChip label="EMA 50" active={showEma} dotClassName="bg-blue-500" onClick={() => setShowEma(v => !v)} />
+        <IndicatorChip label="SMA 20" active={showSma} dotClassName="bg-purple-500" onClick={() => setShowSma(v => !v)} />
+        <IndicatorChip label="RSI 14" active={showRsi} dotClassName="bg-amber-500" onClick={() => setShowRsi(v => !v)} />
+      </div>
+      <div ref={containerRef} className="w-full" />
+    </div>
+  );
+}
+
+function IndicatorChip({ label, active, dotClassName, onClick }: { label: string; active: boolean; dotClassName: string; onClick: () => void }) {
+  return (
+    <Button type="button" size="sm" variant={active ? 'secondary' : 'outline'} onClick={onClick} className="h-6 px-2 text-[11px] gap-1.5">
+      <span className={cn('w-1.5 h-1.5 rounded-full', active ? dotClassName : 'bg-muted-foreground/40')} />
+      {label}
+    </Button>
+  );
 }
