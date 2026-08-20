@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, IChartApi, ISeriesApi, IPriceLine, UTCTimestamp } from 'lightweight-charts';
 import { Candle, BacktestTrade } from '../data/types';
 import { computeSMA, computeEMA, computeRSI, IndicatorPoint } from './indicators';
+import { TIMEFRAME_SECONDS, derivableTimeframes, createResampleCache, resampleIncremental, ResampleCache } from './resample';
 import { Button } from '../../lib/ui/button';
 import { cn } from '../../lib/utils';
 
@@ -10,6 +11,13 @@ type Props = {
   visibleCount: number;
   trades: BacktestTrade[];
   height?: number;
+  // The timeframe `candles` was actually fetched at (e.g. '1m'). Optional -
+  // when omitted the timeframe switcher is hidden and the chart just shows
+  // `candles` as-is, same as before this existed. When present, anything
+  // equal-or-coarser is selectable and gets resampled client-side from this
+  // base series (see resample.ts) - no re-fetch needed to look at the same
+  // history zoomed out.
+  baseTimeframe?: string;
 };
 
 // Fixed periods rather than user-adjustable ones - keeps this a "the basics
@@ -24,7 +32,9 @@ const RSI_PERIOD = 14;
 // Indicator points are aligned to a specific candle index by convention
 // (see indicators.ts) - these offsets convert "how many candles are
 // visible" into "how many indicator points are visible" without
-// recomputing anything.
+// recomputing anything. Only used for the un-resampled (base timeframe)
+// case - resampled indicator series are already clipped to exactly what's
+// revealed, so they don't need an offset (see the indicator effect below).
 const smaVisibleLen = (visibleCount: number) => Math.max(0, visibleCount - (SMA_PERIOD - 1));
 const emaVisibleLen = (visibleCount: number) => Math.max(0, visibleCount - (EMA_PERIOD - 1));
 const rsiVisibleLen = (visibleCount: number) => Math.max(0, visibleCount - RSI_PERIOD);
@@ -60,12 +70,13 @@ function pushIncremental(
 // jump/reset (series.setData - rebuilds the visible series). Re-creating
 // the whole chart on every replay tick would both be slow for a dataset
 // with 100k+ candles and would reset the user's zoom/pan on every step.
-export default function ReplayChart({ candles, visibleCount, trades, height = 480 }: Props) {
+export default function ReplayChart({ candles, visibleCount, trades, height = 480, baseTimeframe }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const prevLenRef = useRef(0);
+  const resampleCacheRef = useRef<ResampleCache>(createResampleCache());
 
   const smaSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const emaSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
@@ -83,6 +94,16 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
   const [showEma, setShowEma] = useState(true);
   const [showSma, setShowSma] = useState(false);
   const [showRsi, setShowRsi] = useState(false);
+
+  // Which timeframe is currently displayed - defaults to (and resets to
+  // whenever it changes) the base timeframe the data was actually fetched
+  // at. Only timeframes derivable from that base are ever selected (see
+  // derivableTimeframes) - you can zoom OUT to 1h from a 1m dataset, not
+  // in to 1m from an hourly one.
+  const [displayTf, setDisplayTf] = useState(baseTimeframe ?? '1m');
+  useEffect(() => { setDisplayTf(baseTimeframe ?? '1m'); }, [baseTimeframe]);
+
+  const isResampling = !!baseTimeframe && displayTf !== baseTimeframe;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -185,13 +206,39 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
     rsiLinesRef.current.forEach(l => l.applyOptions({ axisLabelVisible: showRsi }));
   }, [showRsi]);
 
+  // What the candle series should actually render right now: either the
+  // base series (fast path, unchanged from before resampling existed) or a
+  // resampled-and-already-revealed-only series for a coarser display
+  // timeframe. Resampling only ever folds in *already-revealed* base
+  // candles (baseCandles.slice(0, visibleCount) conceptually - the
+  // incremental cache does this without re-slicing) - a bucket that's
+  // still forming shows only the wicks that have actually happened so far
+  // in the replay, same as the base series never showing future candles.
+  const resampled = useMemo(() => {
+    if (!isResampling) return null;
+    return resampleIncremental(resampleCacheRef.current, candles, Math.max(0, Math.min(visibleCount, candles.length)), TIMEFRAME_SECONDS[displayTf]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isResampling, candles, visibleCount, displayTf]);
+
   // Push new bars into the series: a single-step increment uses .update()
   // (cheap, preserves zoom/pan), anything else (initial load, jump-to-point,
-  // reset) uses .setData() and re-fits the view.
+  // reset, timeframe switch) uses .setData() and re-fits the view.
   useEffect(() => {
     const series = seriesRef.current;
     const chart = chartRef.current;
     if (!series || !chart) return;
+
+    if (isResampling && resampled) {
+      if (resampled.wasReset) {
+        series.setData(resampled.candles.map(c => ({ time: c.time as UTCTimestamp, open: c.open, high: c.high, low: c.low, close: c.close })));
+        chart.timeScale().fitContent();
+      } else if (resampled.candles.length > 0) {
+        const c = resampled.candles[resampled.candles.length - 1];
+        series.update({ time: c.time as UTCTimestamp, open: c.open, high: c.high, low: c.low, close: c.close });
+      }
+      prevLenRef.current = -1; // force a full setData() if we drop back to the base (non-resampled) path
+      return;
+    }
 
     const clamped = Math.max(0, Math.min(visibleCount, candles.length));
     const prevLen = prevLenRef.current;
@@ -207,31 +254,52 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
       chart.timeScale().fitContent();
     }
     prevLenRef.current = clamped;
-  }, [candles, visibleCount]);
+  }, [candles, visibleCount, isResampling, resampled]);
 
-  // Indicators are computed once per dataset (not per replay tick) over the
-  // *full* candle array, since a moving average needs history from before
-  // the visible window - only the reveal is progressive, the math isn't.
-  const smaPoints = useMemo(() => computeSMA(candles, SMA_PERIOD), [candles]);
-  const emaPoints = useMemo(() => computeEMA(candles, EMA_PERIOD), [candles]);
-  const rsiPoints = useMemo(() => computeRSI(candles, RSI_PERIOD), [candles]);
+  // Indicators are computed from whatever's actually on screen right now -
+  // the base series (full array, backward-looking math means precomputing
+  // on the full array and only *displaying* a prefix is equivalent to
+  // computing on just the revealed portion) or, when resampling, the
+  // already-revealed-only resampled series directly (no separate offset
+  // needed - it's pre-clipped, see the comment above).
+  const effectiveForIndicators = isResampling && resampled ? resampled.candles : candles;
+  const smaPoints = useMemo(() => computeSMA(effectiveForIndicators, SMA_PERIOD), [effectiveForIndicators]);
+  const emaPoints = useMemo(() => computeEMA(effectiveForIndicators, EMA_PERIOD), [effectiveForIndicators]);
+  const rsiPoints = useMemo(() => computeRSI(effectiveForIndicators, RSI_PERIOD), [effectiveForIndicators]);
+
+  useEffect(() => {
+    if (isResampling) {
+      // Resampled indicator series are always exactly-visible already, so
+      // there's no incremental case to preserve across a timeframe switch
+      // - just draw the current point-in-time set fresh each time.
+      prevSmaLenRef.current = 0;
+      prevEmaLenRef.current = 0;
+      prevRsiLenRef.current = 0;
+    }
+  }, [isResampling, smaPoints, emaPoints, rsiPoints]);
 
   useEffect(() => {
     prevSmaLenRef.current = 0;
     prevEmaLenRef.current = 0;
     prevRsiLenRef.current = 0;
-  }, [smaPoints, emaPoints, rsiPoints]);
+  }, [candles]);
 
   useEffect(() => {
-    if (smaSeriesRef.current) pushIncremental(smaSeriesRef.current, smaPoints, smaVisibleLen(visibleCount), prevSmaLenRef);
-    if (emaSeriesRef.current) pushIncremental(emaSeriesRef.current, emaPoints, emaVisibleLen(visibleCount), prevEmaLenRef);
-    if (rsiSeriesRef.current) pushIncremental(rsiSeriesRef.current, rsiPoints, rsiVisibleLen(visibleCount), prevRsiLenRef);
-  }, [visibleCount, smaPoints, emaPoints, rsiPoints]);
+    const smaLen = isResampling ? smaPoints.length : smaVisibleLen(visibleCount);
+    const emaLen = isResampling ? emaPoints.length : emaVisibleLen(visibleCount);
+    const rsiLen = isResampling ? rsiPoints.length : rsiVisibleLen(visibleCount);
+    if (smaSeriesRef.current) pushIncremental(smaSeriesRef.current, smaPoints, smaLen, prevSmaLenRef);
+    if (emaSeriesRef.current) pushIncremental(emaSeriesRef.current, emaPoints, emaLen, prevEmaLenRef);
+    if (rsiSeriesRef.current) pushIncremental(rsiSeriesRef.current, rsiPoints, rsiLen, prevRsiLenRef);
+  }, [visibleCount, smaPoints, emaPoints, rsiPoints, isResampling]);
 
   // Markers (entry/exit arrows) + price lines (entry/SL/TP for any trade
   // still open at the current point in the replay) - recomputed whenever
   // the trade list or the visible window changes. Cheap: trade counts are
-  // small (tens, not thousands), unlike the candle series itself.
+  // small (tens, not thousands), unlike the candle series itself. Always
+  // driven off the base candles/visibleCount (not the resampled display
+  // series) - a trade's real entry/exit time doesn't change based on which
+  // timeframe you're currently looking at it through.
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
@@ -286,12 +354,33 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
     }
   }, [trades, candles, visibleCount]);
 
+  const timeframeOptions = baseTimeframe ? derivableTimeframes(baseTimeframe) : [];
+
   return (
     <div className="w-full">
-      <div className="flex items-center justify-end gap-1.5 mb-1.5">
-        <IndicatorChip label="EMA 50" active={showEma} dotClassName="bg-blue-500" onClick={() => setShowEma(v => !v)} />
-        <IndicatorChip label="SMA 20" active={showSma} dotClassName="bg-purple-500" onClick={() => setShowSma(v => !v)} />
-        <IndicatorChip label="RSI 14" active={showRsi} dotClassName="bg-amber-500" onClick={() => setShowRsi(v => !v)} />
+      <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+        {timeframeOptions.length > 1 ? (
+          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+            {timeframeOptions.map(tf => (
+              <button
+                key={tf}
+                type="button"
+                onClick={() => setDisplayTf(tf)}
+                className={cn(
+                  'h-6 px-2 rounded text-[11px] font-medium transition-colors',
+                  tf === displayTf ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
+                )}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+        ) : <div />}
+        <div className="flex items-center gap-1.5">
+          <IndicatorChip label="EMA 50" active={showEma} dotClassName="bg-blue-500" onClick={() => setShowEma(v => !v)} />
+          <IndicatorChip label="SMA 20" active={showSma} dotClassName="bg-purple-500" onClick={() => setShowSma(v => !v)} />
+          <IndicatorChip label="RSI 14" active={showRsi} dotClassName="bg-amber-500" onClick={() => setShowRsi(v => !v)} />
+        </div>
       </div>
       <div ref={containerRef} className="w-full" />
     </div>
