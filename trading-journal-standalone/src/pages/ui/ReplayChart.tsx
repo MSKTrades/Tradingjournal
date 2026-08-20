@@ -39,6 +39,26 @@ const smaVisibleLen = (visibleCount: number) => Math.max(0, visibleCount - (SMA_
 const emaVisibleLen = (visibleCount: number) => Math.max(0, visibleCount - (EMA_PERIOD - 1));
 const rsiVisibleLen = (visibleCount: number) => Math.max(0, visibleCount - RSI_PERIOD);
 
+// A resampled view with only a handful of candles looks broken, not just
+// sparse - lightweight-charts' fitContent() stretches a 1-2 bar series
+// into one oddly-wide bar with empty space on both sides, which reads as a
+// rendering bug rather than "there just isn't much history yet." Below
+// this threshold, a timeframe chip is disabled (with a tooltip explaining
+// why) instead of letting someone click into that degenerate view - it
+// re-enables itself automatically as more history gets revealed.
+const MIN_CHIP_CANDLES = 5;
+
+// Cheap approximation of "how many candles would this timeframe show right
+// now" - doesn't need to actually run the resampler (which needs the real
+// candle data + a stateful cache) just to gate a button's enabled state.
+// Slightly off at bucket boundaries; fine for a UI threshold check.
+function estimateResampledCount(baseVisibleCount: number, baseTf: string, targetTf: string): number {
+  const baseSec = TIMEFRAME_SECONDS[baseTf];
+  const targetSec = TIMEFRAME_SECONDS[targetTf];
+  if (!baseSec || !targetSec) return baseVisibleCount;
+  return Math.floor((baseVisibleCount * baseSec) / targetSec);
+}
+
 // Same incremental-vs-reset logic the main candle series uses (see the
 // comment on the candle effect below) - a line series with tens of
 // thousands of points shouldn't get a full setData() on every single-step
@@ -104,6 +124,20 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
   useEffect(() => { setDisplayTf(baseTimeframe ?? '1m'); }, [baseTimeframe]);
 
   const isResampling = !!baseTimeframe && displayTf !== baseTimeframe;
+
+  // Auto-revert to the base timeframe if the currently-displayed coarser
+  // view would drop below a usable number of candles - e.g. hitting Reset
+  // while zoomed into 1h shouldn't leave you staring at a single
+  // stretched-looking in-progress bar; it should just drop you back to the
+  // timeframe that actually has that little history to show, same as if
+  // you'd started fresh. Doesn't touch anything if there's no baseTimeframe
+  // (timeframe switching disabled entirely) or displayTf already IS base.
+  useEffect(() => {
+    if (!baseTimeframe || displayTf === baseTimeframe) return;
+    if (estimateResampledCount(visibleCount, baseTimeframe, displayTf) < MIN_CHIP_CANDLES) {
+      setDisplayTf(baseTimeframe);
+    }
+  }, [visibleCount, baseTimeframe, displayTf]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -361,19 +395,27 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
       <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
         {timeframeOptions.length > 1 ? (
           <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-            {timeframeOptions.map(tf => (
-              <button
-                key={tf}
-                type="button"
-                onClick={() => setDisplayTf(tf)}
-                className={cn(
-                  'h-6 px-2 rounded text-[11px] font-medium transition-colors',
-                  tf === displayTf ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
-                )}
-              >
-                {tf}
-              </button>
-            ))}
+            {timeframeOptions.map(tf => {
+              const tooFewCandles = tf !== baseTimeframe
+                && estimateResampledCount(visibleCount, baseTimeframe!, tf) < MIN_CHIP_CANDLES;
+              return (
+                <button
+                  key={tf}
+                  type="button"
+                  disabled={tooFewCandles}
+                  title={tooFewCandles ? `Not enough revealed history yet for a useful ${tf} view - keep playing, or choose a later starting point` : undefined}
+                  onClick={() => setDisplayTf(tf)}
+                  className={cn(
+                    'h-6 px-2 rounded text-[11px] font-medium transition-colors',
+                    tooFewCandles
+                      ? 'text-muted-foreground/40 cursor-not-allowed'
+                      : tf === displayTf ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
+                  )}
+                >
+                  {tf}
+                </button>
+              );
+            })}
           </div>
         ) : <div />}
         <div className="flex items-center gap-1.5">

@@ -14,11 +14,27 @@ import TradeReplayTab from './ui/TradeReplayTab';
 import { useReplayPlayback, SPEED_OPTIONS } from './ui/useReplayPlayback';
 
 // Candles that must already be visible before replay can "start" - a chart
-// with 3 bars on it isn't useful context to trade against.
+// with 3 bars on it isn't useful context to trade against. This is a floor
+// (the slider's minimum), not the default - see DEFAULT_LOOKBACK below for
+// where a fresh dataset actually starts.
 const MIN_LOOKBACK = 50;
 // Kept clear of the tail end of the dataset on a random start so there's
 // still meaningful runway ahead of you to actually place and resolve trades.
 const RANDOM_START_BUFFER = 300;
+// Where the starting-point slider defaults to when a dataset first loads.
+// Deliberately much deeper than MIN_LOOKBACK: the replay chart can zoom out
+// to coarser timeframes (see ReplayChart's resampling), and a coarser view
+// only ever shows what's already been revealed - starting right at candle
+// 50 of a 371,000-candle dataset means switching to 1h shows a single
+// still-forming candle, which reads as broken even though it's technically
+// correct (there just isn't more history yet at that point in the replay).
+// 30,000 base candles is ~500 hours' worth on a 1-minute dataset - enough
+// for a proper-looking zoomed-out view the moment someone starts, while
+// still leaving RANDOM_START_BUFFER candles of runway ahead to trade
+// against. Only kicks in as a *default* - the slider can still be dragged
+// all the way back to MIN_LOOKBACK for anyone who wants to start from the
+// very beginning of their history.
+const DEFAULT_LOOKBACK = 30000;
 
 function LogTradeForm({ lastClose, onSubmit }: { lastClose: number; onSubmit: (t: { direction: string; entry_price: number; sl_price: number | null; tp_price: number | null; notes: string }) => void }) {
   const [direction, setDirection] = useState<'Long' | 'Short'>('Long');
@@ -122,7 +138,12 @@ export default function Backtest() {
       .then((data: Candle[]) => {
         if (cancelled) return;
         setCandles(data);
-        setStartIndex(Math.min(MIN_LOOKBACK, Math.max(1, data.length - 1)));
+        // Deepest point that still leaves RANDOM_START_BUFFER candles of
+        // runway ahead, capped at DEFAULT_LOOKBACK, floored at MIN_LOOKBACK
+        // (and never past the end of a short dataset) - see the constants'
+        // comments above for why this isn't just MIN_LOOKBACK anymore.
+        const withRunway = Math.max(MIN_LOOKBACK, data.length - RANDOM_START_BUFFER);
+        setStartIndex(Math.max(1, Math.min(DEFAULT_LOOKBACK, withRunway, data.length - 1)));
       })
       .catch(e => { if (!cancelled) setCandlesError(e.message); })
       .finally(() => { if (!cancelled) setCandlesLoading(false); });
@@ -300,6 +321,7 @@ export default function Backtest() {
                 <p className="text-sm font-semibold">Choose a starting point</p>
                 <p className="text-xs text-muted-foreground">
                   Replay reveals candles one at a time from here forward - everything after your start point stays hidden until you step or play into it, so you're trading blind just like the real thing.
+                  Defaults partway into your data (not the very beginning) so there's already enough history behind you to look reasonable if you zoom out to a bigger timeframe right away - drag all the way left for a clean-slate start with no prior history.
                 </p>
                 <div className="flex flex-col gap-1.5">
                   <input
