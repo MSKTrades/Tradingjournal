@@ -508,6 +508,25 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
 
 CREATE INDEX IF NOT EXISTS idx_backtest_trades_dataset ON backtest_trades (dataset_id);
 
+-- Trend lines / horizontal lines / rectangles / Fibonacci retracements drawn
+-- on a chart_datasets replay chart. Scoped per dataset_id (not per-account)
+-- so drawings are shared across whoever views that dataset's replay - same
+-- pattern as the candle data itself. `points` holds however many
+-- {time, price} anchor points the drawing type needs (every type
+-- currently supported uses one or two) as JSON rather than fixed columns,
+-- so a future drawing type with a different point count doesn't need a
+-- schema change.
+CREATE TABLE IF NOT EXISTS chart_drawings (
+  id            SERIAL PRIMARY KEY,
+  dataset_id    INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
+  type          TEXT NOT NULL,          -- 'trendline' | 'horizontal' | 'rectangle' | 'fib'
+  points        JSONB NOT NULL,         -- [{time, price}, ...]
+  color         TEXT NOT NULL DEFAULT '#3b82f6',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chart_drawings_dataset ON chart_drawings (dataset_id);
+
 -- Quality/mistake tags on practice trades (e.g. "A+ Setup", "Off-Plan",
 -- "FOMO"), same idea as trades.tags on the real Journal. Deliberately
 -- shares that same `tags` table/vocabulary rather than a second tag list -

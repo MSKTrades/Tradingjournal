@@ -189,7 +189,7 @@ export default function TradeReplayTab({ datasets }: Props) {
                 {selected.trade.gain_loss != null && <span className="font-mono text-muted-foreground">{fmtMoney(selected.trade.gain_loss)}</span>}
               </div>
             </div>
-            <ReplayChart candles={windowed.slice} visibleCount={visibleCount} trades={[windowed.reviewTrade]} baseTimeframe={selected.dataset.timeframe} />
+            <ReplayChart candles={windowed.slice} visibleCount={visibleCount} trades={[windowed.reviewTrade]} baseTimeframe={selected.dataset.timeframe} datasetId={selected.dataset.id} />
           </CardContent>
         </Card>
       )}

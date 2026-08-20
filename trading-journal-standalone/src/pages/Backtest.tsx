@@ -370,7 +370,7 @@ export default function Backtest() {
                       {new Date(candles[Math.max(0, visibleCount - 1)].time * 1000).toLocaleString()} &middot; {visibleCount.toLocaleString()} / {candles.length.toLocaleString()}
                     </p>
                   </div>
-                  <ReplayChart candles={candles} visibleCount={visibleCount} trades={trades} baseTimeframe={selectedDataset?.timeframe} />
+                  <ReplayChart candles={candles} visibleCount={visibleCount} trades={trades} baseTimeframe={selectedDataset?.timeframe} datasetId={selectedId} />
                 </CardContent>
               </Card>
 

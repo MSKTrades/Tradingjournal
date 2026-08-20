@@ -1,122 +1,125 @@
-# Deploy: Real Contact form + Admin user details (location, logins)
+# Deploy: Drawing tools on the replay chart (trend line, horizontal line, rectangle, Fibonacci retracement)
 
-Two things from your last message: (1) Contact us now opens an in-app form
-instead of handing off to an external email app, and (2) the Admin page
-now shows, per registered user, where they signed up from and how often
-they're coming back.
+Adds a small toolbar above the Backtest replay chart (both the Practice
+Backtest tab and the Trade Replay tab) so you can mark up the chart while
+you're studying it — trend lines, horizontal support/resistance lines,
+rectangles, and Fibonacci retracements. Drawings are saved per dataset (not
+just kept in the browser), so they're still there next time you open that
+same pair/timeframe, and anyone else who opens it sees the same markup —
+same visibility model as the candle data itself.
 
-Tested end-to-end locally: submitted the contact form both as a logged-out
-landing-page visitor and as a logged-in user (email pre-fills), confirmed
-validation (bad email / empty message both rejected), confirmed a message
-submitted with no email configured still safely lands in the database,
-and confirmed the Admin page's new Registered Users table shows real
-location + login data (simulated Vercel's own geolocation headers locally
-to verify, since those only exist on a real Vercel deployment).
+## 1. Run this against your Neon database first
 
-## 1. Files in this zip
-
-```
-schema.sql                        (new contact_messages table + new users columns — append only, see step 2)
-api/_auth.js                      (adds getRequestGeo — reads Vercel's built-in geo headers)
-api/columns.ts                    (contact form endpoint, login/geo tracking, admin_stats extended)
-src/components/ContactDialog.tsx  (new — the contact form itself)
-src/components/Layout.tsx         (sidebar Contact us now opens the form, not mailto)
-src/pages/ui/MarketingChrome.tsx  (landing page header + footer Contact us, same change)
-src/pages/Admin.tsx               (new Registered Users table + Contact Messages section)
-```
-
-Copy these over the matching paths in your repo the same way as before.
-`schema.sql` is append-only again — see step 2 for the exact SQL to run
-against your production database rather than diffing the whole file.
-
-## 2. Database migration
-
-Run this once against your production Neon database:
+This feature needs one new table. Open your Neon project's SQL editor (or
+any Postgres client pointed at your `DATABASE_URL`) and run:
 
 ```sql
-CREATE TABLE IF NOT EXISTS contact_messages (
-  id          SERIAL PRIMARY KEY,
-  email       TEXT NOT NULL,
-  message     TEXT NOT NULL,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS chart_drawings (
+  id            SERIAL PRIMARY KEY,
+  dataset_id    INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
+  type          TEXT NOT NULL,          -- 'trendline' | 'horizontal' | 'rectangle' | 'fib'
+  points        JSONB NOT NULL,         -- [{time, price}, ...]
+  color         TEXT NOT NULL DEFAULT '#3b82f6',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_contact_messages_created ON contact_messages (created_at DESC);
 
-ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_country TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_city TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_ip TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_chart_drawings_dataset ON chart_drawings (dataset_id);
 ```
 
-Existing accounts (your own, and anyone who signed up before this) will
-show "—" for location and 0 logins until they log in again — there's no
-way to retroactively know where a past signup came from. New signups, and
-anyone who logs in again, start filling in immediately.
+`schema.sql` in this zip already has this added too, so your local copy of
+that file (if you keep one in the repo for reference) stays in sync — but
+the table itself only exists once you actually run the SQL above against
+Neon.
 
-## 3. Contact form — does it actually email you?
+## 2. Files in this zip
 
-Yes, but it needs one optional setup step to fully work, and it's designed
-so nothing breaks or gets lost either way:
+```
+api/backtest.ts                 (adds a resource=drawings GET/POST/DELETE branch — no new function, still fits Vercel Hobby's 12-function cap)
+src/pages/ui/drawingPrimitives.ts   (new — the trend line / rectangle / Fibonacci rendering, drawn directly on the chart's own canvas)
+src/pages/ui/ReplayChart.tsx    (adds the toolbar + click-to-draw/select/delete interaction)
+src/pages/Backtest.tsx          (one line — tells the chart which dataset to scope drawings to)
+src/pages/ui/TradeReplayTab.tsx (same one line, for the Trade Replay tab)
+src/pages/data/types.ts         (adds the ChartDrawing type)
+package.json                    (adds `fancy-canvas` as a direct dependency — see note below)
+```
 
-**Right now, with zero setup:** every message submitted through the form
-is saved to the database and shows up on your Admin page under "Contact
-messages" — you'll see it there even if you skip the rest of this section.
+Copy all of these over the matching paths in your repo, **then run
+`npm install`** before your next deploy (see the `fancy-canvas` note below —
+this is the one step that's easy to miss).
 
-**To also get it delivered to your actual support@pipecho.com inbox:**
+## 3. Why `fancy-canvas` got added to package.json
 
-1. Create a free account at https://resend.com (100 emails/day, 3,000/month
-   free — plenty for a contact form).
-2. In Resend, add and verify the **pipecho.com** domain — they'll give you
-   a few DNS records (TXT/CNAME) to add wherever pipecho.com's DNS is
-   managed. This step is required — Resend can only deliver to
-   support@pipecho.com once your domain is verified; without it, emails
-   from an unverified sender can only reach the address on your own Resend
-   account, not support@pipecho.com.
-3. In Resend, copy your API key (starts with `re_`).
-4. In Vercel: Project Settings → Environment Variables, add:
-   - `RESEND_API_KEY` = `re_xxxxx`
-   - `RESEND_FROM` = `PipEcho <contact@pipecho.com>` (any address on the
-     verified pipecho.com domain works)
-   - `CONTACT_TO_EMAIL` — optional, defaults to `support@pipecho.com`
-     already, only set this if you want messages sent somewhere else.
-5. Redeploy.
+The trend line/rectangle/Fib drawings are rendered by hooking into
+lightweight-charts' own canvas via its "Series Primitives" API — the same
+mechanism the library's own official plugin examples use, since it has no
+built-in drawing tools. That API's types live in a small library called
+`fancy-canvas`, which lightweight-charts already depends on internally (it's
+already sitting in your `node_modules` right now, just not listed directly
+in your `package.json`). Adding it as a direct dependency just makes sure
+`npm install` always pulls a working copy in when this file imports it
+directly — cheap insurance against a future lockfile change moving it
+somewhere `drawingPrimitives.ts` can't see it.
 
-Once that's set, every contact-form submission arrives in your inbox with
-**Reply-To set to the sender's own email** — so hitting Reply in Gmail (or
-wherever you read support@pipecho.com) goes straight back to them, without
-you needing to copy their address out of the message body.
+## 4. What you get
 
-Until you do this setup, the form still works from the visitor's side (they
-get a "Message sent" confirmation either way) — you just check the Admin
-page instead of your inbox.
+- A small toolbar (cursor / trend line / horizontal line / rectangle /
+  Fibonacci / delete) above the chart, next to the timeframe and indicator
+  chips.
+- **Trend line, Rectangle, Fibonacci retracement**: click the tool, click
+  two points on the chart (e.g. a swing low then a swing high for Fib).
+  Fibonacci draws the standard levels — 0%, 23.6%, 38.2%, 50%, 61.8%, 78.6%,
+  100% — labeled on the right of each line.
+- **Horizontal line**: click the tool, click once on the chart.
+- **Select tool** (the cursor icon, default): click near any drawing to
+  select it (it highlights), then the trash icon deletes it. Click empty
+  chart space to deselect.
+- Everything survives a page reload and a timeframe switch (1m ↔ 1h ↔ 1d,
+  etc.) — drawings are anchored to real price/time, not a fixed pixel
+  position, so zooming/panning/resampling doesn't distort them.
+- Drawings are scoped to the dataset (pair + timeframe) you're viewing, not
+  to your account — same as the candle data itself. If you and someone else
+  both open the same GBPUSD 1m replay, you'll both see the same markup.
 
-## 4. Admin page — what's new
+## 5. What's intentionally NOT included (kept the scope reasonable)
 
-The Admin page now has a **Registered Users** table: email, signup date,
-location (city/country — read from Vercel's own request headers, no
-third-party IP-lookup service, no extra cost), number of logins, and how
-recently they were last active ("3h ago", "2d ago", etc).
+- No drag-to-move/resize on an existing drawing — to reposition one, delete
+  it and redraw it. Adding drag support is a reasonable follow-up if it
+  turns out you want it often.
+- No per-drawing color picker — each tool has one fixed, distinguishable
+  color (trend line blue, horizontal green, rectangle purple, Fib amber).
+- No undo — deleting is immediate (one click on the trash icon once
+  something's selected).
 
-One honest limitation, called out directly on the page itself: this tells
-you **how often** someone's coming back, not **how long** they stay each
-time. True session duration needs real client-side activity tracking,
-which is what PostHog (from the last batch of changes) is for — once
-you've set up your PostHog account, that's where session length and
-engagement depth live. This table complements that rather than
-duplicating it: "who, from where, how often" here, "how long, doing what"
-there.
+## 6. Tested before sending this
 
-## 5. What to check after deploying
+Ran this against a local test dataset (a few thousand 1-minute candles) via
+a full browser test:
 
-- Submit the contact form both logged out (landing page) and logged in
-  (sidebar) — confirm you see a "Message sent" confirmation both times.
-- Check the Admin page's Contact Messages section — both test submissions
-  should show up there immediately, regardless of whether Resend is set up.
-- If you did the Resend setup, check that support@pipecho.com actually
-  received the test message, and that hitting Reply addresses it back to
-  the email you submitted with.
-- Log in with a second test account (or just log out and back in) and
-  confirm the Registered Users table's login count goes up and "Last
-  active" updates.
+- Drew one of each tool (trend line, horizontal line, rectangle, Fibonacci)
+  — each rendered correctly and persisted to the database (confirmed via a
+  direct DB query, not just visually).
+- Reloaded the page — all four drawings reloaded from the database and
+  rendered in the same place, confirming persistence actually round-trips
+  (not just an in-memory illusion).
+- Selected a drawing with the cursor tool (it highlighted), deleted it,
+  confirmed it disappeared from both the chart and the database, and the
+  other three drawings were untouched.
+- Cycled through every timeframe chip (1m → 5m → 15m → 1h → 4h → 1m) with
+  drawings on screen — no distortion, no console errors, no crashes. This
+  was the main risk (drawings are anchored to raw price/time, and the
+  timeframe switcher resamples what's actually plotted underneath them) and
+  it held up cleanly.
+- Zero console/JS errors throughout. `tsc --noEmit` and `npm run build`
+  both clean.
+
+## 7. What to check after deploying
+
+- Open a dataset's replay, start it, draw a trend line and a Fibonacci
+  retracement.
+- Reload the page, confirm both are still there.
+- Switch timeframes (1m/1h/1d) with drawings visible, confirm they don't
+  jump or distort.
+- Select one and delete it with the trash icon, confirm only that one goes
+  away.
+- If you use the Trade Replay tab too, confirm the toolbar shows up there
+  as well and drawings for that trade's dataset load correctly.

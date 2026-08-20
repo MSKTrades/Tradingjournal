@@ -392,3 +392,14 @@ export type BacktestTrade = {
   tags: string[];              // shares the same reusable tag pool as trades.tags
   created_at: string;
 };
+
+export type ChartDrawingType = 'trendline' | 'horizontal' | 'rectangle' | 'fib';
+
+export type ChartDrawing = {
+  id: number;
+  dataset_id: number;
+  type: ChartDrawingType;
+  points: { time: number; price: number }[];
+  color: string;
+  created_at: string;
+};

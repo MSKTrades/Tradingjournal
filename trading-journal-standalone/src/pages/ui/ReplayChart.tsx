@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createChart, IChartApi, ISeriesApi, IPriceLine, UTCTimestamp } from 'lightweight-charts';
-import { Candle, BacktestTrade } from '../data/types';
+import { createChart, IChartApi, ISeriesApi, IPriceLine, UTCTimestamp, MouseEventParams, Time } from 'lightweight-charts';
+import { MousePointer2, Slash, Minus, Square, Percent, Trash2 } from 'lucide-react';
+import { Candle, BacktestTrade, ChartDrawing } from '../data/types';
 import { computeSMA, computeEMA, computeRSI, IndicatorPoint } from './indicators';
 import { TIMEFRAME_SECONDS, derivableTimeframes, createResampleCache, resampleIncremental, ResampleCache } from './resample';
+import { DrawingsPrimitive, Drawing, DrawingType, FIB_LEVELS, distanceToSegment } from './drawingPrimitives';
+import { api } from '../../lib/api';
 import { Button } from '../../lib/ui/button';
 import { cn } from '../../lib/utils';
 
@@ -18,7 +21,30 @@ type Props = {
   // base series (see resample.ts) - no re-fetch needed to look at the same
   // history zoomed out.
   baseTimeframe?: string;
+  // Which chart_datasets row these candles belong to. Optional - when
+  // omitted the drawing toolbar is hidden entirely (nothing to scope
+  // drawings to) and the chart behaves exactly as it did before drawing
+  // tools existed. When present, drawings are loaded/saved/deleted against
+  // this dataset via the resource=drawings API and are shared with anyone
+  // else who opens the same dataset's replay - same visibility model as the
+  // candle data itself.
+  datasetId?: number | null;
 };
+
+type ActiveTool = 'select' | DrawingType | 'horizontal';
+
+const TOOL_COLORS: Record<DrawingType | 'horizontal', string> = {
+  trendline: '#3b82f6',
+  rectangle: '#a855f7',
+  fib: '#f59e0b',
+  horizontal: '#10b981',
+};
+
+// How close (in pixels) a click needs to land to an existing drawing to
+// select it. Generous enough for a mouse or a fingertip on a touchscreen,
+// tight enough that it doesn't just grab whatever's closest anywhere on
+// the chart.
+const HIT_TEST_PX = 8;
 
 // Fixed periods rather than user-adjustable ones - keeps this a "the basics
 // are here" addition rather than a full indicator-configuration feature.
@@ -90,7 +116,7 @@ function pushIncremental(
 // jump/reset (series.setData - rebuilds the visible series). Re-creating
 // the whole chart on every replay tick would both be slow for a dataset
 // with 100k+ candles and would reset the user's zoom/pan on every step.
-export default function ReplayChart({ candles, visibleCount, trades, height = 480, baseTimeframe }: Props) {
+export default function ReplayChart({ candles, visibleCount, trades, height = 480, baseTimeframe, datasetId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -105,6 +131,235 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
   const prevSmaLenRef = useRef(0);
   const prevEmaLenRef = useRef(0);
   const prevRsiLenRef = useRef(0);
+
+  // --- Drawing tools state -------------------------------------------------
+  // `drawings` is the source of truth (persisted rows for this dataset,
+  // fetched below); everything else here is interaction plumbing so the
+  // chart's own click/crosshair subscriptions (registered once, in the
+  // chart-creation effect below) never see a stale closure over React state.
+  // Instead they read `latestRef.current`, which a plain post-render effect
+  // keeps in sync every render - the same "mutate a ref from an effect, not
+  // from render" discipline resample.ts's StrictMode lesson established.
+  const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
+  const [activeTool, setActiveTool] = useState<ActiveTool>('select');
+  const [selectedDrawingId, setSelectedDrawingId] = useState<number | string | null>(null);
+
+  const drawingsPrimitiveRef = useRef<DrawingsPrimitive | null>(null);
+  const horizontalLinesRef = useRef<Map<number, IPriceLine>>(new Map());
+  const latestRef = useRef<{
+    activeTool: ActiveTool;
+    drawings: ChartDrawing[];
+    pendingPoint: { time: number; price: number } | null;
+  }>({ activeTool: 'select', drawings: [], pendingPoint: null });
+
+  useEffect(() => {
+    latestRef.current.activeTool = activeTool;
+    latestRef.current.drawings = drawings;
+  });
+
+  // Switching tools (or datasets) mid-placement cancels whatever was half
+  // drawn rather than leaving an orphaned pending point around.
+  useEffect(() => {
+    latestRef.current.pendingPoint = null;
+    drawingsPrimitiveRef.current?.setPreview(null);
+  }, [activeTool]);
+
+  // Load this dataset's saved drawings whenever it changes - same
+  // direct-fetch-on-id-change pattern Backtest.tsx uses for candle data.
+  useEffect(() => {
+    setSelectedDrawingId(null);
+    setActiveTool('select');
+    if (!datasetId) { setDrawings([]); return; }
+    let cancelled = false;
+    api.get(`/backtest?resource=drawings&dataset_id=${datasetId}`)
+      .then((rows: ChartDrawing[]) => { if (!cancelled) setDrawings(rows); })
+      .catch(() => { if (!cancelled) setDrawings([]); });
+    return () => { cancelled = true; };
+  }, [datasetId]);
+
+  // Push the non-horizontal drawings into the primitive, and the current
+  // selection, whenever either changes - the primitive itself never fetches
+  // or owns state, it just renders whatever's handed to it (see
+  // drawingPrimitives.ts).
+  useEffect(() => {
+    const asPrimitiveDrawings: Drawing[] = drawings
+      .filter(d => d.type !== 'horizontal')
+      .map(d => ({ id: d.id, type: d.type as DrawingType, points: d.points, color: d.color }));
+    drawingsPrimitiveRef.current?.setDrawings(asPrimitiveDrawings);
+  }, [drawings]);
+
+  useEffect(() => {
+    drawingsPrimitiveRef.current?.setSelected(selectedDrawingId);
+  }, [selectedDrawingId]);
+
+  // Horizontal lines use the chart's native price-line API (same mechanism
+  // as the entry/SL/TP lines below) rather than the custom primitive - a
+  // horizontal line is exactly what createPriceLine already draws, so
+  // there's no reason to reimplement it. Rebuilt from scratch on every
+  // change rather than diffed - the count is always small (a handful of
+  // drawings per chart), so this is cheap.
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) return;
+    horizontalLinesRef.current.forEach(l => series.removePriceLine(l));
+    horizontalLinesRef.current.clear();
+    drawings.filter(d => d.type === 'horizontal').forEach(d => {
+      const price = d.points[0]?.price;
+      if (price == null) return;
+      const selected = d.id === selectedDrawingId;
+      const line = series.createPriceLine({
+        price, color: d.color, lineWidth: selected ? 3 : 1, lineStyle: 0,
+        axisLabelVisible: true, title: 'Line',
+      });
+      horizontalLinesRef.current.set(d.id, line);
+    });
+  }, [drawings, selectedDrawingId]);
+
+  async function persistDrawing(type: DrawingType | 'horizontal', points: { time: number; price: number }[], color: string) {
+    if (!datasetId) return;
+    try {
+      const saved: ChartDrawing = await api.post('/backtest', { resource: 'drawings', dataset_id: datasetId, type, points, color });
+      setDrawings(prev => [...prev, saved]);
+    } catch (e) {
+      console.error('Failed to save drawing', e);
+    }
+  }
+
+  async function handleDeleteSelected() {
+    if (selectedDrawingId == null) return;
+    const id = selectedDrawingId;
+    setSelectedDrawingId(null);
+    setDrawings(prev => prev.filter(d => d.id !== id));
+    try {
+      await api.del(`/backtest?resource=drawings&id=${id}`);
+    } catch (e) {
+      console.error('Failed to delete drawing', e);
+    }
+  }
+
+  // Distance-based hit test against every current drawing, in pixel space -
+  // horizontal lines compare against their single fixed y; trend
+  // lines/rectangle edges/fib level lines all reduce to "distance to a line
+  // segment" (see distanceToSegment in drawingPrimitives.ts). Not the
+  // library's own primitive hitTest hook - keeping selection logic here
+  // alongside the rest of the click wiring is simpler than threading
+  // externalIds through attachPrimitive's hover-cursor mechanism for what's
+  // ultimately just a handful of drawings at a time.
+  function findDrawingNear(x: number, y: number): ChartDrawing | null {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return null;
+    const ts = chart.timeScale();
+    let best: ChartDrawing | null = null;
+    let bestDist = HIT_TEST_PX;
+
+    for (const d of latestRef.current.drawings) {
+      if (d.type === 'horizontal') {
+        const price = d.points[0]?.price;
+        if (price == null) continue;
+        const ly = series.priceToCoordinate(price);
+        if (ly == null) continue;
+        const dist = Math.abs(y - ly);
+        if (dist < bestDist) { bestDist = dist; best = d; }
+        continue;
+      }
+
+      const [a, b] = d.points;
+      if (!a || !b) continue;
+      const x1 = ts.timeToCoordinate(a.time as Time);
+      const y1 = series.priceToCoordinate(a.price);
+      const x2 = ts.timeToCoordinate(b.time as Time);
+      const y2 = series.priceToCoordinate(b.price);
+      if (x1 == null || y1 == null || x2 == null || y2 == null) continue;
+
+      if (d.type === 'trendline') {
+        const dist = distanceToSegment(x, y, x1, y1, x2, y2);
+        if (dist < bestDist) { bestDist = dist; best = d; }
+      } else if (d.type === 'rectangle') {
+        const rx1 = Math.min(x1, x2), rx2 = Math.max(x1, x2);
+        const ry1 = Math.min(y1, y2), ry2 = Math.max(y1, y2);
+        const edges: [number, number, number, number][] = [
+          [rx1, ry1, rx2, ry1], [rx2, ry1, rx2, ry2], [rx2, ry2, rx1, ry2], [rx1, ry2, rx1, ry1],
+        ];
+        const dist = Math.min(...edges.map(([ex1, ey1, ex2, ey2]) => distanceToSegment(x, y, ex1, ey1, ex2, ey2)));
+        if (dist < bestDist) { bestDist = dist; best = d; }
+      } else if (d.type === 'fib') {
+        const fx1 = Math.min(x1, x2), fx2 = Math.max(x1, x2);
+        for (const level of FIB_LEVELS) {
+          const price = a.price + level * (b.price - a.price);
+          const ly = series.priceToCoordinate(price);
+          if (ly == null) continue;
+          const dist = distanceToSegment(x, y, fx1, ly, fx2, ly);
+          if (dist < bestDist) { bestDist = dist; best = d; }
+        }
+      }
+    }
+    return best;
+  }
+
+  function timeAtClick(param: MouseEventParams<Time>): number | null {
+    if (param.time != null) return param.time as number;
+    const chart = chartRef.current;
+    if (param.point && chart) {
+      const t = chart.timeScale().coordinateToTime(param.point.x);
+      return t == null ? null : (t as number);
+    }
+    return null;
+  }
+
+  // Registered once, at chart creation - reads everything through refs
+  // (never closes over a per-render `activeTool`/`drawings` value) so it
+  // stays correct no matter how many renders have happened since mount.
+  function handleChartClick(param: MouseEventParams<Time>) {
+    const series = seriesRef.current;
+    if (!series || !param.point) return;
+    const tool = latestRef.current.activeTool;
+
+    if (tool === 'select') {
+      const hit = findDrawingNear(param.point.x, param.point.y);
+      setSelectedDrawingId(hit ? hit.id : null);
+      return;
+    }
+
+    const price = series.coordinateToPrice(param.point.y);
+    const time = timeAtClick(param);
+    if (price == null || time == null) return;
+
+    if (tool === 'horizontal') {
+      persistDrawing('horizontal', [{ time, price }], TOOL_COLORS.horizontal);
+      setActiveTool('select');
+      return;
+    }
+
+    const pending = latestRef.current.pendingPoint;
+    if (!pending) {
+      latestRef.current.pendingPoint = { time, price };
+      drawingsPrimitiveRef.current?.setPreview({ id: 'preview', type: tool, points: [{ time, price }, { time, price }], color: TOOL_COLORS[tool] });
+      return;
+    }
+
+    const points = [pending, { time, price }];
+    latestRef.current.pendingPoint = null;
+    const primitive = drawingsPrimitiveRef.current;
+    // Keep the finished shape visible as a preview while the save is in
+    // flight - clearing it immediately would flash the drawing away for the
+    // round trip, then pop it back in once `drawings` state updates.
+    primitive?.setPreview({ id: 'preview', type: tool, points, color: TOOL_COLORS[tool] });
+    persistDrawing(tool, points, TOOL_COLORS[tool]).finally(() => primitive?.setPreview(null));
+    setActiveTool('select');
+  }
+
+  function handleChartCrosshairMove(param: MouseEventParams<Time>) {
+    const pending = latestRef.current.pendingPoint;
+    const tool = latestRef.current.activeTool;
+    const series = seriesRef.current;
+    const primitive = drawingsPrimitiveRef.current;
+    if (!pending || !series || !primitive || !param.point || tool === 'select' || tool === 'horizontal') return;
+    const price = series.coordinateToPrice(param.point.y);
+    const time = timeAtClick(param);
+    if (price == null || time == null) return;
+    primitive.setPreview({ id: 'preview', type: tool, points: [pending, { time, price }], color: TOOL_COLORS[tool] });
+  }
 
   // Overlay visibility lives here rather than being threaded down from
   // Backtest.tsx / TradeReplayTab.tsx, so both places that render a replay
@@ -209,6 +464,21 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
     prevEmaLenRef.current = 0;
     prevRsiLenRef.current = 0;
 
+    // Drawing tools: one primitive instance attached for the component's
+    // whole lifetime (see drawingPrimitives.ts - it renders whatever
+    // drawings/preview/selection are pushed into it, it doesn't fetch or
+    // own state itself), plus the click/crosshair subscriptions that drive
+    // placing and selecting drawings. Both handlers read exclusively
+    // through refs (chartRef/seriesRef/drawingsPrimitiveRef/latestRef), so
+    // registering them once here - rather than re-subscribing whenever
+    // activeTool/drawings change - is safe and avoids tearing down/rebuilding
+    // the chart's event wiring on every toolbar click.
+    const drawingsPrimitive = new DrawingsPrimitive();
+    series.attachPrimitive(drawingsPrimitive);
+    drawingsPrimitiveRef.current = drawingsPrimitive;
+    chart.subscribeClick(handleChartClick);
+    chart.subscribeCrosshairMove(handleChartCrosshairMove);
+
     const resizeObserver = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width;
       if (w) chart.applyOptions({ width: Math.floor(w) });
@@ -217,6 +487,10 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
 
     return () => {
       resizeObserver.disconnect();
+      chart.unsubscribeClick(handleChartClick);
+      chart.unsubscribeCrosshairMove(handleChartCrosshairMove);
+      series.detachPrimitive(drawingsPrimitive);
+      drawingsPrimitiveRef.current = null;
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -392,6 +666,40 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
 
   return (
     <div className="w-full">
+      {datasetId != null && (
+        <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+            <ToolButton active={activeTool === 'select'} onClick={() => setActiveTool('select')} title="Select - click a drawing to select it">
+              <MousePointer2 className="w-3.5 h-3.5" />
+            </ToolButton>
+            <ToolButton active={activeTool === 'trendline'} onClick={() => setActiveTool('trendline')} title="Trend line - click two points">
+              <Slash className="w-3.5 h-3.5" />
+            </ToolButton>
+            <ToolButton active={activeTool === 'horizontal'} onClick={() => setActiveTool('horizontal')} title="Horizontal line - click one point">
+              <Minus className="w-3.5 h-3.5" />
+            </ToolButton>
+            <ToolButton active={activeTool === 'rectangle'} onClick={() => setActiveTool('rectangle')} title="Rectangle - click two corners">
+              <Square className="w-3.5 h-3.5" />
+            </ToolButton>
+            <ToolButton active={activeTool === 'fib'} onClick={() => setActiveTool('fib')} title="Fibonacci retracement - click the swing low, then the swing high (or vice versa)">
+              <Percent className="w-3.5 h-3.5" />
+            </ToolButton>
+          </div>
+          <Button
+            type="button" size="icon" variant="outline" className="h-6 w-6"
+            disabled={selectedDrawingId == null}
+            onClick={handleDeleteSelected}
+            title="Delete selected drawing"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+          {activeTool !== 'select' && (
+            <p className="text-[11px] text-muted-foreground">
+              {activeTool === 'horizontal' ? 'Click the chart to place the line.' : 'Click two points on the chart.'}
+            </p>
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
         {timeframeOptions.length > 1 ? (
           <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
@@ -426,6 +734,22 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
       </div>
       <div ref={containerRef} className="w-full" />
     </div>
+  );
+}
+
+function ToolButton({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={cn(
+        'h-6 w-6 flex items-center justify-center rounded transition-colors',
+        active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
