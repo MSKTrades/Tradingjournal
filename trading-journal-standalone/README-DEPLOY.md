@@ -1,125 +1,75 @@
-# Deploy: Drawing tools on the replay chart (trend line, horizontal line, rectangle, Fibonacci retracement)
+# Deploy: Restrict Backtest to your account only
 
-Adds a small toolbar above the Backtest replay chart (both the Practice
-Backtest tab and the Trade Replay tab) so you can mark up the chart while
-you're studying it — trend lines, horizontal support/resistance lines,
-rectangles, and Fibonacci retracements. Drawings are saved per dataset (not
-just kept in the browser), so they're still there next time you open that
-same pair/timeframe, and anyone else who opens it sees the same markup —
-same visibility model as the candle data itself.
+You said Backtest isn't ready to release to everyone yet — this locks it
+down to just your account (`manjyot1537@gmail.com`), the same way `/admin`
+already works, at three layers so it's actually not accessible to anyone
+else, not just hidden:
 
-## 1. Run this against your Neon database first
+1. **The sidebar link disappears** for every other user — same as the
+   Admin link already does. Nobody sees a "Backtest" tab at all.
+2. **The `/backtest` page itself** shows the existing "Coming soon" card
+   (the one already in your codebase from before this feature was built)
+   for anyone but you — so an old bookmark or a shared link doesn't show a
+   half-finished feature either.
+3. **The API itself** (`/api/backtest`) now 404s for anyone who isn't you —
+   this is the part that actually matters. Before this change, the API had
+   no access check at all: anyone who found the URL (logged in or not)
+   could read your datasets/trades/drawings or write to them directly,
+   regardless of what the UI showed. That's closed now.
 
-This feature needs one new table. Open your Neon project's SQL editor (or
-any Postgres client pointed at your `DATABASE_URL`) and run:
+Nothing about this touches your data or your real Backtest usage — you'll
+see everything exactly as before, since the check is "is this
+`manjyot1537@gmail.com`," which is you.
 
-```sql
-CREATE TABLE IF NOT EXISTS chart_drawings (
-  id            SERIAL PRIMARY KEY,
-  dataset_id    INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
-  type          TEXT NOT NULL,          -- 'trendline' | 'horizontal' | 'rectangle' | 'fib'
-  points        JSONB NOT NULL,         -- [{time, price}, ...]
-  color         TEXT NOT NULL DEFAULT '#3b82f6',
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+## 1. No database changes
 
-CREATE INDEX IF NOT EXISTS idx_chart_drawings_dataset ON chart_drawings (dataset_id);
-```
-
-`schema.sql` in this zip already has this added too, so your local copy of
-that file (if you keep one in the repo for reference) stays in sync — but
-the table itself only exists once you actually run the SQL above against
-Neon.
+Nothing new to run against Neon for this one — it's all application code.
 
 ## 2. Files in this zip
 
 ```
-api/backtest.ts                 (adds a resource=drawings GET/POST/DELETE branch — no new function, still fits Vercel Hobby's 12-function cap)
-src/pages/ui/drawingPrimitives.ts   (new — the trend line / rectangle / Fibonacci rendering, drawn directly on the chart's own canvas)
-src/pages/ui/ReplayChart.tsx    (adds the toolbar + click-to-draw/select/delete interaction)
-src/pages/Backtest.tsx          (one line — tells the chart which dataset to scope drawings to)
-src/pages/ui/TradeReplayTab.tsx (same one line, for the Trade Replay tab)
-src/pages/data/types.ts         (adds the ChartDrawing type)
-package.json                    (adds `fancy-canvas` as a direct dependency — see note below)
+api/backtest.ts                 (the real gate — 404s the whole API for anyone but you)
+src/App.tsx                     (shows the existing "Coming soon" page instead of the real one for anyone but you)
+src/components/Layout.tsx       (hides the sidebar link for anyone but you)
 ```
 
-Copy all of these over the matching paths in your repo, **then run
-`npm install`** before your next deploy (see the `fancy-canvas` note below —
-this is the one step that's easy to miss).
+The rest of the files in this zip (`ReplayChart.tsx`, `drawingPrimitives.ts`,
+`TradeReplayTab.tsx`, `Backtest.tsx`, `types.ts`, `package.json`,
+`schema.sql`) are the same drawing-tools delivery from before — included
+again so this zip is safe to copy over regardless of whether you'd already
+applied that one. If you already uploaded those, re-copying them is a
+no-op; if you hadn't yet, this brings your repo fully up to date in one
+step.
 
-## 3. Why `fancy-canvas` got added to package.json
+## 3. How it works
 
-The trend line/rectangle/Fib drawings are rendered by hooking into
-lightweight-charts' own canvas via its "Series Primitives" API — the same
-mechanism the library's own official plugin examples use, since it has no
-built-in drawing tools. That API's types live in a small library called
-`fancy-canvas`, which lightweight-charts already depends on internally (it's
-already sitting in your `node_modules` right now, just not listed directly
-in your `package.json`). Adding it as a direct dependency just makes sure
-`npm install` always pulls a working copy in when this file imports it
-directly — cheap insurance against a future lockfile change moving it
-somewhere `drawingPrimitives.ts` can't see it.
+Both the UI check and the API check use the same `isAdminEmail()` helper
+your `/admin` page already relies on (`ADMIN_EMAIL` — defaults to
+`manjyot1537@gmail.com`, overridable via a Vercel env var if you ever want
+to change which account this is). The UI hiding is just so other users
+don't see a feature that isn't ready for them; the API check is the real
+security boundary — even someone who knew the exact API URL and was logged
+into their own account would get a 404, same as hitting a route that
+doesn't exist.
 
-## 4. What you get
+## 4. Tested before sending this
 
-- A small toolbar (cursor / trend line / horizontal line / rectangle /
-  Fibonacci / delete) above the chart, next to the timeframe and indicator
-  chips.
-- **Trend line, Rectangle, Fibonacci retracement**: click the tool, click
-  two points on the chart (e.g. a swing low then a swing high for Fib).
-  Fibonacci draws the standard levels — 0%, 23.6%, 38.2%, 50%, 61.8%, 78.6%,
-  100% — labeled on the right of each line.
-- **Horizontal line**: click the tool, click once on the chart.
-- **Select tool** (the cursor icon, default): click near any drawing to
-  select it (it highlights), then the trash icon deletes it. Click empty
-  chart space to deselect.
-- Everything survives a page reload and a timeframe switch (1m ↔ 1h ↔ 1d,
-  etc.) — drawings are anchored to real price/time, not a fixed pixel
-  position, so zooming/panning/resampling doesn't distort them.
-- Drawings are scoped to the dataset (pair + timeframe) you're viewing, not
-  to your account — same as the candle data itself. If you and someone else
-  both open the same GBPUSD 1m replay, you'll both see the same markup.
+Logged in locally as two different accounts against the same running app:
 
-## 5. What's intentionally NOT included (kept the scope reasonable)
+- **Your account**: sidebar shows Backtest, `/backtest` loads the real
+  page, and `/api/backtest?resource=datasets` returns your data (200).
+- **A different logged-in account**: no Backtest link in the sidebar,
+  `/backtest` shows the "Coming soon" card instead of the real page, and
+  both a GET and a POST straight to `/api/backtest` return 404 — confirmed
+  the API rejects it, not just the UI hiding the button.
+- **Logged out entirely**: visiting `/backtest` redirects to `/login`
+  (existing behavior), and a direct API call also 404s.
 
-- No drag-to-move/resize on an existing drawing — to reposition one, delete
-  it and redraw it. Adding drag support is a reasonable follow-up if it
-  turns out you want it often.
-- No per-drawing color picker — each tool has one fixed, distinguishable
-  color (trend line blue, horizontal green, rectangle purple, Fib amber).
-- No undo — deleting is immediate (one click on the trash icon once
-  something's selected).
+`tsc --noEmit` and `npm run build` both clean.
 
-## 6. Tested before sending this
+## 5. What to check after deploying
 
-Ran this against a local test dataset (a few thousand 1-minute candles) via
-a full browser test:
-
-- Drew one of each tool (trend line, horizontal line, rectangle, Fibonacci)
-  — each rendered correctly and persisted to the database (confirmed via a
-  direct DB query, not just visually).
-- Reloaded the page — all four drawings reloaded from the database and
-  rendered in the same place, confirming persistence actually round-trips
-  (not just an in-memory illusion).
-- Selected a drawing with the cursor tool (it highlighted), deleted it,
-  confirmed it disappeared from both the chart and the database, and the
-  other three drawings were untouched.
-- Cycled through every timeframe chip (1m → 5m → 15m → 1h → 4h → 1m) with
-  drawings on screen — no distortion, no console errors, no crashes. This
-  was the main risk (drawings are anchored to raw price/time, and the
-  timeframe switcher resamples what's actually plotted underneath them) and
-  it held up cleanly.
-- Zero console/JS errors throughout. `tsc --noEmit` and `npm run build`
-  both clean.
-
-## 7. What to check after deploying
-
-- Open a dataset's replay, start it, draw a trend line and a Fibonacci
-  retracement.
-- Reload the page, confirm both are still there.
-- Switch timeframes (1m/1h/1d) with drawings visible, confirm they don't
-  jump or distort.
-- Select one and delete it with the trash icon, confirm only that one goes
-  away.
-- If you use the Trade Replay tab too, confirm the toolbar shows up there
-  as well and drawings for that trade's dataset load correctly.
+- Log in as yourself, confirm Backtest still works exactly as before.
+- If you have a second test account (or ask a friend/beta tester to check),
+  confirm they don't see the Backtest tab and that `/backtest` shows
+  "Coming soon" for them instead of the real page.

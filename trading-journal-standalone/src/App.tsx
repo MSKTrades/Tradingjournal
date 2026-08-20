@@ -19,15 +19,21 @@ import StrategyDetail from './pages/StrategyDetail';
 import Checklists from './pages/Checklists';
 import Admin from './pages/Admin';
 import Backtest from './pages/Backtest';
+import BacktestComingSoon from './pages/BacktestComingSoon';
+import { isAdminEmail } from './lib/admin';
 // Chart Replay & Backtesting was gated behind BacktestComingSoon while we
-// figured out TradingView's charting library situation — resolved now:
-// this page has always been built on `lightweight-charts` (see
-// ui/ReplayChart.tsx), TradingView's separate free/open-source Apache-2.0
-// library, not the commercially-licensed "Advanced Charts" product. No
-// license, fee, or approval needed for that one — just the attribution
-// link (see ReplayChart.tsx's chart options) their Apache NOTICE requires.
-// BacktestComingSoon.tsx is left in the codebase unused for now rather
-// than deleted, in case this ever needs to be toggled off again quickly.
+// figured out TradingView's charting library situation — that's resolved
+// (this page has always been built on `lightweight-charts`, TradingView's
+// separate free/open-source Apache-2.0 library, not the commercially-
+// licensed "Advanced Charts" product - no license, fee, or approval needed,
+// just the attribution link their Apache NOTICE requires, see
+// ReplayChart.tsx's chart options). It's gated again now for a different
+// reason: the feature itself (drawing tools, replay, etc.) is still being
+// built and tested and isn't ready to hand to every user yet. BacktestGate
+// below reuses the same BacktestComingSoon placeholder for that - same
+// isAdminEmail check Layout.tsx uses to hide the sidebar link, and the real
+// access control lives server-side in api/backtest.ts (this is UX, not
+// security - see that file's note).
 
 /** Splash shown while the very first /columns?resource=auth check is in
  * flight, so logged-in visitors don't see a flash of the landing page (and
@@ -95,6 +101,18 @@ function AuthedShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Stands in for the real Backtest page for anyone but the admin account -
+ * same reasoning as the /admin route below, but shown as the friendly
+ * "coming soon" placeholder rather than a bare 404, since a nav item
+ * pointing at a 404 would look broken rather than intentional. The actual
+ * access control is server-side (api/backtest.ts 404s the API itself for
+ * non-admins) - this just keeps a non-admin who lands here (an old
+ * bookmark, a shared link) from seeing a half-finished feature. */
+function BacktestGate() {
+  const { user } = useAuth();
+  return isAdminEmail(user?.email) ? <Backtest /> : <BacktestComingSoon />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -114,7 +132,7 @@ export default function App() {
             <Route path="/strategies" element={<Protected><AuthedShell><Strategies /></AuthedShell></Protected>} />
             <Route path="/strategies/:id" element={<Protected><AuthedShell><StrategyDetail /></AuthedShell></Protected>} />
             <Route path="/checklists" element={<Protected><AuthedShell><Checklists /></AuthedShell></Protected>} />
-            <Route path="/backtest" element={<Protected><AuthedShell><Backtest /></AuthedShell></Protected>} />
+            <Route path="/backtest" element={<Protected><AuthedShell><BacktestGate /></AuthedShell></Protected>} />
             {/* No client-side email check here on purpose — the API
                 (?resource=admin_stats) is the real gate and 404s anyone but
                 the admin. Layout.tsx just hides the nav link for everyone

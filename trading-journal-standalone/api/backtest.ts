@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getHistoricalRates } from 'dukascopy-node';
 import { put } from '@vercel/blob';
 import { db, withApi } from './_db.js';
+import { getUserFromRequest, isAdminEmail } from './_auth.js';
 
 // Chart Replay / Backtesting: three resources sharing one function (same
 // reasoning as api/columns.ts — Vercel Hobby caps serverless functions at
@@ -29,6 +30,14 @@ import { db, withApi } from './_db.js';
 //     and shared across whoever views that dataset (same pattern as the
 //     candle data itself, see chart_datasets above) - not per-account, since
 //     nothing else in this Backtest feature is account-scoped either.
+//
+// Backtest isn't ready for other users yet (still being built/tested), so
+// the whole file is gated to the admin account only, same pattern and same
+// isAdminEmail check as api/columns.ts's resource=admin_stats - a 404, not
+// a 401/403, so a non-admin request can't even tell this route exists.
+// This is the REAL gate; Layout.tsx hiding the sidebar link and App.tsx
+// swapping in BacktestComingSoon for anyone else are just the UX to match -
+// neither of those stops a direct request to this URL on their own.
 
 // Same public Blob store api/upload.ts uploads screenshots/candles to — see
 // that file's note on why the forexblob_ prefixed token is tried first.
@@ -245,6 +254,10 @@ async function addDrawing(sql: ReturnType<typeof db>, p: any) {
 
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
+
+  const requester = await getUserFromRequest(req, sql);
+  if (!requester || !isAdminEmail(requester.email)) { res.status(404).json({ error: 'Not found' }); return; }
+
   const resource = (req.method === 'POST' ? req.body?.resource : req.query.resource) as string | undefined;
 
   if (req.method === 'GET') {

@@ -12,17 +12,21 @@ import FeedbackDialog from './FeedbackDialog';
 import ContactDialog from './ContactDialog';
 
 const NAV_ITEMS = [
-  { to: '/',             label: 'Summary',     icon: BarChart2  },
-  { to: '/journal',      label: 'Journal',     icon: BookOpen   },
-  { to: '/performance',  label: 'Performance', icon: TrendingUp },
-  { to: '/strategies',   label: 'Strategies',  icon: Settings   },
-  { to: '/checklists',   label: 'Checklists',  icon: ListChecks },
-  { to: '/backtest',     label: 'Backtest',    icon: History, disabled: false },
+  { to: '/',             label: 'Summary',     icon: BarChart2,  disabled: false },
+  { to: '/journal',      label: 'Journal',     icon: BookOpen,   disabled: false },
+  { to: '/performance',  label: 'Performance', icon: TrendingUp, disabled: false },
+  { to: '/strategies',   label: 'Strategies',  icon: Settings,   disabled: false },
+  { to: '/checklists',   label: 'Checklists',  icon: ListChecks, disabled: false },
 ];
 
 // Appended only for the admin account (see lib/admin.ts) — everyone else's
-// sidebar never shows this item at all, not even disabled/greyed out, so
-// its existence isn't hinted at to other users.
+// sidebar never shows either of these items at all, not even disabled/
+// greyed out, so their existence isn't hinted at to other users. Backtest
+// joined this list because it isn't ready for everyone yet (still being
+// built/tested) - see App.tsx (BacktestGate) and api/backtest.ts for the
+// route- and API-level gates this pairs with; hiding the link is just the
+// UX to match, not the real access control.
+const BACKTEST_NAV_ITEM = { to: '/backtest', label: 'Backtest', icon: History, disabled: false };
 const ADMIN_NAV_ITEM = { to: '/admin', label: 'Admin', icon: ShieldCheck, disabled: false };
 
 const COLLAPSE_KEY = 'forexforge_sidebar_collapsed';
@@ -33,7 +37,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(COLLAPSE_KEY) === '1');
-  const navItems = isAdminEmail(user?.email) ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
+  const navItems = isAdminEmail(user?.email) ? [...NAV_ITEMS, BACKTEST_NAV_ITEM, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   async function handleLogout() {
     await logout();
