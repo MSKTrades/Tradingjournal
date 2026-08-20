@@ -32,6 +32,14 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
       layout: {
         background: { color: 'transparent' },
         textColor: isDark ? '#9ca3af' : '#4b5563',
+        // attributionLogo is intentionally left unset (defaults to true) -
+        // this is lightweight-charts' own free/open-source Apache-2.0
+        // library, and their license requires a visible "Powered by
+        // TradingView" link somewhere the user can see; this built-in
+        // badge satisfies that automatically. Don't set this to false
+        // unless there's an equivalent tradingview.com link/attribution
+        // elsewhere in the app instead - see the NOTICE file in the
+        // lightweight-charts package for the exact requirement.
       },
       grid: {
         vertLines: { color: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' },

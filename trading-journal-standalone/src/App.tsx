@@ -18,12 +18,16 @@ import Strategies from './pages/Strategies';
 import StrategyDetail from './pages/StrategyDetail';
 import Checklists from './pages/Checklists';
 import Admin from './pages/Admin';
-import BacktestComingSoon from './pages/BacktestComingSoon';
-// NOTE: the real Backtest page (Chart Replay & Backtesting) is on hold until
-// the TradingView Advanced Charts library is approved — see BacktestComingSoon.
-// The /backtest route below intentionally renders the placeholder instead of
-// importing/mounting the real `./pages/Backtest` component, so it can't be
-// reached by a direct link either. Swap the element back once ready.
+import Backtest from './pages/Backtest';
+// Chart Replay & Backtesting was gated behind BacktestComingSoon while we
+// figured out TradingView's charting library situation — resolved now:
+// this page has always been built on `lightweight-charts` (see
+// ui/ReplayChart.tsx), TradingView's separate free/open-source Apache-2.0
+// library, not the commercially-licensed "Advanced Charts" product. No
+// license, fee, or approval needed for that one — just the attribution
+// link (see ReplayChart.tsx's chart options) their Apache NOTICE requires.
+// BacktestComingSoon.tsx is left in the codebase unused for now rather
+// than deleted, in case this ever needs to be toggled off again quickly.
 
 /** Splash shown while the very first /columns?resource=auth check is in
  * flight, so logged-in visitors don't see a flash of the landing page (and
@@ -110,7 +114,7 @@ export default function App() {
             <Route path="/strategies" element={<Protected><AuthedShell><Strategies /></AuthedShell></Protected>} />
             <Route path="/strategies/:id" element={<Protected><AuthedShell><StrategyDetail /></AuthedShell></Protected>} />
             <Route path="/checklists" element={<Protected><AuthedShell><Checklists /></AuthedShell></Protected>} />
-            <Route path="/backtest" element={<Protected><AuthedShell><BacktestComingSoon /></AuthedShell></Protected>} />
+            <Route path="/backtest" element={<Protected><AuthedShell><Backtest /></AuthedShell></Protected>} />
             {/* No client-side email check here on purpose — the API
                 (?resource=admin_stats) is the real gate and 404s anyone but
                 the admin. Layout.tsx just hides the nav link for everyone

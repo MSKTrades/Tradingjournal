@@ -17,11 +17,7 @@ const NAV_ITEMS = [
   { to: '/performance',  label: 'Performance', icon: TrendingUp },
   { to: '/strategies',   label: 'Strategies',  icon: Settings   },
   { to: '/checklists',   label: 'Checklists',  icon: ListChecks },
-  // Disabled until the TradingView Advanced Charts library is approved —
-  // the tab stays visible (so the feature doesn't come out of nowhere once
-  // it ships) but isn't a real link; see `disabled` handling below and the
-  // /backtest route in App.tsx, which renders a matching placeholder page.
-  { to: '/backtest',     label: 'Backtest',    icon: History, disabled: true },
+  { to: '/backtest',     label: 'Backtest',    icon: History, disabled: false },
 ];
 
 // Appended only for the admin account (see lib/admin.ts) — everyone else's
