@@ -17,6 +17,7 @@ import SmcChart from './ui/smc/SmcChart';
 import StrategyPanel from './ui/smc/StrategyPanel';
 import RuleChecklist from './ui/smc/RuleChecklist';
 import ChartMarkupPanel from './ui/smc/ChartMarkupPanel';
+import MultiTfSummaryTable from './ui/smc/MultiTfSummaryTable';
 
 const DEFAULT_PAIR = 'GBPUSD';
 
@@ -188,8 +189,14 @@ export default function SmcAnalysis() {
         </form>
       </div>
 
-      {fetchedAt && <p className="text-[11px] text-muted-foreground mb-4">Candles last fetched {new Date(fetchedAt).toLocaleString()} for {pair}.</p>}
+      {fetchedAt && <p className="text-[11px] text-muted-foreground mb-2">Candles last fetched {new Date(fetchedAt).toLocaleString()} for {pair}.</p>}
       {error && <Card className="mb-4"><CardContent className="pt-4 pb-4 text-sm text-destructive">{error}</CardContent></Card>}
+
+      <div className="flex justify-end mb-4">
+        <div className="w-full sm:w-80">
+          <MultiTfSummaryTable bundle={bundle} activeTf={activeTf} onSelect={setActiveTf} />
+        </div>
+      </div>
 
       <Tabs value={activeTf} onValueChange={(v: string) => setActiveTf(v as SmcTimeframe)}>
         <TabsList>

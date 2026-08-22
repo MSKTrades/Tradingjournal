@@ -54,9 +54,29 @@ export function Badge({
     outline: 'border border-border text-foreground',
     default: 'bg-primary text-primary-foreground',
   };
+  // A caller passing its own bg-*/text-* color (every status/trend/bias
+  // badge across Backtest and SMC Analysis does this - e.g. bg-green-600
+  // text-white for a bullish trend) means to fully replace the variant's
+  // own background/text, not blend with it. cn()'s conflict-group merge
+  // (see lib/utils.ts) only covers sizing utilities on purpose, so two
+  // bg-*/text-* classes both landing in the same class list left Tailwind's
+  // generated stylesheet order - not JSX order - deciding the winner PER
+  // UTILITY independently. In practice that meant background and text
+  // color could each be won by a DIFFERENT side (e.g. the variant's
+  // bg-secondary beating the caller's bg-green-600, while the caller's
+  // text-white still beat the variant's text-secondary-foreground) -
+  // producing washed-out, barely-readable badges instead of either
+  // intended look. Dropping the variant's own bg-/text- tokens whenever the
+  // caller supplies its own removes the ambiguity outright.
+  const callerSetsBg = /(^|\s)bg-/.test(className ?? '');
+  const callerSetsText = /(^|\s)text-/.test(className ?? '');
+  const filteredVariant = variantClasses[variant]
+    .split(' ')
+    .filter(cls => !((callerSetsBg && cls.startsWith('bg-')) || (callerSetsText && cls.startsWith('text-'))))
+    .join(' ');
   return (
     <span
-      className={cn('inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium', variantClasses[variant], className)}
+      className={cn('inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium', filteredVariant, className)}
       {...props}
     />
   );
