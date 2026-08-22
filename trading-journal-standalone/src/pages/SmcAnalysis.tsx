@@ -16,6 +16,7 @@ import { gradeMarkup } from './ui/smc/markupGrading';
 import SmcChart from './ui/smc/SmcChart';
 import StrategyPanel from './ui/smc/StrategyPanel';
 import RuleChecklist from './ui/smc/RuleChecklist';
+import ChartMarkupPanel from './ui/smc/ChartMarkupPanel';
 
 const DEFAULT_PAIR = 'GBPUSD';
 
@@ -227,6 +228,9 @@ export default function SmcAnalysis() {
                 )}
               </CardContent></Card>
             )}
+            <div className="mt-4">
+              <ChartMarkupPanel pair={pair} tf={tf} analysis={bundle[tf]} />
+            </div>
           </TabsContent>
         ))}
       </Tabs>

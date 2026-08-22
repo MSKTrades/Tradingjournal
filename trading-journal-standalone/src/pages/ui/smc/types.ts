@@ -173,3 +173,30 @@ export type SmcMarkup = {
   grade: StrategyEvaluation | null;
   created_at: string;
 };
+
+// A pasted/uploaded chart screenshot for a given pair+timeframe, paired with
+// an AI vision read of it (see resource=smc_chart_analyze in
+// api/backtest.ts). This is deliberately separate from SmcMarkup above:
+// SmcMarkup is a precise entry/SL/TP idea graded against a model's exact
+// rules using real candle data; a chart image markup is a much fuzzier
+// "here's a picture, what do you make of it" second opinion that can never
+// be as numerically precise as the live-data path, and is presented that way
+// in the UI.
+export type SmcChartAnalysis = {
+  visual_read: string;
+  cross_check: string;
+  possible_bias: 'bullish' | 'bearish' | 'neutral' | 'unclear';
+  confidence: 'low' | 'medium' | 'high';
+  caveats: string;
+};
+
+export type SmcChartMarkup = {
+  id: number | string;
+  pair: string;
+  timeframe: SmcTimeframe;
+  image_url: string;
+  live_context: any;
+  analysis: SmcChartAnalysis | null;
+  raw_response: string | null;
+  created_at: string;
+};

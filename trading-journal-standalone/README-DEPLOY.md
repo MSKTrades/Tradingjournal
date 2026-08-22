@@ -1,195 +1,142 @@
-# New: Smart Money Concepts (SMC) Analysis — admin-only
+# New: Upload or paste your own chart screenshots — AI cross-checked against live data
 
-This is the big one you asked for: a whole new section that pulls live
-candles across 7 timeframes (Weekly, Daily, 4H, 1H, 15M, 5M, 1M), reads them
-against Lewis Kelly's market-structure-hierarchy / liquidity / Premium-
-Discount framework, auto-marks the current range, Order Blocks and FVGs on
-every timeframe, runs all six of your strategy models against live price
-action to surface entry/SL/TP when a setup is actually valid right now, and
-lets you draw your own entry/SL/TP idea and grade it against any of the six
-models — showing exactly which of that model's rules your idea does and
-doesn't satisfy.
+This adds what you asked for: on every timeframe tab of SMC Analysis, you can
+now paste (Ctrl+V) or upload a screenshot of your own chart, and an AI vision
+model gives you a best-effort read of it — cross-checked against the real
+live data already loaded for that pair/timeframe, not just guessed from the
+picture.
 
-**Locked to just your account**, same three-layer pattern as Backtest
-(sidebar link hidden, the route shows a "Coming soon" card, and — the part
-that actually matters — the API itself 404s for anyone but
-`manjyot1537@gmail.com`).
+**Note:** this zip's `api/backtest.ts` and `src/pages/SmcAnalysis.tsx` also
+include the earlier "Something went wrong" fix (sequential candle fetching,
+no more all-or-nothing failure). If you haven't applied that fix zip yet,
+this one covers both — you don't need to apply them separately.
 
-## 1. Database migration — run this against Neon
+## 1. New setup step: an Anthropic API key
 
-Two new tables, both brand new (nothing existing is touched). Copy/paste
-this into Neon's SQL editor, or just re-run the full `schema.sql` in this
-zip (every statement in it is idempotent — safe to run against your existing
-database, it'll skip everything that already exists):
+This is the one genuinely new piece of infrastructure. The AI read is a real
+Claude API call (Claude has to actually look at your image), so it needs its
+own API key:
+
+1. Go to **console.anthropic.com**, sign in (or create an account), and
+   create an API key under **Settings → API Keys**. Anthropic's API is
+   pay-as-you-go, separate from any claude.ai subscription — you'll need to
+   add billing details there if you haven't already.
+2. In Vercel, open the `tradingjournal` project → **Settings → Environment
+   Variables**, and add:
+   - `ANTHROPIC_API_KEY` = the key you just created.
+   - *(optional)* `SMC_VISION_MODEL` — only set this if you want to override
+     the model. It defaults to `claude-3-haiku-20240307`, the cheapest
+     Anthropic model that can still read an image — this feature is a rough
+     second opinion, not a precision tool, so there's no reason to spend
+     more per screenshot than that. If the reads ever feel too shallow, set
+     this to a stronger model (check current model names/pricing at
+     docs.claude.com).
+3. Redeploy after adding the env var (or it just won't be visible until the
+   next deploy).
+
+**Cost**: each screenshot analyzed is one small API call — a chart image plus
+a few hundred words of prompt/response. At the default Haiku-tier model this
+is a fraction of a cent per upload. You only pay for images you actually
+upload; nothing runs in the background.
+
+## 2. Database migration — run this against Neon
+
+One new table. Copy/paste into Neon's SQL editor, or re-run the full
+`schema.sql` from this zip (idempotent, safe against your existing DB):
 
 ```sql
-CREATE TABLE IF NOT EXISTS smc_candle_cache (
+CREATE TABLE IF NOT EXISTS smc_chart_markups (
   id            SERIAL PRIMARY KEY,
   pair          TEXT NOT NULL,
   timeframe     TEXT NOT NULL,
-  blob_url      TEXT NOT NULL,
-  candle_count  INTEGER NOT NULL DEFAULT 0,
-  from_time     TIMESTAMPTZ,
-  to_time       TIMESTAMPTZ,
-  fetched_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(pair, timeframe)
-);
-
-CREATE TABLE IF NOT EXISTS smc_markups (
-  id            SERIAL PRIMARY KEY,
-  pair          TEXT NOT NULL,
-  timeframe     TEXT NOT NULL,
-  model_key     TEXT,
-  direction     TEXT NOT NULL DEFAULT 'bullish',
-  entry_price   NUMERIC NOT NULL,
-  sl_price      NUMERIC NOT NULL,
-  tp_price      NUMERIC NOT NULL,
-  entry_time    TIMESTAMPTZ,
-  points        JSONB NOT NULL DEFAULT '[]'::jsonb,
-  notes         TEXT NOT NULL DEFAULT '',
-  grade         JSONB,
+  image_url     TEXT NOT NULL,
+  live_context  JSONB,
+  analysis      JSONB,
+  raw_response  TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_smc_markups_pair ON smc_markups (pair);
+CREATE INDEX IF NOT EXISTS idx_smc_chart_markups_pair_tf ON smc_chart_markups (pair, timeframe);
 ```
 
-No changes to any existing table.
+## 3. No new Vercel function
 
-## 2. No new Vercel function, no new env vars
+Same reasoning as everything else in this feature — you're at the Hobby
+plan's 12-function cap. This lives as two more `resource=` branches inside
+`api/backtest.ts` (`smc_chart_analyze`, `smc_chart_markups`), so it inherits
+the same admin-only gate automatically. The image upload itself reuses your
+existing `/api/upload` endpoint (same one trade screenshots already use) —
+no new upload function either.
 
-This all lives inside `api/backtest.ts` as two more `resource=` branches
-(`smc_candles`, `smc_markups`) — same reason everything else in that file is
-crammed together: Vercel's Hobby plan caps you at 12 serverless functions
-and you're already sitting exactly at that limit. Because it's the same
-file, it inherits the exact same admin-only gate the rest of Backtest
-already has, automatically.
-
-It reuses the Blob storage token you've already got configured
-(`forexblob_READ_WRITE_TOKEN` / `BLOB_READ_WRITE_TOKEN`) — nothing new to
-add in Vercel's environment variables.
-
-## 3. Files in this zip
+## 4. Files in this zip
 
 ```
-api/backtest.ts                      (new smc_candles / smc_markups resources)
-schema.sql                           (the two new tables)
-src/App.tsx                          (new /smc-analysis route, admin-gated)
-src/components/Layout.tsx            (new sidebar link, admin-only)
-src/pages/SmcAnalysis.tsx            (the page itself)
-src/pages/SmcComingSoon.tsx          (placeholder shown to everyone else)
-src/pages/ui/smc/types.ts            (domain types)
-src/pages/ui/smc/marketStructure.ts  (swing/structure/OB/FVG/range/liquidity detection)
-src/pages/ui/smc/strategyHelpers.ts  (shared building blocks for the 6 models)
-src/pages/ui/smc/strategyModels.ts   (the 6 strategy rule engines)
-src/pages/ui/smc/markupGrading.ts    (grades your own markup against a model)
-src/pages/ui/smc/smcOverlayPrimitive.ts (chart rendering for OB/FVG/range/EQ)
-src/pages/ui/smc/SmcChart.tsx        (the chart component)
-src/pages/ui/smc/StrategyPanel.tsx   (the 6-model live dashboard)
-src/pages/ui/smc/RuleChecklist.tsx   (shared rule-list renderer)
+api/backtest.ts                          (smc_chart_analyze / smc_chart_markups resources + the earlier smcCandles fix)
+schema.sql                               (new smc_chart_markups table)
+src/pages/SmcAnalysis.tsx                (wires the new upload panel into each timeframe tab + the earlier fix)
+src/pages/ui/smc/types.ts                (new SmcChartAnalysis / SmcChartMarkup types)
+src/pages/ui/smc/ChartMarkupPanel.tsx    (new — the upload/paste UI + saved markups list)
 ```
 
-## 4. How each concept was actually implemented — read this before trusting any output
+## 5. How it actually works
 
-You're going to be looking at this for real trading decisions on a funded
-account, so here's exactly what the app is doing under the hood, not just
-what it's called. Every one of these is ONE specific, defensible reading of
-an SMC concept — not "the" definition. A human trader would bring more
-context and judgment than any fixed algorithm can.
+- On any timeframe tab, there's a new **"Chart Markup — AI Read"** card
+  below the chart. Click it and press Ctrl+V to paste a screenshot, drag a
+  file onto it, or click to browse for one.
+- The image uploads straight to your Blob storage (bypassing any server
+  body-size limit), then gets sent — as just a URL, not the raw bytes — to
+  Claude along with a compact summary of what the live data engine already
+  reads for that pair/timeframe (trend, current range, open Order
+  Blocks/FVGs, unswept liquidity).
+- Claude gives back: a plain-English description of what it sees in the
+  image, a note on whether that agrees or conflicts with the live data, a
+  rough bullish/bearish/neutral/unclear lean, a confidence level, and any
+  caveats (most commonly: it can't reliably read exact prices off a
+  screenshot's axis labels).
+- That's saved and shown in a running list under the same card — reload the
+  page and your past uploads for that pair/timeframe are still there.
+- Delete any one with the trash icon; click the thumbnail to view it full
+  size.
 
-- **Swings**: classic 5-bar fractal (2 candles either side). A swing only
-  counts once it's actually confirmed by price turning away from it —
-  same as a person reading a chart couldn't call a swing high in real time
-  either.
-- **Structure / BOS / CHoCH**: a break is a candle CLOSING beyond the most
-  recently confirmed opposite swing (not just a wick through it). BOS =
-  break in the direction of the current trend, CHoCH = break against it
-  (trend flips). This is a common convention, not the only one — some
-  traders use wicks instead of closes.
-- **Order Blocks**: the last opposite-colored candle before a break, found
-  by searching backward up to 15 candles. Marked "mitigated" the first time
-  price trades back into its range.
-- **FVGs**: the standard 3-candle imbalance (candle 1's high/low doesn't
-  overlap candle 3's low/high). Marked "filled" once price fully trades
-  back through it.
-- **Range & Premium/Discount**: the most recent confirmed swing high and
-  swing low bound the active range; 50% of that is the equilibrium line.
-  Buy setups are only valid below it, sell setups only above it — enforced
-  everywhere a model picks a POI, not just in Model 4 where you specified it
-  explicitly.
-- **Liquidity (EQH/EQL)**: swing highs (or lows) within ~0.06% of price of
-  each other count as one pool. "Swept" once price later trades through it.
-- **The six strategy models**: each is turned into an ordered checklist of
-  rules evaluated against the live multi-timeframe data. The checklist is
-  ALWAYS shown in full — a step that hasn't been reached yet shows as
-  "pending" rather than being hidden, so you can see exactly how far along a
-  setup is and what it's still waiting on. Entry is placed at the
-  conservative edge of the relevant zone (buy the dip into it, sell the rip
-  into it), SL sits just beyond the relevant invalidation swing with a small
-  price-scaled buffer, TP is a fixed R-multiple per model (see the code
-  comments in `strategyModels.ts` for the exact numbers per model).
-- **"London session"**: approximated as UTC year-round (no daylight-saving
-  correction) — off by up to an hour during British Summer Time. Called out
-  explicitly here and in the code rather than silently guessing.
-- **Grading your own markup**: reuses the exact same rule-checking code a
-  live scan uses, fed only the candle data that existed at (or before) your
-  stated entry time — so you're graded against what you could actually have
-  known then, not hindsight. On top of the model's own context checklist, it
-  separately checks that your SL/TP sit on the correct side of your entry,
-  that your entry sits in the correct discount/premium half of the range,
-  and (when the model has a live setup of its own) whether your direction
-  matches it.
+## 6. Why this is a rougher tool than the rest of the page
 
-**This is a second opinion, not a signal** — that line is on the page
-itself too. Please don't execute anything against your funded account
-purely because this app said a setup is valid.
+Worth being direct about this, since it's a different kind of feature than
+everything else on this page. The six strategy models and the live structure
+detection work off real numeric candle data — they're precise, even if the
+underlying SMC interpretation is still just one reasonable reading. This new
+piece is different: an AI model looking at a picture cannot reliably read
+exact price levels off a chart's axis labels, cannot verify the screenshot is
+even current, and can be wrong about what it thinks it's seeing the same way
+any of us glancing at a chart can be wrong. That's exactly why it's paired
+with the real live data (so you get a cross-check, not just an opinion in a
+vacuum) and why every response comes back with an explicit confidence level
+and caveats rather than a flat verdict. Treat it the way you'd treat asking a
+knowledgeable friend to eyeball a screenshot — a useful second look, never a
+precise reading and never a signal to act on by itself.
 
-## 5. Tested before sending this
+## 7. Tested before sending this
 
-- `tsc -b` (full project, including every new file) — clean, zero errors.
-- A standalone script fed the detection engine ~7,700 synthetic candles
-  across all 7 timeframes (deterministic pseudo-random walk with real
-  trending legs, pullbacks, and displacement candles, not pure noise) and
-  verified: swings/structure/OB/FVG/range all populate sensibly on every
-  timeframe; all six strategy evaluators always return a full rule list,
-  every rule has a real detail string, and a `valid` status always comes
-  with a setup while anything else never does; grading a deliberately
-  inverted SL/TP correctly flags both as wrong and grades the whole thing
-  invalid.
-- Full browser walkthrough (scripted, real clicks/typing, not just API
-  calls) against a local Postgres + a stand-in for `vercel dev`, with
-  synthetic GBPUSD candle data seeded through the same cache path
-  production uses (so the exact cache-read code path was exercised):
-  - Logged in as your account: sidebar shows "SMC Analysis", the page loads
-    real candles across timeframe tabs, the chart renders with Order
-    Block/FVG/range overlays, all 6 strategy model cards render with full
-    rule checklists and correct pass/pending/fail states.
-  - Filled in an entry/SL/TP, clicked Grade Markup, got real feedback
-    listing which specific rules did and didn't pass; clicked Save,
-    confirmed it shows up in the Saved Markups list with its verdict badge.
-  - Clicked a "pick price from chart" button and clicked the chart — the
-    price populated the field correctly (this also caught and fixed a real
-    bug: picking a price while looking at a different timeframe tab than
-    your markup's own timeframe used to silently do nothing; arming a field
-    now jumps you to the right tab automatically).
-  - Logged in as a second, non-admin account: no "SMC Analysis" link in the
-    sidebar, `/smc-analysis` shows the "Coming soon" card instead of the
-    real page, and a direct API call to `smc_candles` returns 404 — same as
-    Backtest, this is the real access control, not just the UI hiding a
-    button.
+- `tsc -b` (full project) — clean, zero errors. `vite build` — clean
+  production build.
+- A standalone script exercised the real `api/backtest.ts` handler directly
+  (mocked Anthropic's API response, real local Postgres) end-to-end:
+  uploading + analyzing a chart correctly stores and returns a fully parsed
+  result (not a stray JSON string — this caught and fixed a real bug where
+  the `analysis`/`live_context` columns were coming back as unparsed text
+  instead of objects), the saved markup shows up in the list for that
+  pair/timeframe, deleting it removes it, a request with no
+  `ANTHROPIC_API_KEY` configured comes back with that exact actionable
+  message instead of a generic error, and a non-admin account still gets a
+  404 on this new resource exactly like every other SMC/Backtest resource.
 
-## 6. What to check after deploying
+## 8. What to check after deploying
 
-- Log in as yourself, open **SMC Analysis** from the sidebar, type a real
-  pair (e.g. GBPUSD) and click **Load** — first load will actually hit
-  Dukascopy for all 6 fetchable timeframes (Weekly is derived from Daily),
-  so give it a few seconds. Reloading again soon after should be much
-  faster (served from cache).
-- Click through the 7 timeframe tabs and confirm each chart shows candles,
-  and the Order Block / FVG / range overlays look sane.
-- Check the 6 strategy model cards under **Strategy Models — live scan** —
-  each should show a status and a rule checklist.
-- Try grading a markup, then saving it, then deleting it from the Saved
-  Markups list.
-- If you have a second test account, confirm they don't see the SMC
-  Analysis tab and `/smc-analysis` shows "Coming soon" for them.
+- Add `ANTHROPIC_API_KEY` in Vercel and redeploy first — without it, you'll
+  see a clear "AI chart analysis is not configured yet" message if you try
+  to upload something, rather than a broken feature.
+- Open **SMC Analysis**, pick any timeframe tab, and paste or upload a real
+  chart screenshot. Give it a few seconds — you'll see "Uploading…" then
+  "Analyzing chart…" before the result card appears.
+- Confirm the result's bias/confidence badges and text look sensible, and
+  that reloading the page still shows your saved upload in the list.
+- Try deleting one.

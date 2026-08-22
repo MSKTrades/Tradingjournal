@@ -935,3 +935,28 @@ CREATE TABLE IF NOT EXISTS smc_markups (
 );
 
 CREATE INDEX IF NOT EXISTS idx_smc_markups_pair ON smc_markups (pair);
+
+-- Uploaded/pasted chart screenshots per pair+timeframe, each paired with an
+-- AI vision read (see resource=smc_chart_analyze in api/backtest.ts). The
+-- image itself lives in Blob (same store as everything else); this table
+-- just tracks the URL plus what the live-data engine and the AI each said
+-- about it at the time. `live_context` is the compact client-computed
+-- summary (trend/range/OBs/FVGs/liquidity) that was sent alongside the image
+-- so the AI's numbers could be cross-checked against real data instead of
+-- guessed from the picture's axis labels - kept here too so a saved markup's
+-- context can still be understood later even as live data moves on.
+-- `analysis` is the parsed {visual_read, cross_check, possible_bias,
+-- confidence, caveats} object; `raw_response` is the AI's unparsed reply,
+-- kept as a fallback in case parsing ever fails.
+CREATE TABLE IF NOT EXISTS smc_chart_markups (
+  id            SERIAL PRIMARY KEY,
+  pair          TEXT NOT NULL,
+  timeframe     TEXT NOT NULL,          -- '1w' | '1d' | '4h' | '1h' | '15m' | '5m' | '1m'
+  image_url     TEXT NOT NULL,
+  live_context  JSONB,
+  analysis      JSONB,
+  raw_response  TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_smc_chart_markups_pair_tf ON smc_chart_markups (pair, timeframe);

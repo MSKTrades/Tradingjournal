@@ -47,6 +47,21 @@ import { getUserFromRequest, isAdminEmail } from './_auth.js';
 //     persisted here purely as a record of what was graded and when - the
 //     server does not recompute or trust the grade, it just stores whatever
 //     the client computed.
+//   resource=smc_chart_analyze / smc_chart_markups — the "upload or paste a
+//     chart screenshot" companion to smc_candles. The image itself uploads
+//     straight to Blob from the browser via the existing /api/upload
+//     endpoint (same as trade screenshots - bypasses this function's body
+//     limit entirely), then the client posts just the resulting blob URL
+//     here along with a compact summary of what the LIVE data already shows
+//     for that pair/timeframe (trend, range, open OBs/FVGs, liquidity -
+//     computed client-side by analyzeAll(), same as everywhere else in this
+//     feature). This endpoint hands both the image URL and that summary to
+//     an Anthropic vision call, which gives a best-effort READ of the
+//     picture and explicitly cross-checks it against the real live numbers
+//     rather than inventing its own prices - see buildVisionPrompt below for
+//     exactly what it's asked and told not to do. Requires ANTHROPIC_API_KEY
+//     to be set in Vercel; without it this resource returns a clear error
+//     rather than silently failing.
 //
 // Backtest isn't ready for other users yet (still being built/tested), so
 // the whole file is gated to the admin account only, same pattern and same
@@ -59,6 +74,17 @@ import { getUserFromRequest, isAdminEmail } from './_auth.js';
 // Same public Blob store api/upload.ts uploads screenshots/candles to — see
 // that file's note on why the forexblob_ prefixed token is tried first.
 const BLOB_TOKEN = process.env.forexblob_READ_WRITE_TOKEN || process.env.BLOB_READ_WRITE_TOKEN;
+
+// For resource=smc_chart_analyze. Not set by default - that resource returns
+// a clear "not configured" error rather than crashing every other resource
+// in this file when it's missing. claude-3-haiku is the default on purpose:
+// it's the cheapest Anthropic model that can still read an image, and this
+// feature is explicitly a best-effort second opinion, not a precision tool -
+// no reason to spend Sonnet-level money scanning chart screenshots. Bump
+// SMC_VISION_MODEL in Vercel's env vars to a stronger model if the reads feel
+// too shallow.
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const SMC_VISION_MODEL = process.env.SMC_VISION_MODEL || 'claude-3-haiku-20240307';
 
 // Our REPLAY_TIMEFRAMES ('1m'/'5m'/...) -> dukascopy-node's own timeframe
 // enum values (mostly identical, but spelled out explicitly so a mismatch
@@ -464,6 +490,134 @@ async function addSmcMarkup(sql: ReturnType<typeof db>, p: any) {
   return rows[0];
 }
 
+// --- Smart Money Concepts Analysis: chart screenshot upload + AI read ------
+
+// Turns the compact live-data summary the client sends (built from the same
+// analyzeAll() output that drives every other part of this page) into plain
+// English for the prompt, so the model is reading real numbers instead of
+// guessing at exact prices from the picture's own axis labels - which no
+// vision model can do reliably.
+function formatLiveContext(pair: string, timeframe: string, ctx: any): string {
+  if (!ctx || typeof ctx !== 'object') return `No live data context was available for ${pair} ${timeframe}.`;
+  const lines: string[] = [];
+  lines.push(`Pair: ${pair}, timeframe: ${timeframe}.`);
+  lines.push(`Current trend reading: ${ctx.trend ?? 'unknown'}.`);
+  if (ctx.range) {
+    lines.push(`Active range: low ${ctx.range.low}, high ${ctx.range.high}, equilibrium ${ctx.range.eq}. Last close sits in the ${ctx.position ?? 'unknown'} half of that range.`);
+  }
+  if (Array.isArray(ctx.orderBlocks) && ctx.orderBlocks.length) {
+    lines.push(`Unmitigated Order Blocks: ${ctx.orderBlocks.map((o: any) => `${o.direction} OB ${o.low}-${o.high}`).join('; ')}.`);
+  } else {
+    lines.push('No unmitigated Order Blocks currently.');
+  }
+  if (Array.isArray(ctx.fvgs) && ctx.fvgs.length) {
+    lines.push(`Open FVGs: ${ctx.fvgs.map((f: any) => `${f.direction} FVG ${f.bottom}-${f.top}`).join('; ')}.`);
+  } else {
+    lines.push('No open FVGs currently.');
+  }
+  if (Array.isArray(ctx.liquidity) && ctx.liquidity.length) {
+    lines.push(`Unswept liquidity pools: ${ctx.liquidity.map((l: any) => `${l.kind} near ${l.price}`).join('; ')}.`);
+  }
+  if (ctx.lastClose != null) lines.push(`Last known live close: ${ctx.lastClose}.`);
+  return lines.join('\n');
+}
+
+function buildVisionPrompt(pair: string, timeframe: string, liveContextText: string): string {
+  return `You are assisting a trader with a Smart Money Concepts (SMC/ICT-style) reading of an uploaded chart screenshot for ${pair} on the ${timeframe} timeframe.
+
+For cross-reference, here is what our own live market-data engine currently reads for this exact pair/timeframe, computed from real broker candle data (NOT from the image):
+${liveContextText}
+
+Look at the attached chart image and give your own best-effort visual read. Respond with ONLY a single JSON object - no markdown code fences, no text outside the JSON - with exactly these keys:
+{
+  "visual_read": "2-4 sentences describing what you see in the image: apparent trend/structure, any order-block or fair-value-gap-looking zones, notable swing highs/lows, and where price looks positioned.",
+  "cross_check": "1-3 sentences comparing what you see in the image against the live data context above - do they broadly agree, conflict, or does the image look like an older/different moment than the live data?",
+  "possible_bias": "bullish" | "bearish" | "neutral" | "unclear",
+  "confidence": "low" | "medium" | "high",
+  "caveats": "1-2 sentences on what you're not confident about - e.g. you cannot reliably read exact numeric price labels off a screenshot, the image may be cropped, indicators may be obscuring price action, etc."
+}
+
+Important: never state precise numeric price levels drawn only from reading the image's axis labels - when you need to reference a specific price, use the real numbers already given in the live data context above instead. This is meant as a second opinion for the trader's own judgment, never an instruction to enter a trade - do not phrase possible_bias or confidence as a recommendation to act.`;
+}
+
+async function analyzeSmcChartImage(sql: ReturnType<typeof db>, p: any) {
+  const pair = String(p.pair ?? '').trim().toUpperCase();
+  const timeframe = String(p.timeframe ?? '').trim();
+  const imageUrl = String(p.image_url ?? '').trim();
+  if (!pair || !timeframe) throw new Error('pair and timeframe are required');
+  if (!imageUrl.startsWith('https://')) throw new Error('image_url must be an https URL (upload the image via /api/upload first).');
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('AI chart analysis is not configured yet - add an ANTHROPIC_API_KEY environment variable in Vercel (Project Settings -> Environment Variables) and redeploy.');
+  }
+
+  const liveContextText = formatLiveContext(pair, timeframe, p.liveContext);
+  const prompt = buildVisionPrompt(pair, timeframe, liveContextText);
+
+  const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: SMC_VISION_MODEL,
+      max_tokens: 700,
+      temperature: 0.3,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'url', url: imageUrl } },
+          { type: 'text', text: prompt },
+        ],
+      }],
+    }),
+  });
+
+  if (!aiRes.ok) {
+    const errText = await aiRes.text().catch(() => '');
+    throw new Error(`AI chart analysis request failed (${aiRes.status}): ${errText.slice(0, 300)}`);
+  }
+  const aiJson: any = await aiRes.json();
+  const rawText: string = aiJson?.content?.find((b: any) => b.type === 'text')?.text ?? '';
+
+  let analysis: any;
+  try {
+    // Strip a stray ```json fence if the model added one anyway.
+    const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+    analysis = JSON.parse(cleaned);
+  } catch {
+    analysis = {
+      visual_read: rawText || 'The model did not return a readable response.',
+      cross_check: '',
+      possible_bias: 'unclear',
+      confidence: 'low',
+      caveats: 'Could not parse a structured response from the AI - showing its raw reply instead.',
+    };
+  }
+
+  const rows = await sql.unsafe(
+    `INSERT INTO smc_chart_markups (pair, timeframe, image_url, live_context, analysis, raw_response)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
+     RETURNING *`,
+    // Bind the raw objects, NOT JSON.stringify'd strings - same pattern
+    // addSmcMarkup already uses for its `grade` column below. postgres.js
+    // only auto-deserializes a jsonb column back into a JS object on read
+    // when the value went in as an object; a pre-stringified string bound
+    // to a ::jsonb-cast parameter still stores correctly but comes back on
+    // RETURNING as a raw string instead of a parsed object (confirmed with
+    // a standalone repro against this same table/columns).
+    [pair, timeframe, imageUrl, p.liveContext ?? null, analysis, rawText]
+  );
+  return rows[0];
+}
+
+async function listSmcChartMarkups(sql: ReturnType<typeof db>, pair: string | null, timeframe: string | null) {
+  if (pair && timeframe) return sql.unsafe('SELECT * FROM smc_chart_markups WHERE pair = $1 AND timeframe = $2 ORDER BY created_at DESC LIMIT 30', [pair, timeframe]);
+  if (pair) return sql.unsafe('SELECT * FROM smc_chart_markups WHERE pair = $1 ORDER BY created_at DESC LIMIT 30', [pair]);
+  return sql.unsafe('SELECT * FROM smc_chart_markups ORDER BY created_at DESC LIMIT 30');
+}
+
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
 
@@ -499,14 +653,43 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(await listSmcMarkups(sql, pair ? String(pair).trim().toUpperCase() : null));
       return;
     }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", "smc_candles", or "smc_markups"' });
+    if (resource === 'smc_chart_markups') {
+      const pairParam = req.query.pair;
+      const tfParam = req.query.timeframe;
+      const pair = Array.isArray(pairParam) ? pairParam[0] : pairParam;
+      const timeframe = Array.isArray(tfParam) ? tfParam[0] : tfParam;
+      res.status(200).json(await listSmcChartMarkups(sql, pair ? String(pair).trim().toUpperCase() : null, timeframe ? String(timeframe).trim() : null));
+      return;
+    }
+    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", "smc_candles", "smc_markups", or "smc_chart_markups"' });
   } else if (req.method === 'POST') {
     if (resource === 'datasets') { res.status(200).json(await upsertDataset(sql, req.body)); return; }
     if (resource === 'trades') { res.status(200).json(await addTrade(sql, req.body)); return; }
     if (resource === 'fetch') { res.status(200).json(await fetchChunk(sql, req.body)); return; }
     if (resource === 'drawings') { res.status(200).json(await addDrawing(sql, req.body)); return; }
     if (resource === 'smc_markups') { res.status(200).json(await addSmcMarkup(sql, req.body)); return; }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", "fetch", "drawings", or "smc_markups"' });
+    if (resource === 'smc_chart_analyze') {
+      // Every other resource in this file lets withApi's catch-all turn any
+      // thrown error into a generic "Something went wrong" - deliberately,
+      // since a raw DB error can leak table/column names. This resource is
+      // different: its most likely failures (no ANTHROPIC_API_KEY set yet,
+      // a bad image_url, the AI request itself failing) are exactly the
+      // kind of specific, actionable, non-sensitive messages an admin
+      // needs to see on the SMC page to fix their own setup - and this
+      // whole file is already admin-only, so there's no other-user
+      // exposure risk in showing them. Catching locally here (instead of
+      // letting it fall through to withApi) is what lets this one resource
+      // surface its real error message while every other resource keeps
+      // the generic, safer default.
+      try {
+        res.status(200).json(await analyzeSmcChartImage(sql, req.body));
+      } catch (e: any) {
+        console.error('smc_chart_analyze failed', e);
+        res.status(400).json({ error: e?.message ?? 'AI chart analysis failed.' });
+      }
+      return;
+    }
+    res.status(400).json({ error: 'resource must be "datasets", "trades", "fetch", "drawings", "smc_markups", or "smc_chart_analyze"' });
   } else if (req.method === 'PUT') {
     const id = Number(req.query.id);
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
@@ -535,7 +718,12 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json({ deleted: 1 });
       return;
     }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", or "smc_markups"' });
+    if (resource === 'smc_chart_markups') {
+      await sql.unsafe('DELETE FROM smc_chart_markups WHERE id = $1', [id]);
+      res.status(200).json({ deleted: 1 });
+      return;
+    }
+    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", "smc_markups", or "smc_chart_markups"' });
   } else {
     res.status(405).json({ error: 'Method not allowed' });
   }
