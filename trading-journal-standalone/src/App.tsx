@@ -20,6 +20,8 @@ import Checklists from './pages/Checklists';
 import Admin from './pages/Admin';
 import Backtest from './pages/Backtest';
 import BacktestComingSoon from './pages/BacktestComingSoon';
+import SmcAnalysis from './pages/SmcAnalysis';
+import SmcComingSoon from './pages/SmcComingSoon';
 import { isAdminEmail } from './lib/admin';
 // Chart Replay & Backtesting was gated behind BacktestComingSoon while we
 // figured out TradingView's charting library situation — that's resolved
@@ -113,6 +115,17 @@ function BacktestGate() {
   return isAdminEmail(user?.email) ? <Backtest /> : <BacktestComingSoon />;
 }
 
+/** Same pattern as BacktestGate above, for the Smart Money Concepts
+ * Analysis page - restricted to just the admin account per an explicit,
+ * repeated instruction ("keep it to my account, don't release to anyone
+ * else"). The real access control is server-side: api/backtest.ts's
+ * resource=smc_candles/smc_markups both 404 for anyone but the admin,
+ * same as every other Backtest resource - this is the UX to match. */
+function SmcGate() {
+  const { user } = useAuth();
+  return isAdminEmail(user?.email) ? <SmcAnalysis /> : <SmcComingSoon />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -133,6 +146,7 @@ export default function App() {
             <Route path="/strategies/:id" element={<Protected><AuthedShell><StrategyDetail /></AuthedShell></Protected>} />
             <Route path="/checklists" element={<Protected><AuthedShell><Checklists /></AuthedShell></Protected>} />
             <Route path="/backtest" element={<Protected><AuthedShell><BacktestGate /></AuthedShell></Protected>} />
+            <Route path="/smc-analysis" element={<Protected><AuthedShell><SmcGate /></AuthedShell></Protected>} />
             {/* No client-side email check here on purpose — the API
                 (?resource=admin_stats) is the real gate and 404s anyone but
                 the admin. Layout.tsx just hides the nav link for everyone

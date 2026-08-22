@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck } from 'lucide-react';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Radar } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTheme } from '../lib/theme';
 import { useAuth } from '../lib/auth';
@@ -27,6 +27,11 @@ const NAV_ITEMS = [
 // route- and API-level gates this pairs with; hiding the link is just the
 // UX to match, not the real access control.
 const BACKTEST_NAV_ITEM = { to: '/backtest', label: 'Backtest', icon: History, disabled: false };
+// Smart Money Concepts Analysis - same admin-only reasoning as Backtest
+// above (still being built/tested, explicitly restricted to just the admin
+// account) - see App.tsx's SmcGate and api/backtest.ts's smc_* resources
+// for the route- and API-level gates this pairs with.
+const SMC_NAV_ITEM = { to: '/smc-analysis', label: 'SMC Analysis', icon: Radar, disabled: false };
 const ADMIN_NAV_ITEM = { to: '/admin', label: 'Admin', icon: ShieldCheck, disabled: false };
 
 const COLLAPSE_KEY = 'forexforge_sidebar_collapsed';
@@ -37,7 +42,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(COLLAPSE_KEY) === '1');
-  const navItems = isAdminEmail(user?.email) ? [...NAV_ITEMS, BACKTEST_NAV_ITEM, ADMIN_NAV_ITEM] : NAV_ITEMS;
+  const navItems = isAdminEmail(user?.email) ? [...NAV_ITEMS, BACKTEST_NAV_ITEM, SMC_NAV_ITEM, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   async function handleLogout() {
     await logout();

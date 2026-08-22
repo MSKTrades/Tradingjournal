@@ -30,6 +30,23 @@ import { getUserFromRequest, isAdminEmail } from './_auth.js';
 //     and shared across whoever views that dataset (same pattern as the
 //     candle data itself, see chart_datasets above) - not per-account, since
 //     nothing else in this Backtest feature is account-scoped either.
+//   resource=smc_candles — live multi-timeframe candles for the Smart Money
+//     Concepts Analysis page (src/pages/SmcAnalysis.tsx). Pulls fresh
+//     Dukascopy history per pair across every fetchable timeframe (1m
+//     through 1d - Weekly is derived from Daily, see resampleWeeklyServer
+//     below, since dukascopy-node has no native weekly granularity), cached
+//     per pair+timeframe in smc_candle_cache with a short TTL (see
+//     SMC_CACHE_TTL_SECONDS) so switching timeframe tabs or reloading the
+//     page doesn't re-hit Dukascopy every time, while staying "live" within
+//     a few minutes. All the actual SMC analysis (structure/OB/FVG/range/
+//     strategy evaluation) happens client-side in src/pages/ui/smc/ against
+//     these raw candles - this endpoint only ever returns OHLC data.
+//   resource=smc_markups — the user's own manually-drawn entry/SL/TP
+//     markups on the SMC Analysis page, graded client-side against one of
+//     the six strategy models (see src/pages/ui/smc/markupGrading.ts) and
+//     persisted here purely as a record of what was graded and when - the
+//     server does not recompute or trust the grade, it just stores whatever
+//     the client computed.
 //
 // Backtest isn't ready for other users yet (still being built/tested), so
 // the whole file is gated to the admin account only, same pattern and same
@@ -252,6 +269,167 @@ async function addDrawing(sql: ReturnType<typeof db>, p: any) {
   return rows[0];
 }
 
+// --- Smart Money Concepts Analysis: live multi-timeframe candle fetch -------
+
+// How far back each timeframe pulls, and how long a cached pull stays
+// "fresh" before the next request re-fetches from Dukascopy. Deliberately
+// bounded windows (not the multi-year ranges Backtest datasets use) - this
+// feature is about reading CURRENT structure, not backtesting history, and
+// keeping the windows small keeps every timeframe's fetch fast enough that
+// a cold cache (all 6 timeframes fetched in parallel) still comfortably
+// fits inside this function's time budget.
+const SMC_WINDOW_DAYS: Record<string, number> = { '1m': 3, '5m': 7, '15m': 14, '1h': 60, '4h': 180, '1d': 500 };
+const SMC_CACHE_TTL_SECONDS: Record<string, number> = { '1m': 300, '5m': 300, '15m': 900, '1h': 900, '4h': 3600, '1d': 3600 };
+const SMC_FETCH_TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'] as const;
+
+// Weekly candles for the SMC page: dukascopy-node's own Timeframe type has
+// no native weekly granularity (only up to d1, then it jumps to mn1/
+// monthly - confirmed directly against its type defs), so Weekly is always
+// derived server-side from the Daily pull, bucketed to Monday-00:00-UTC
+// weeks. Deliberately duplicated here (not imported from
+// src/pages/ui/smc/marketStructure.ts's resampleWeekly) so this API
+// function stays self-contained and doesn't pull the client bundle's
+// analysis code into a serverless function - same reasoning every other
+// resource in this file keeps its own small helpers rather than importing
+// from src/.
+function resampleWeeklyServer(daily: Candle[]): Candle[] {
+  const out: Candle[] = [];
+  let current: Candle | null = null;
+  let currentStart = -1;
+  for (const c of daily) {
+    const d = new Date(c.time * 1000);
+    const day = d.getUTCDay();
+    const diffToMonday = day === 0 ? 6 : day - 1;
+    const start = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diffToMonday) / 1000);
+    if (!current || start !== currentStart) {
+      if (current) out.push(current);
+      currentStart = start;
+      current = { time: start, open: c.open, high: c.high, low: c.low, close: c.close };
+    } else {
+      current.high = Math.max(current.high, c.high);
+      current.low = Math.min(current.low, c.low);
+      current.close = c.close;
+    }
+  }
+  if (current) out.push(current);
+  return out;
+}
+
+async function readBlobJson(url: string): Promise<Candle[] | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function getSmcCandlesForTf(sql: ReturnType<typeof db>, pair: string, tf: string): Promise<Candle[]> {
+  const dukaTf = DUKA_TIMEFRAME[tf];
+  const cacheRows = await sql.unsafe('SELECT * FROM smc_candle_cache WHERE pair = $1 AND timeframe = $2', [pair, tf]);
+  const cached = cacheRows[0] ?? null;
+  const ttlMs = (SMC_CACHE_TTL_SECONDS[tf] ?? 900) * 1000;
+  if (cached && Date.now() - new Date(cached.fetched_at).getTime() < ttlMs) {
+    const fresh = await readBlobJson(cached.blob_url);
+    if (fresh) return fresh;
+  }
+
+  const days = SMC_WINDOW_DAYS[tf] ?? 30;
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 86400 * 1000);
+  let raw: any[];
+  try {
+    raw = (await getHistoricalRates({
+      instrument: pair.toLowerCase() as any,
+      dates: { from, to },
+      timeframe: dukaTf as any,
+      priceType: 'bid',
+      format: 'json',
+      useCache: false,
+      retryCount: 2,
+      pauseBetweenRetriesMs: 500,
+      failAfterRetryCount: true,
+    })) as any[];
+  } catch (e: any) {
+    // A fetch failure falls back to whatever's cached (even if stale)
+    // rather than breaking the whole page - one timeframe being a bit
+    // behind is far better than the SMC page erroring out entirely.
+    if (cached) {
+      const stale = await readBlobJson(cached.blob_url);
+      if (stale) return stale;
+    }
+    throw new Error(`Fetching ${pair} ${tf} from Dukascopy failed: ${e?.message ?? 'unknown error'}.`);
+  }
+
+  const candles: Candle[] = (raw ?? []).map(r => ({
+    time: Math.round(r.timestamp / 1000), open: r.open, high: r.high, low: r.low, close: r.close, volume: r.volume,
+  }));
+
+  if (candles.length === 0 && cached) {
+    const stale = await readBlobJson(cached.blob_url);
+    if (stale) return stale;
+  }
+  if (!BLOB_TOKEN) throw new Error('Blob storage is not configured for this Vercel project (see api/upload.ts).');
+
+  const blob = await put(`smc-candles/${pair}-${tf}.json`, JSON.stringify(candles), {
+    access: 'public', contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true, token: BLOB_TOKEN,
+  });
+
+  await sql.unsafe(
+    `INSERT INTO smc_candle_cache (pair, timeframe, blob_url, candle_count, from_time, to_time, fetched_at)
+     VALUES ($1, $2, $3, $4, $5, $6, now())
+     ON CONFLICT (pair, timeframe) DO UPDATE SET
+       blob_url = EXCLUDED.blob_url, candle_count = EXCLUDED.candle_count,
+       from_time = EXCLUDED.from_time, to_time = EXCLUDED.to_time, fetched_at = now()`,
+    [
+      pair, tf, blob.url, candles.length,
+      candles.length ? new Date(candles[0].time * 1000).toISOString() : null,
+      candles.length ? new Date(candles[candles.length - 1].time * 1000).toISOString() : null,
+    ]
+  );
+
+  return candles;
+}
+
+async function smcCandles(sql: ReturnType<typeof db>, p: any) {
+  const pair = String(p.pair ?? '').trim().toUpperCase();
+  if (!pair) throw new Error('pair is required');
+
+  const results = await Promise.all(SMC_FETCH_TIMEFRAMES.map(tf => getSmcCandlesForTf(sql, pair, tf)));
+  const timeframes: Record<string, Candle[]> = {};
+  SMC_FETCH_TIMEFRAMES.forEach((tf, i) => { timeframes[tf] = results[i]; });
+  timeframes['1w'] = resampleWeeklyServer(timeframes['1d']);
+
+  return { pair, timeframes, fetchedAt: new Date().toISOString() };
+}
+
+// --- Smart Money Concepts Analysis: user markups ----------------------------
+
+async function listSmcMarkups(sql: ReturnType<typeof db>, pair: string | null) {
+  if (pair) return sql.unsafe('SELECT * FROM smc_markups WHERE pair = $1 ORDER BY created_at DESC', [pair]);
+  return sql.unsafe('SELECT * FROM smc_markups ORDER BY created_at DESC');
+}
+
+async function addSmcMarkup(sql: ReturnType<typeof db>, p: any) {
+  const pair = String(p.pair ?? '').trim().toUpperCase();
+  const timeframe = String(p.timeframe ?? '').trim();
+  if (!pair || !timeframe) throw new Error('pair and timeframe are required');
+  if (p.entry_price == null || p.sl_price == null || p.tp_price == null) throw new Error('entry_price, sl_price, and tp_price are required');
+
+  const rows = await sql.unsafe(
+    `INSERT INTO smc_markups (pair, timeframe, model_key, direction, entry_price, sl_price, tp_price, entry_time, points, notes, grade)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb)
+     RETURNING *`,
+    [
+      pair, timeframe, p.model_key ?? null, p.direction ?? 'bullish',
+      p.entry_price, p.sl_price, p.tp_price, p.entry_time ?? null,
+      p.points ?? [], p.notes ?? '', p.grade ?? null,
+    ]
+  );
+  return rows[0];
+}
+
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
 
@@ -275,13 +453,26 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(await listDrawings(sql, datasetId));
       return;
     }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", or "drawings"' });
+    if (resource === 'smc_candles') {
+      const pairParam = req.query.pair;
+      const pair = Array.isArray(pairParam) ? pairParam[0] : pairParam;
+      res.status(200).json(await smcCandles(sql, { pair }));
+      return;
+    }
+    if (resource === 'smc_markups') {
+      const pairParam = req.query.pair;
+      const pair = Array.isArray(pairParam) ? pairParam[0] : pairParam;
+      res.status(200).json(await listSmcMarkups(sql, pair ? String(pair).trim().toUpperCase() : null));
+      return;
+    }
+    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", "smc_candles", or "smc_markups"' });
   } else if (req.method === 'POST') {
     if (resource === 'datasets') { res.status(200).json(await upsertDataset(sql, req.body)); return; }
     if (resource === 'trades') { res.status(200).json(await addTrade(sql, req.body)); return; }
     if (resource === 'fetch') { res.status(200).json(await fetchChunk(sql, req.body)); return; }
     if (resource === 'drawings') { res.status(200).json(await addDrawing(sql, req.body)); return; }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", "fetch", or "drawings"' });
+    if (resource === 'smc_markups') { res.status(200).json(await addSmcMarkup(sql, req.body)); return; }
+    res.status(400).json({ error: 'resource must be "datasets", "trades", "fetch", "drawings", or "smc_markups"' });
   } else if (req.method === 'PUT') {
     const id = Number(req.query.id);
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
@@ -305,7 +496,12 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json({ deleted: 1 });
       return;
     }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", or "drawings"' });
+    if (resource === 'smc_markups') {
+      await sql.unsafe('DELETE FROM smc_markups WHERE id = $1', [id]);
+      res.status(200).json({ deleted: 1 });
+      return;
+    }
+    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", or "smc_markups"' });
   } else {
     res.status(405).json({ error: 'Method not allowed' });
   }

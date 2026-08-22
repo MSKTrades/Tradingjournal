@@ -886,3 +886,52 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_ip TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS login_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+
+-- ============================================================================
+-- Smart Money Concepts (SMC) Analysis — admin-only (see api/backtest.ts's
+-- resource=smc_candles/smc_markups and its isAdminEmail gate). Two tables,
+-- same "keep raw candle data out of Postgres, put it in Blob, and just
+-- track pointers here" pattern chart_datasets already uses above.
+--
+-- smc_candle_cache: a short-TTL cache of live Dukascopy pulls per
+-- pair+timeframe (see SMC_CACHE_TTL_SECONDS in api/backtest.ts) - the SMC
+-- page fetches "live" data, but re-hitting Dukascopy on every page load/tab
+-- switch would be both slow and unnecessary; this is what makes repeated
+-- views cheap while still staying live within a few minutes.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS smc_candle_cache (
+  id            SERIAL PRIMARY KEY,
+  pair          TEXT NOT NULL,
+  timeframe     TEXT NOT NULL,          -- '1m' | '5m' | '15m' | '1h' | '4h' | '1d' (never '1w' - that's derived on read, not cached)
+  blob_url      TEXT NOT NULL,
+  candle_count  INTEGER NOT NULL DEFAULT 0,
+  from_time     TIMESTAMPTZ,
+  to_time       TIMESTAMPTZ,
+  fetched_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(pair, timeframe)
+);
+
+-- One row per manually-drawn entry/SL/TP markup the trader makes on the SMC
+-- Analysis page, graded client-side against one of the six strategy models
+-- (see src/pages/ui/smc/markupGrading.ts). `grade` stores exactly what the
+-- client computed (the full rule checklist + pass/fail) at save time -
+-- this is a record of what was graded and when, not re-validated server-
+-- side, since the underlying live candle analysis it was graded against
+-- lives client-side, not in this database.
+CREATE TABLE IF NOT EXISTS smc_markups (
+  id            SERIAL PRIMARY KEY,
+  pair          TEXT NOT NULL,
+  timeframe     TEXT NOT NULL,          -- '1w' | '1d' | '4h' | '1h' | '15m' | '5m' | '1m'
+  model_key     TEXT,                   -- one of STRATEGY_MODEL_KEYS in types.ts, or NULL if graded against none
+  direction     TEXT NOT NULL DEFAULT 'bullish',  -- 'bullish' | 'bearish'
+  entry_price   NUMERIC NOT NULL,
+  sl_price      NUMERIC NOT NULL,
+  tp_price      NUMERIC NOT NULL,
+  entry_time    TIMESTAMPTZ,            -- when in history this entry would have triggered; NULL = "as of now"
+  points        JSONB NOT NULL DEFAULT '[]'::jsonb,  -- freeform drawing shapes, same shape as chart_drawings.points
+  notes         TEXT NOT NULL DEFAULT '',
+  grade         JSONB,                  -- the StrategyEvaluation object computed client-side at save time
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_smc_markups_pair ON smc_markups (pair);
