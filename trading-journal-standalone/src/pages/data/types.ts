@@ -364,6 +364,23 @@ export const COMMON_PAIRS = [
   'XAUUSD', 'XAGUSD',
 ];
 
+// How many decimal places a pair is conventionally quoted to, for chart
+// price-scale/axis formatting. Most FX pairs trade in "pipettes" (5 decimal
+// places, the 5th being a tenth of a pip); JPY-quoted pairs run two orders
+// of magnitude higher in price so their convention is 3 decimals instead;
+// metals are quoted in whole-dollar terms so 2-3 decimals is standard.
+// lightweight-charts' default price-scale formatting isn't pair-aware, so
+// without this it was falling back to a generic 2-decimal display on every
+// pair - fine for a stock price, but useless for reading pips off an FX
+// chart, which is the entire point of this page.
+export function pricePrecisionForPair(pair: string): { precision: number; minMove: number } {
+  const p = pair.toUpperCase();
+  if (p.includes('JPY')) return { precision: 3, minMove: 0.001 };
+  if (p.startsWith('XAU')) return { precision: 2, minMove: 0.01 };
+  if (p.startsWith('XAG')) return { precision: 3, minMove: 0.001 };
+  return { precision: 5, minMove: 0.00001 };
+}
+
 export type ChartDataset = {
   id: number;
   pair: string;

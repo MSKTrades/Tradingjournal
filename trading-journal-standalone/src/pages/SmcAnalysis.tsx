@@ -244,6 +244,7 @@ export default function SmcAnalysis() {
                   <SmcChart
                     key={tf}
                     tf={tf}
+                    pair={pair}
                     analysis={bundle[tf]!}
                     markup={{ entry: markupTf === tf ? Number(entry) || null : null, sl: markupTf === tf ? Number(sl) || null : null, tp: markupTf === tf ? Number(tp) || null : null, direction: markupDirection }}
                     armField={markupTf === tf ? armField : null}

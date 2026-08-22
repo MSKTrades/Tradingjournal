@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { createChart, IChartApi, ISeriesApi, Time } from 'lightweight-charts';
 import { TimeframeAnalysis, SmcTimeframe, Direction } from './types';
 import { SmcOverlayPrimitive } from './smcOverlayPrimitive';
+import { pricePrecisionForPair } from '../../data/types';
 
 // The SMC Analysis page's chart: one candlestick series for whichever
 // timeframe tab is active, plus the auto-detected overlays (Order Blocks,
@@ -24,9 +25,14 @@ import { SmcOverlayPrimitive } from './smcOverlayPrimitive';
 // MarkupPanel.tsx are the alternative/complementary way to set the same
 // values by hand.
 export default function SmcChart({
-  tf, analysis, markup, armField, onChartPriceClick, height = 420, showZones = true,
+  tf, pair, analysis, markup, armField, onChartPriceClick, height = 420, showZones = true,
 }: {
   tf: SmcTimeframe;
+  // Which pair this is - drives the price scale's decimal precision (see
+  // pricePrecisionForPair in data/types.ts), since an FX chart is unreadable
+  // for pip-level entries at the 2-decimal default lightweight-charts falls
+  // back to when it isn't told otherwise.
+  pair: string;
   analysis: TimeframeAnalysis;
   markup: { entry: number | null; sl: number | null; tp: number | null; direction: Direction };
   armField: 'entry' | 'sl' | 'tp' | null;
@@ -65,10 +71,12 @@ export default function SmcChart({
       rightPriceScale: { borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' },
       crosshair: { mode: 0 },
     });
+    const { precision, minMove } = pricePrecisionForPair(pair);
     const series = chart.addCandlestickSeries({
       upColor: '#22c55e', downColor: '#ef4444',
       borderUpColor: '#22c55e', borderDownColor: '#ef4444',
       wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+      priceFormat: { type: 'price', precision, minMove },
     });
     series.setData(analysis.candles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close })));
 
@@ -99,7 +107,7 @@ export default function SmcChart({
       overlayRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysis, height]);
+  }, [analysis, height, pair]);
 
   // Entry/SL/TP markup - pushed into the overlay primitive whenever the
   // values change, so it's drawn by the same canvas pass as the OB/FVG/Range
