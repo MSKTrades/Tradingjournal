@@ -59,6 +59,11 @@ export default function SmcAnalysis() {
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-timeframe fetch errors (e.g. one TF still hitting a Dukascopy 429
+  // after retries) - the request as a whole no longer throws for this, so
+  // these render as a small notice on just that TF's tab instead of the
+  // page-wide error banner above.
+  const [candleErrors, setCandleErrors] = useState<Record<string, string>>({});
   const [activeTf, setActiveTf] = useState<SmcTimeframe>('15m');
 
   const [markupDirection, setMarkupDirection] = useState<Direction>('bullish');
@@ -82,6 +87,7 @@ export default function SmcAnalysis() {
       const data = await api.get(`/backtest?resource=smc_candles&pair=${encodeURIComponent(p)}`);
       setRawCandles(data.timeframes);
       setFetchedAt(data.fetchedAt);
+      setCandleErrors(data.errors ?? {});
     } catch (e: any) {
       setError(e.message ?? 'Failed to load candle data.');
     } finally {
@@ -208,8 +214,17 @@ export default function SmcAnalysis() {
                 </CardContent></Card>
               </div>
             ) : (
-              <Card><CardContent className="pt-6 pb-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-                {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading {SMC_TIMEFRAME_LABELS[tf]} candles…</> : `No ${SMC_TIMEFRAME_LABELS[tf]} data yet.`}
+              <Card><CardContent className="pt-6 pb-6 text-center text-sm text-muted-foreground flex flex-col items-center justify-center gap-2">
+                {loading ? (
+                  <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading {SMC_TIMEFRAME_LABELS[tf]} candles…</span>
+                ) : candleErrors[tf] ? (
+                  <>
+                    <span>{SMC_TIMEFRAME_LABELS[tf]} data is temporarily unavailable — Dukascopy's feed rate-limited this timeframe.</span>
+                    <Button type="button" size="sm" variant="outline" onClick={() => loadCandles(pair)} disabled={loading}>Try refreshing</Button>
+                  </>
+                ) : (
+                  `No ${SMC_TIMEFRAME_LABELS[tf]} data yet.`
+                )}
               </CardContent></Card>
             )}
           </TabsContent>

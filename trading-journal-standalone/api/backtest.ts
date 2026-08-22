@@ -347,8 +347,18 @@ async function getSmcCandlesForTf(sql: ReturnType<typeof db>, pair: string, tf: 
       priceType: 'bid',
       format: 'json',
       useCache: false,
-      retryCount: 2,
-      pauseBetweenRetriesMs: 500,
+      // Dukascopy's public feed rate-limits by request burst, not by
+      // timeframe - a single getHistoricalRates call is normally a small
+      // handful of requests (minute-granularity timeframes fetch one file
+      // per DAY, hour-granularity one per MONTH, day-granularity one per
+      // YEAR - see node_modules/dukascopy-node's url-generator), so the
+      // real risk isn't any one call, it's SIX of these firing at once (see
+      // smcCandles below, which now sequences them instead). A longer,
+      // slightly jittered backoff here is what lets a transient 429 from
+      // that burst actually clear before the retry, instead of retrying
+      // straight into the same still-active rate-limit window.
+      retryCount: 3,
+      pauseBetweenRetriesMs: 1200 + Math.floor(Math.random() * 600),
       failAfterRetryCount: true,
     })) as any[];
   } catch (e: any) {
@@ -396,12 +406,36 @@ async function smcCandles(sql: ReturnType<typeof db>, p: any) {
   const pair = String(p.pair ?? '').trim().toUpperCase();
   if (!pair) throw new Error('pair is required');
 
-  const results = await Promise.all(SMC_FETCH_TIMEFRAMES.map(tf => getSmcCandlesForTf(sql, pair, tf)));
+  // Fetched ONE AT A TIME, not via Promise.all. Six concurrent
+  // getHistoricalRates calls used to burst past Dukascopy's public-feed
+  // rate limit and come back as a 429 on whichever timeframe lost the race
+  // - and because Promise.all fails fast, that single rejection used to
+  // take the ENTIRE request down (the page-wide "Something went wrong"
+  // error the user saw, with every timeframe/model stuck showing no data,
+  // even though 5 of the 6 fetches had actually succeeded). Sequencing
+  // them keeps request volume low enough to stay under the limit, and each
+  // fetch gets its own try/catch below so ONE persistently-failing
+  // timeframe (already unlikely after the retry/backoff bump above) comes
+  // back as an empty array plus a note in `errors`, instead of failing
+  // every other timeframe that loaded fine.
   const timeframes: Record<string, Candle[]> = {};
-  SMC_FETCH_TIMEFRAMES.forEach((tf, i) => { timeframes[tf] = results[i]; });
+  const errors: Record<string, string> = {};
+  for (const tf of SMC_FETCH_TIMEFRAMES) {
+    try {
+      timeframes[tf] = await getSmcCandlesForTf(sql, pair, tf);
+    } catch (e: any) {
+      console.error(`smcCandles: ${pair} ${tf} failed`, e);
+      timeframes[tf] = [];
+      errors[tf] = e?.message ?? 'Failed to load candles for this timeframe.';
+    }
+    // Small stagger between sequential requests too - Dukascopy's limit is
+    // burst-based, so even one-at-a-time back-to-back-to-back requests with
+    // zero gap can still trip it under load.
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
   timeframes['1w'] = resampleWeeklyServer(timeframes['1d']);
 
-  return { pair, timeframes, fetchedAt: new Date().toISOString() };
+  return { pair, timeframes, errors, fetchedAt: new Date().toISOString() };
 }
 
 // --- Smart Money Concepts Analysis: user markups ----------------------------
