@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw, Loader2, Save, Trash2, Crosshair } from 'lucide-react';
+import { RefreshCw, Loader2, Save, Trash2, Crosshair, Eye, EyeOff } from 'lucide-react';
 import { Card, CardContent } from '../lib/ui/card';
 import { Button } from '../lib/ui/button';
 import { Select, Input, Label, Textarea, Badge } from '../lib/ui/form';
@@ -79,6 +79,11 @@ export default function SmcAnalysis() {
   const [armField, setArmField] = useState<ArmField>(null);
   const [gradeResult, setGradeResult] = useState<StrategyEvaluation | null>(null);
   const [saving, setSaving] = useState(false);
+  // On by default (the full auto-read is the point of this page), but
+  // "View this setup on chart" below switches it off so that one trade idea
+  // isn't buried under every other detected Order Block/FVG - the trader can
+  // always flip it back on with the toggle above the chart.
+  const [showZones, setShowZones] = useState(true);
 
   const { data: rawMarkups, refetch: refetchMarkups } = useFetch<SmcMarkup[]>(`/backtest?resource=smc_markups&pair=${encodeURIComponent(pair)}`);
   const markups = rawMarkups ?? [];
@@ -147,6 +152,7 @@ export default function SmcAnalysis() {
     setTp(ev.setup.tp.toFixed(5));
     setArmField(null);
     setGradeResult(null);
+    setShowZones(false);
     tabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
@@ -228,6 +234,13 @@ export default function SmcAnalysis() {
             {bundle[tf] && bundle[tf]!.candles.length > 0 ? (
               <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-4">
                 <Card><CardContent className="pt-4 pb-2">
+                  <div className="flex items-center justify-end mb-2">
+                    <Button type="button" size="sm" variant="outline" onClick={() => setShowZones(v => !v)}>
+                      {showZones
+                        ? <><EyeOff className="w-3.5 h-3.5 mr-1" /> Hide zones</>
+                        : <><Eye className="w-3.5 h-3.5 mr-1" /> Show zones</>}
+                    </Button>
+                  </div>
                   <SmcChart
                     key={tf}
                     tf={tf}
@@ -235,6 +248,7 @@ export default function SmcAnalysis() {
                     markup={{ entry: markupTf === tf ? Number(entry) || null : null, sl: markupTf === tf ? Number(sl) || null : null, tp: markupTf === tf ? Number(tp) || null : null, direction: markupDirection }}
                     armField={markupTf === tf ? armField : null}
                     onChartPriceClick={handleChartPriceClick}
+                    showZones={showZones}
                   />
                 </CardContent></Card>
                 <Card><CardContent className="pt-4 pb-4">

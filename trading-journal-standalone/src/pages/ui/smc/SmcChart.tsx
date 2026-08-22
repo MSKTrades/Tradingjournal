@@ -24,7 +24,7 @@ import { SmcOverlayPrimitive } from './smcOverlayPrimitive';
 // MarkupPanel.tsx are the alternative/complementary way to set the same
 // values by hand.
 export default function SmcChart({
-  tf, analysis, markup, armField, onChartPriceClick, height = 420,
+  tf, analysis, markup, armField, onChartPriceClick, height = 420, showZones = true,
 }: {
   tf: SmcTimeframe;
   analysis: TimeframeAnalysis;
@@ -32,6 +32,13 @@ export default function SmcChart({
   armField: 'entry' | 'sl' | 'tp' | null;
   onChartPriceClick: (price: number) => void;
   height?: number;
+  // When false, the auto-detected Order Block/FVG boxes are omitted (the
+  // Range High/Low/EQ 50% lines and the trader's own Entry/SL/TP markup
+  // still show) - lets the "View this setup on chart" flow present just the
+  // one trade idea against price action, instead of a chart with dozens of
+  // OB/FVG boxes competing for attention. Defaults on so the full auto-read
+  // is what a plain visit to a timeframe tab shows.
+  showZones?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -67,8 +74,9 @@ export default function SmcChart({
 
     const overlay = new SmcOverlayPrimitive();
     series.attachPrimitive(overlay);
-    overlay.setData(analysis.orderBlocks, analysis.fvgs, analysis.range);
     overlay.setMarkup(markup.entry, markup.sl, markup.tp);
+    // Zone data (OB/FVG boxes) is set by the effect below, keyed on
+    // showZones - not here, so toggling it doesn't need a full remount.
 
     chart.timeScale().fitContent();
 
@@ -101,6 +109,15 @@ export default function SmcChart({
   useEffect(() => {
     overlayRef.current?.setMarkup(markup.entry, markup.sl, markup.tp);
   }, [markup.entry, markup.sl, markup.tp]);
+
+  // OB/FVG zone boxes - separated from the mount effect so toggling
+  // showZones (e.g. via "View this setup on chart") just redraws the
+  // overlay's boxes rather than tearing down and recreating the whole
+  // chart. Range/EQ lines always pass through since they're much lower
+  // clutter and still useful context even in the decluttered view.
+  useEffect(() => {
+    overlayRef.current?.setData(showZones ? analysis.orderBlocks : [], showZones ? analysis.fvgs : [], analysis.range);
+  }, [analysis, showZones]);
 
   return (
     <div>
