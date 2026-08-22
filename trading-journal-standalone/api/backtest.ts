@@ -373,16 +373,25 @@ async function getSmcCandlesForTf(sql: ReturnType<typeof db>, pair: string, tf: 
       priceType: 'bid',
       format: 'json',
       useCache: false,
-      // Dukascopy's public feed rate-limits by request burst, not by
-      // timeframe - a single getHistoricalRates call is normally a small
-      // handful of requests (minute-granularity timeframes fetch one file
-      // per DAY, hour-granularity one per MONTH, day-granularity one per
-      // YEAR - see node_modules/dukascopy-node's url-generator), so the
-      // real risk isn't any one call, it's SIX of these firing at once (see
-      // smcCandles below, which now sequences them instead). A longer,
-      // slightly jittered backoff here is what lets a transient 429 from
-      // that burst actually clear before the retry, instead of retrying
-      // straight into the same still-active rate-limit window.
+      // Dukascopy's public feed rate-limits by request burst. Sequencing the
+      // six timeframes below (see smcCandles) turned out to only be HALF the
+      // fix: dukascopy-node fetches the underlying daily/monthly/yearly data
+      // files for one timeframe in its OWN internal batches too, and its
+      // default is batchSize=10 with only a 1s pause between batches. A
+      // file-hungry window - 15m over a 14-day lookback needs 14 daily
+      // files, 5m over 7 days needs 7 - was firing up to 10 of those file
+      // requests at Dukascopy CONCURRENTLY from inside a single call, which
+      // is enough to trip the rate limit on its own even with every
+      // timeframe's top-level call already sequenced one-at-a-time. That's
+      // why 15m/5m/4h (the file-hungriest windows) were the ones actually
+      // seen failing on a cold cache, while 1h/1d (2 files each) sailed
+      // through - and why the failures cascaded to neighboring timeframes
+      // fetched shortly after, since Dukascopy's cooldown outlasts a single
+      // request. Capping batchSize here keeps every single timeframe's OWN
+      // fetch under that burst threshold too, not just the sequence across
+      // timeframes.
+      batchSize: 3,
+      pauseBetweenBatchesMs: 1200,
       retryCount: 3,
       pauseBetweenRetriesMs: 1200 + Math.floor(Math.random() * 600),
       failAfterRetryCount: true,
@@ -438,12 +447,20 @@ async function smcCandles(sql: ReturnType<typeof db>, p: any) {
   // - and because Promise.all fails fast, that single rejection used to
   // take the ENTIRE request down (the page-wide "Something went wrong"
   // error the user saw, with every timeframe/model stuck showing no data,
-  // even though 5 of the 6 fetches had actually succeeded). Sequencing
-  // them keeps request volume low enough to stay under the limit, and each
-  // fetch gets its own try/catch below so ONE persistently-failing
-  // timeframe (already unlikely after the retry/backoff bump above) comes
-  // back as an empty array plus a note in `errors`, instead of failing
-  // every other timeframe that loaded fine.
+  // even though 5 of the 6 fetches had actually succeeded). Each fetch also
+  // gets its own try/catch below so ONE persistently-failing timeframe comes
+  // back as an empty array plus a note in `errors`, instead of failing every
+  // other timeframe that loaded fine - that graceful-degradation behavior is
+  // what turns a still-possible Dukascopy failure into the small "data is
+  // temporarily unavailable, try refreshing" notice on just that one tab,
+  // instead of the page-wide crash this originally was.
+  //
+  // Sequencing the SIX TIMEFRAMES turned out to be necessary but not
+  // sufficient on its own, though - see the batchSize comment inside
+  // getSmcCandlesForTf below for the other half of this: a single
+  // getHistoricalRates call for a file-hungry window (15m/5m/4h) was
+  // internally bursting up to 10 concurrent requests at Dukascopy by
+  // itself, regardless of how carefully the six calls here were spaced out.
   const timeframes: Record<string, Candle[]> = {};
   const errors: Record<string, string> = {};
   for (const tf of SMC_FETCH_TIMEFRAMES) {
