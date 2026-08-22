@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { MultiTfAnalysis } from './types';
+import { ExternalLink } from 'lucide-react';
+import { MultiTfAnalysis, StrategyEvaluation } from './types';
 import { evaluateAllStrategies } from './strategyModels';
 import { Card, CardContent } from '../../../lib/ui/card';
 import { Badge } from '../../../lib/ui/form';
@@ -17,7 +18,21 @@ const STATUS_LABEL: Record<string, string> = { valid: 'Setup Valid', partial: 'F
 // are plain array scans over already-analyzed structures, not re-detecting
 // anything), so it always reflects whatever timeframe/candle data is
 // currently loaded.
-export default function StrategyPanel({ bundle }: { bundle: MultiTfAnalysis }) {
+type Props = {
+  bundle: MultiTfAnalysis;
+  // Called when the trader clicks "View on chart" on a valid setup - the
+  // parent (SmcAnalysis.tsx) jumps to that model's execution timeframe and
+  // pre-fills the markup form with exactly this setup's direction/entry/SL/
+  // TP, so the chart shows this one trade idea's lines and nothing else.
+  onViewSetup?: (ev: StrategyEvaluation) => void;
+};
+
+// Live dashboard of all six strategy models evaluated against the current
+// multi-timeframe bundle - runs on every render (cheap: the rule engines
+// are plain array scans over already-analyzed structures, not re-detecting
+// anything), so it always reflects whatever timeframe/candle data is
+// currently loaded.
+export default function StrategyPanel({ bundle, onViewSetup }: Props) {
   const evaluations = useMemo(() => evaluateAllStrategies(bundle), [bundle]);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -30,11 +45,22 @@ export default function StrategyPanel({ bundle }: { bundle: MultiTfAnalysis }) {
             </div>
             <p className="text-xs text-muted-foreground">{ev.summary}</p>
             {ev.setup && (
-              <div className="grid grid-cols-4 gap-2 bg-muted/40 rounded-md p-2 text-xs">
-                <div><p className="text-muted-foreground">Dir</p><p className="font-mono font-medium">{ev.setup.direction === 'bullish' ? 'Long' : 'Short'}</p></div>
-                <div><p className="text-muted-foreground">Entry</p><p className="font-mono font-medium">{ev.setup.entry.toFixed(5)}</p></div>
-                <div><p className="text-muted-foreground">SL</p><p className="font-mono font-medium">{ev.setup.sl.toFixed(5)}</p></div>
-                <div><p className="text-muted-foreground">TP</p><p className="font-mono font-medium">{ev.setup.tp.toFixed(5)}</p></div>
+              <div className="bg-muted/40 rounded-md p-2 text-xs flex flex-col gap-2">
+                <div className="grid grid-cols-4 gap-2">
+                  <div><p className="text-muted-foreground">Dir</p><p className="font-mono font-medium">{ev.setup.direction === 'bullish' ? 'Long' : 'Short'}</p></div>
+                  <div><p className="text-muted-foreground">Entry</p><p className="font-mono font-medium">{ev.setup.entry.toFixed(5)}</p></div>
+                  <div><p className="text-muted-foreground">SL</p><p className="font-mono font-medium">{ev.setup.sl.toFixed(5)}</p></div>
+                  <div><p className="text-muted-foreground">TP</p><p className="font-mono font-medium">{ev.setup.tp.toFixed(5)}</p></div>
+                </div>
+                {onViewSetup && (
+                  <button
+                    type="button"
+                    onClick={() => onViewSetup(ev)}
+                    className="self-start flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    <ExternalLink className="w-3 h-3" /> View this setup on chart
+                  </button>
+                )}
               </div>
             )}
             <RuleChecklist rules={ev.rules} />

@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react';
-import { createChart, IChartApi, ISeriesApi, IPriceLine, Time } from 'lightweight-charts';
+import { createChart, IChartApi, ISeriesApi, Time } from 'lightweight-charts';
 import { TimeframeAnalysis, SmcTimeframe, Direction } from './types';
 import { SmcOverlayPrimitive } from './smcOverlayPrimitive';
 
 // The SMC Analysis page's chart: one candlestick series for whichever
 // timeframe tab is active, plus the auto-detected overlays (Order Blocks,
-// FVGs, range/EQ line - see smcOverlayPrimitive.ts) and up to three
-// draggable-by-click price lines for the trader's own Entry/SL/TP markup.
+// FVGs, range/EQ line) and the trader's own Entry/SL/TP markup lines, set by
+// clicking the chart. Both layers are drawn by the same SmcOverlayPrimitive
+// (see smcOverlayPrimitive.ts for why the markup lines live there instead of
+// using lightweight-charts' native series.createPriceLine()).
 //
 // Deliberately simpler than ReplayChart.tsx: there's no replay/scrubbing
 // here (SMC analysis looks at the full live history, not a blind step-
@@ -35,7 +37,6 @@ export default function SmcChart({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const overlayRef = useRef<SmcOverlayPrimitive | null>(null);
-  const priceLinesRef = useRef<IPriceLine[]>([]);
   const clickHandlerRef = useRef<(price: number) => void>(onChartPriceClick);
   const armFieldRef = useRef(armField);
   clickHandlerRef.current = onChartPriceClick;
@@ -67,6 +68,7 @@ export default function SmcChart({
     const overlay = new SmcOverlayPrimitive();
     series.attachPrimitive(overlay);
     overlay.setData(analysis.orderBlocks, analysis.fvgs, analysis.range);
+    overlay.setMarkup(markup.entry, markup.sl, markup.tp);
 
     chart.timeScale().fitContent();
 
@@ -87,30 +89,17 @@ export default function SmcChart({
       chartRef.current = null;
       seriesRef.current = null;
       overlayRef.current = null;
-      priceLinesRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis, height]);
 
-  // Entry/SL/TP price lines - recreated whenever the markup values change.
-  // Cheap enough (3 lines) that a full remove+recreate beats tracking
-  // per-line diffing.
+  // Entry/SL/TP markup - pushed into the overlay primitive whenever the
+  // values change, so it's drawn by the same canvas pass as the OB/FVG/Range
+  // overlay (see smcOverlayPrimitive.ts) instead of via native
+  // series.createPriceLine(), which turned out not to render reliably once
+  // this primitive is attached.
   useEffect(() => {
-    const series = seriesRef.current;
-    if (!series) return;
-    priceLinesRef.current.forEach(l => series.removePriceLine(l));
-    priceLinesRef.current = [];
-    const specs: { price: number | null; color: string; title: string }[] = [
-      { price: markup.entry, color: '#3b82f6', title: 'Entry' },
-      { price: markup.sl, color: '#ef4444', title: 'SL' },
-      { price: markup.tp, color: '#22c55e', title: 'TP' },
-    ];
-    for (const s of specs) {
-      if (s.price == null || isNaN(s.price)) continue;
-      priceLinesRef.current.push(series.createPriceLine({
-        price: s.price, color: s.color, lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: s.title,
-      }));
-    }
+    overlayRef.current?.setMarkup(markup.entry, markup.sl, markup.tp);
   }, [markup.entry, markup.sl, markup.tp]);
 
   return (

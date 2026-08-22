@@ -1,5 +1,5 @@
 import {
-  MultiTfAnalysis, Direction, RuleCheck, StrategyEvaluation, StrategyModelKey, STRATEGY_MODEL_KEYS, TradeSetup, SwingPoint,
+  MultiTfAnalysis, Direction, RuleCheck, StrategyEvaluation, StrategyModelKey, STRATEGY_MODEL_KEYS, TradeSetup, SwingPoint, SmcTimeframe,
 } from './types';
 import {
   Zone, zonesFor, latestPoiInPd, zoneTappedSince, firstStructureEventAfter, zoneFormedAfter,
@@ -72,6 +72,22 @@ const CANON: Record<StrategyModelKey, RuleDef[]> = {
     { id: 'entry-trigger', label: 'Pro-trend continuation entry after the sweep' },
     { id: 'entry-zone', label: 'Entry at the 15M OB/FVG formed by the continuation break' },
   ],
+};
+
+// Which timeframe each model's entry zone (and therefore its setup's
+// entry/SL/TP) actually lives on - i.e. the chart you'd want open to look at
+// a valid setup. Read directly off each evaluate* function below: whichever
+// TF's candles feed entryFromZone() for that model is the one listed here.
+// Used by the "View on chart" link (see StrategyPanel.tsx) to jump straight
+// to the right tab with this exact setup drawn on it, instead of leaving the
+// trader to guess which of the 7 tabs the entry zone is actually sitting on.
+export const STRATEGY_MODEL_ENTRY_TF: Record<StrategyModelKey, SmcTimeframe> = {
+  pro_trend_m15_m1: '1m',
+  session_liquidity_sweep: '1m',
+  candle2_sweep: '15m',
+  structural_pullback: '15m',
+  inducement_sweep: '1m',
+  htf_continuation: '15m',
 };
 
 export const STRATEGY_MODEL_NAMES: Record<StrategyModelKey, string> = {

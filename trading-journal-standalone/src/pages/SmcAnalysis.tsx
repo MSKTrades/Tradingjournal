@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Loader2, Save, Trash2, Crosshair } from 'lucide-react';
 import { Card, CardContent } from '../lib/ui/card';
 import { Button } from '../lib/ui/button';
@@ -11,7 +11,7 @@ import {
   Direction, StrategyModelKey, SmcMarkup, StrategyEvaluation,
 } from './ui/smc/types';
 import { analyzeAll } from './ui/smc/marketStructure';
-import { STRATEGY_MODEL_NAMES } from './ui/smc/strategyModels';
+import { STRATEGY_MODEL_NAMES, STRATEGY_MODEL_ENTRY_TF } from './ui/smc/strategyModels';
 import { gradeMarkup } from './ui/smc/markupGrading';
 import SmcChart from './ui/smc/SmcChart';
 import StrategyPanel from './ui/smc/StrategyPanel';
@@ -67,6 +67,7 @@ export default function SmcAnalysis() {
   // page-wide error banner above.
   const [candleErrors, setCandleErrors] = useState<Record<string, string>>({});
   const [activeTf, setActiveTf] = useState<SmcTimeframe>('15m');
+  const tabsRef = useRef<HTMLDivElement>(null);
 
   const [markupDirection, setMarkupDirection] = useState<Direction>('bullish');
   const [markupModel, setMarkupModel] = useState<StrategyModelKey>('pro_trend_m15_m1');
@@ -126,6 +127,27 @@ export default function SmcAnalysis() {
     else if (armField === 'sl') setSl(price.toFixed(5));
     else if (armField === 'tp') setTp(price.toFixed(5));
     setArmField(null);
+  }
+
+  // "View this setup on chart" (from a valid strategy-model card below) -
+  // jumps to the timeframe that model's entry zone actually lives on (see
+  // STRATEGY_MODEL_ENTRY_TF) and loads this exact setup's direction/entry/
+  // SL/TP into the markup form, so the chart shows only this one trade
+  // idea's lines rather than whatever was previously typed in. Any earlier
+  // grade result is cleared since it belonged to a different markup.
+  function handleViewSetup(ev: StrategyEvaluation) {
+    if (!ev.setup) return;
+    const tf = STRATEGY_MODEL_ENTRY_TF[ev.modelKey];
+    setActiveTf(tf);
+    setMarkupTf(tf);
+    setMarkupModel(ev.modelKey);
+    setMarkupDirection(ev.setup.direction);
+    setEntry(ev.setup.entry.toFixed(5));
+    setSl(ev.setup.sl.toFixed(5));
+    setTp(ev.setup.tp.toFixed(5));
+    setArmField(null);
+    setGradeResult(null);
+    tabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function buildMarkupInput() {
@@ -192,12 +214,11 @@ export default function SmcAnalysis() {
       {fetchedAt && <p className="text-[11px] text-muted-foreground mb-2">Candles last fetched {new Date(fetchedAt).toLocaleString()} for {pair}.</p>}
       {error && <Card className="mb-4"><CardContent className="pt-4 pb-4 text-sm text-destructive">{error}</CardContent></Card>}
 
-      <div className="flex justify-end mb-4">
-        <div className="w-full sm:w-80">
-          <MultiTfSummaryTable bundle={bundle} activeTf={activeTf} onSelect={setActiveTf} />
-        </div>
+      <div className="mb-4">
+        <MultiTfSummaryTable bundle={bundle} activeTf={activeTf} onSelect={setActiveTf} />
       </div>
 
+      <div ref={tabsRef} />
       <Tabs value={activeTf} onValueChange={(v: string) => setActiveTf(v as SmcTimeframe)}>
         <TabsList>
           {SMC_TIMEFRAMES.map(tf => <TabsTrigger key={tf} value={tf}>{SMC_TIMEFRAME_LABELS[tf]}</TabsTrigger>)}
@@ -244,7 +265,7 @@ export default function SmcAnalysis() {
 
       <div className="mt-6">
         <h2 className="text-sm font-bold mb-3">Strategy Models — live scan</h2>
-        <StrategyPanel bundle={bundle} />
+        <StrategyPanel bundle={bundle} onViewSetup={handleViewSetup} />
       </div>
 
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">

@@ -348,9 +348,20 @@ export type ReplayTimeframe = typeof REPLAY_TIMEFRAMES[number];
 // pair picker. Dukascopy actually covers hundreds of forex/metals/indices/
 // crypto instruments beyond this list - the dialog's pair field also takes
 // free text, this is just autocomplete for the ones most people will want.
+//
+// Every pair across the 8 majors (EUR, GBP, AUD, NZD, USD, CAD, CHF, JPY) -
+// all 28 combinations, each written once in standard FX quoting convention
+// (higher-priority currency as the base: EUR > GBP > AUD > NZD > USD > CAD >
+// CHF > JPY) - plus gold/silver at the end.
 export const COMMON_PAIRS = [
-  'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
-  'EURGBP', 'EURJPY', 'GBPJPY', 'XAUUSD', 'XAGUSD',
+  'EURUSD', 'EURGBP', 'EURAUD', 'EURNZD', 'EURCAD', 'EURCHF', 'EURJPY',
+  'GBPUSD', 'GBPAUD', 'GBPNZD', 'GBPCAD', 'GBPCHF', 'GBPJPY',
+  'AUDUSD', 'AUDNZD', 'AUDCAD', 'AUDCHF', 'AUDJPY',
+  'NZDUSD', 'NZDCAD', 'NZDCHF', 'NZDJPY',
+  'USDCAD', 'USDCHF', 'USDJPY',
+  'CADCHF', 'CADJPY',
+  'CHFJPY',
+  'XAUUSD', 'XAGUSD',
 ];
 
 export type ChartDataset = {
