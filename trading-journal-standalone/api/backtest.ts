@@ -41,6 +41,14 @@ import { getUserFromRequest, isAdminEmail } from './_auth.js';
 //     a few minutes. All the actual SMC analysis (structure/OB/FVG/range/
 //     strategy evaluation) happens client-side in src/pages/ui/smc/ against
 //     these raw candles - this endpoint only ever returns OHLC data.
+//   resource=smc_candles_tf — the same fetch as smc_candles, but for ONE
+//     timeframe per request instead of all six bundled into a single
+//     response. SmcAnalysis.tsx calls this in a loop (one request per
+//     timeframe) so it can render each timeframe's data, and a running
+//     "N of 6 loaded" progress indicator, as results come in - rather than
+//     the page staring at a single blank loading state for however long the
+//     slowest timeframe (often the most heavily-throttled one, see the
+//     batchSize note in getSmcCandlesForTf) takes to resolve.
 //   resource=smc_markups — the user's own manually-drawn entry/SL/TP
 //     markups on the SMC Analysis page, graded client-side against one of
 //     the six strategy models (see src/pages/ui/smc/markupGrading.ts) and
@@ -481,6 +489,28 @@ async function smcCandles(sql: ReturnType<typeof db>, p: any) {
   return { pair, timeframes, errors, fetchedAt: new Date().toISOString() };
 }
 
+// One timeframe at a time, for the client to fetch progressively (see
+// resource=smc_candles_tf below) instead of waiting on the whole
+// smcCandles() sequence above to finish before showing anything. Reuses the
+// exact same fetch/cache/retry path as smcCandles - this is purely about
+// giving the client incremental results, not a second implementation of the
+// fetch logic to keep in sync.
+async function smcCandlesForTf(sql: ReturnType<typeof db>, p: any) {
+  const pair = String(p.pair ?? '').trim().toUpperCase();
+  const tf = String(p.tf ?? '').trim();
+  if (!pair) throw new Error('pair is required');
+  if (!(SMC_FETCH_TIMEFRAMES as readonly string[]).includes(tf)) {
+    throw new Error(`Unsupported timeframe "${tf}" - expected one of ${SMC_FETCH_TIMEFRAMES.join(', ')}.`);
+  }
+  try {
+    const candles = await getSmcCandlesForTf(sql, pair, tf);
+    return { pair, tf, candles, error: null };
+  } catch (e: any) {
+    console.error(`smcCandlesForTf: ${pair} ${tf} failed`, e);
+    return { pair, tf, candles: [] as Candle[], error: e?.message ?? 'Failed to load candles for this timeframe.' };
+  }
+}
+
 // --- Smart Money Concepts Analysis: user markups ----------------------------
 
 async function listSmcMarkups(sql: ReturnType<typeof db>, pair: string | null) {
@@ -664,6 +694,14 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(await smcCandles(sql, { pair }));
       return;
     }
+    if (resource === 'smc_candles_tf') {
+      const pairParam = req.query.pair;
+      const tfParam = req.query.tf;
+      const pair = Array.isArray(pairParam) ? pairParam[0] : pairParam;
+      const tf = Array.isArray(tfParam) ? tfParam[0] : tfParam;
+      res.status(200).json(await smcCandlesForTf(sql, { pair, tf }));
+      return;
+    }
     if (resource === 'smc_markups') {
       const pairParam = req.query.pair;
       const pair = Array.isArray(pairParam) ? pairParam[0] : pairParam;
@@ -678,7 +716,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(await listSmcChartMarkups(sql, pair ? String(pair).trim().toUpperCase() : null, timeframe ? String(timeframe).trim() : null));
       return;
     }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", "smc_candles", "smc_markups", or "smc_chart_markups"' });
+    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", "smc_candles", "smc_candles_tf", "smc_markups", or "smc_chart_markups"' });
   } else if (req.method === 'POST') {
     if (resource === 'datasets') { res.status(200).json(await upsertDataset(sql, req.body)); return; }
     if (resource === 'trades') { res.status(200).json(await addTrade(sql, req.body)); return; }

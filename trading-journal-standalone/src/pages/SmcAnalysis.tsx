@@ -10,7 +10,7 @@ import {
   SMC_TIMEFRAMES, SMC_TIMEFRAME_LABELS, SmcTimeframe, Candle, MultiTfAnalysis,
   Direction, StrategyModelKey, SmcMarkup, StrategyEvaluation,
 } from './ui/smc/types';
-import { analyzeAll } from './ui/smc/marketStructure';
+import { analyzeAll, resampleWeekly } from './ui/smc/marketStructure';
 import { STRATEGY_MODEL_NAMES, STRATEGY_MODEL_ENTRY_TF } from './ui/smc/strategyModels';
 import { gradeMarkup } from './ui/smc/markupGrading';
 import SmcChart from './ui/smc/SmcChart';
@@ -20,6 +20,17 @@ import ChartMarkupPanel from './ui/smc/ChartMarkupPanel';
 import MultiTfSummaryTable from './ui/smc/MultiTfSummaryTable';
 
 const DEFAULT_PAIR = 'GBPUSD';
+
+// Fetched one timeframe at a time (see loadCandles below and
+// resource=smc_candles_tf in api/backtest.ts), lowest-latency/most-likely-
+// to-succeed first: Daily and 1H need very few underlying Dukascopy files
+// per api/backtest.ts's batchSize comment, so those - the timeframes the
+// Strategy Models panel leans on most for higher-timeframe bias - are
+// usually the first two chips to light up, even on a cold cache where a
+// file-hungry window like 15m/5m takes longer or needs a retry. '1w' isn't
+// listed since it's derived client-side from '1d' the moment that resolves,
+// not fetched on its own.
+const CANDLE_FETCH_ORDER: SmcTimeframe[] = ['1d', '4h', '1h', '15m', '5m', '1m'];
 
 const POSITION_STYLE: Record<string, string> = {
   premium: 'bg-red-500/15 text-red-600 dark:text-red-400',
@@ -56,10 +67,12 @@ function StructureSummary({ tf, bundle }: { tf: SmcTimeframe; bundle: MultiTfAna
 
 export default function SmcAnalysis() {
   const [pair, setPair] = useState(DEFAULT_PAIR);
-  const [pairInput, setPairInput] = useState(DEFAULT_PAIR);
   const [rawCandles, setRawCandles] = useState<Partial<Record<SmcTimeframe, Candle[]>> | null>(null);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // "N of 6 timeframes loaded" - null while nothing is in flight, so the
+  // progress bar below only ever shows during an actual load.
+  const [loadProgress, setLoadProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Per-timeframe fetch errors (e.g. one TF still hitting a Dukascopy 429
   // after retries) - the request as a whole no longer throws for this, so
@@ -88,32 +101,64 @@ export default function SmcAnalysis() {
   const { data: rawMarkups, refetch: refetchMarkups } = useFetch<SmcMarkup[]>(`/backtest?resource=smc_markups&pair=${encodeURIComponent(pair)}`);
   const markups = rawMarkups ?? [];
 
+  // Bumped on every loadCandles() call so a load that's superseded by a
+  // newer one (the user picks a different pair, or clicks Refresh again,
+  // before the first finishes) can tell it's stale and stop touching state -
+  // without this, six sequential per-timeframe requests per load gives a
+  // second, overlapping load plenty of opportunity to interleave with the
+  // first and leave rawCandles/loadProgress showing a mix of two pairs'
+  // results. A single bulk request had this same theoretical gap before,
+  // but one request resolving out of order is a much smaller window than
+  // six resolving out of order.
+  const loadTokenRef = useRef(0);
+
+  // Fetches all 6 real (non-derived) timeframes ONE AT A TIME via
+  // resource=smc_candles_tf, updating rawCandles/candleErrors/loadProgress
+  // after EACH one resolves - not just once at the very end. That's what
+  // lets already-loaded tabs and summary chips go live while later
+  // timeframes are still in flight, and what gives loadProgress a real
+  // "N of 6" to report instead of a single opaque wait. '1w' is derived
+  // client-side the moment '1d' comes back, via the same resampleWeekly
+  // logic the server used to run for the old bulk endpoint.
   async function loadCandles(p: string) {
+    const myToken = ++loadTokenRef.current;
     setLoading(true);
     setError(null);
-    try {
-      const data = await api.get(`/backtest?resource=smc_candles&pair=${encodeURIComponent(p)}`);
-      setRawCandles(data.timeframes);
-      setFetchedAt(data.fetchedAt);
-      setCandleErrors(data.errors ?? {});
-    } catch (e: any) {
-      setError(e.message ?? 'Failed to load candle data.');
-    } finally {
-      setLoading(false);
+    setCandleErrors({});
+    setLoadProgress({ done: 0, total: CANDLE_FETCH_ORDER.length });
+    const nextCandles: Partial<Record<SmcTimeframe, Candle[]>> = {};
+    const nextErrors: Record<string, string> = {};
+    for (let i = 0; i < CANDLE_FETCH_ORDER.length; i++) {
+      const tf = CANDLE_FETCH_ORDER[i];
+      try {
+        const data = await api.get(`/backtest?resource=smc_candles_tf&pair=${encodeURIComponent(p)}&tf=${tf}`);
+        if (loadTokenRef.current !== myToken) return; // superseded mid-flight
+        nextCandles[tf] = data.candles ?? [];
+        if (data.error) nextErrors[tf] = data.error;
+        if (tf === '1d') nextCandles['1w'] = resampleWeekly(nextCandles['1d'] ?? []);
+      } catch (e: any) {
+        if (loadTokenRef.current !== myToken) return;
+        nextCandles[tf] = [];
+        nextErrors[tf] = e.message ?? 'Failed to load candles for this timeframe.';
+      }
+      setRawCandles({ ...nextCandles });
+      setCandleErrors({ ...nextErrors });
+      setLoadProgress({ done: i + 1, total: CANDLE_FETCH_ORDER.length });
     }
+    // Every single timeframe failing is worth a loud page-wide banner (e.g.
+    // Dukascopy fully down, or a pair it doesn't recognize) - one timeframe
+    // failing is just that tab's own "temporarily unavailable" notice.
+    if (Object.keys(nextErrors).length === CANDLE_FETCH_ORDER.length) {
+      setError(`Failed to load candle data for ${p}: ${nextErrors[CANDLE_FETCH_ORDER[0]]}`);
+    }
+    setFetchedAt(new Date().toISOString());
+    setLoading(false);
+    setLoadProgress(null);
   }
 
   useEffect(() => { loadCandles(pair); }, [pair]);
 
   const bundle: MultiTfAnalysis = useMemo(() => analyzeAll(pair, rawCandles ?? {}), [pair, rawCandles]);
-
-  function handlePairSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const next = pairInput.trim().toUpperCase();
-    if (!next) return;
-    setPair(next);
-    setGradeResult(null);
-  }
 
   // Arming a "pick from chart" field also jumps the active tab to the
   // markup's own timeframe - without this, clicking the crosshair button
@@ -207,21 +252,42 @@ export default function SmcAnalysis() {
             market-structure-hierarchy / PD-array framework. Second opinion only — see the note at the bottom before acting on anything here.
           </p>
         </div>
-        <form onSubmit={handlePairSubmit} className="flex items-center gap-2">
-          <Input list="smc-pairs" value={pairInput} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPairInput(e.target.value)} className="w-32 uppercase" placeholder="GBPUSD" />
-          <datalist id="smc-pairs">{COMMON_PAIRS.map(p => <option key={p} value={p} />)}</datalist>
-          <Button type="submit" size="sm" variant="outline">Load</Button>
+        <div className="flex items-center gap-2">
+          <Select
+            value={pair}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { setPair(e.target.value); setGradeResult(null); }}
+            className="w-40"
+          >
+            {COMMON_PAIRS.map(p => <option key={p} value={p}>{p}</option>)}
+          </Select>
           <Button type="button" size="sm" onClick={() => loadCandles(pair)} disabled={loading}>
             {loading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />} Refresh
           </Button>
-        </form>
+        </div>
       </div>
 
-      {fetchedAt && <p className="text-[11px] text-muted-foreground mb-2">Candles last fetched {new Date(fetchedAt).toLocaleString()} for {pair}.</p>}
+      {fetchedAt && !loading && <p className="text-[11px] text-muted-foreground mb-2">Candles last fetched {new Date(fetchedAt).toLocaleString()} for {pair}.</p>}
+      {loading && loadProgress && (
+        // Candles now load one timeframe at a time (see loadCandles /
+        // resource=smc_candles_tf), which takes noticeably longer than the
+        // old single bulk fetch, especially now that Dukascopy's own
+        // internal batching is throttled too (see api/backtest.ts) - a bare
+        // spinner with no sense of progress was the actual complaint. This
+        // fills in as each timeframe resolves, success or failure either way.
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-40 h-1.5 rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-300"
+              style={{ width: `${Math.round((loadProgress.done / loadProgress.total) * 100)}%` }}
+            />
+          </div>
+          <span className="text-[11px] text-muted-foreground">Loading candles… {loadProgress.done}/{loadProgress.total} timeframes</span>
+        </div>
+      )}
       {error && <Card className="mb-4"><CardContent className="pt-4 pb-4 text-sm text-destructive">{error}</CardContent></Card>}
 
       <div className="mb-4">
-        <MultiTfSummaryTable bundle={bundle} activeTf={activeTf} onSelect={setActiveTf} />
+        <MultiTfSummaryTable bundle={bundle} activeTf={activeTf} onSelect={setActiveTf} loading={loading} errors={candleErrors} />
       </div>
 
       <div ref={tabsRef} />
@@ -259,13 +325,19 @@ export default function SmcAnalysis() {
               </div>
             ) : (
               <Card><CardContent className="pt-6 pb-6 text-center text-sm text-muted-foreground flex flex-col items-center justify-center gap-2">
-                {loading ? (
-                  <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading {SMC_TIMEFRAME_LABELS[tf]} candles…</span>
-                ) : candleErrors[tf] ? (
+                {candleErrors[tf] ? (
+                  // Checked BEFORE `loading` on purpose: candles now load one
+                  // timeframe at a time (see loadCandles), so this specific
+                  // tab can already know it failed while `loading` is still
+                  // true overall for whichever timeframe is fetching next -
+                  // without this order, a failed tab would keep showing
+                  // "Loading…" indefinitely until every other tab finished.
                   <>
                     <span>{SMC_TIMEFRAME_LABELS[tf]} data is temporarily unavailable — Dukascopy's feed rate-limited this timeframe.</span>
                     <Button type="button" size="sm" variant="outline" onClick={() => loadCandles(pair)} disabled={loading}>Try refreshing</Button>
                   </>
+                ) : loading ? (
+                  <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading {SMC_TIMEFRAME_LABELS[tf]} candles…</span>
                 ) : (
                   `No ${SMC_TIMEFRAME_LABELS[tf]} data yet.`
                 )}

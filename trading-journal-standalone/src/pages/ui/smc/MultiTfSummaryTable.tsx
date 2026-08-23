@@ -1,3 +1,4 @@
+import { Loader2 } from 'lucide-react';
 import { Card, CardContent } from '../../../lib/ui/card';
 import { Badge } from '../../../lib/ui/form';
 import { SMC_TIMEFRAMES, SMC_TIMEFRAME_LABELS, SmcTimeframe, MultiTfAnalysis } from './types';
@@ -15,6 +16,16 @@ type Props = {
   bundle: MultiTfAnalysis;
   activeTf: SmcTimeframe;
   onSelect: (tf: SmcTimeframe) => void;
+  // Both optional so this component still works with just a finished
+  // bundle and no in-flight fetch to describe (e.g. if it's ever reused
+  // somewhere that already has all its data). When set, a timeframe with no
+  // data yet shows a spinner instead of a flat "No data" IF the overall
+  // fetch is still running and this specific timeframe hasn't already come
+  // back with an error - once SmcAnalysis.tsx's per-timeframe fetch loop
+  // (see loadCandles) reaches and resolves this timeframe, it's no longer
+  // "pending" even while later timeframes in the loop are still loading.
+  loading?: boolean;
+  errors?: Record<string, string>;
 };
 
 // Quick multi-timeframe bias check: trend + Premium/Discount/Equilibrium
@@ -23,7 +34,7 @@ type Props = {
 // left most of the page empty around a small box in the corner; this fills
 // the same width the header/tabs already use, so no space goes to waste.
 // Clicking a chip jumps straight to that timeframe's tab below.
-export default function MultiTfSummaryTable({ bundle, activeTf, onSelect }: Props) {
+export default function MultiTfSummaryTable({ bundle, activeTf, onSelect, loading = false, errors = {} }: Props) {
   return (
     <Card>
       <CardContent className="p-2">
@@ -31,6 +42,7 @@ export default function MultiTfSummaryTable({ bundle, activeTf, onSelect }: Prop
           {SMC_TIMEFRAMES.map(tf => {
             const a = bundle[tf];
             const hasData = !!a && a.candles.length > 0;
+            const pending = !hasData && loading && !errors[tf];
             return (
               <button
                 key={tf}
@@ -52,6 +64,10 @@ export default function MultiTfSummaryTable({ bundle, activeTf, onSelect }: Prop
                       <span className="text-[11px] text-muted-foreground">—</span>
                     )}
                   </>
+                ) : pending ? (
+                  <span className="text-[11px] text-muted-foreground flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Loading…</span>
+                ) : errors[tf] ? (
+                  <span className="text-[11px] text-amber-600 dark:text-amber-400">Unavailable</span>
                 ) : (
                   <span className="text-[11px] text-muted-foreground">No data</span>
                 )}
