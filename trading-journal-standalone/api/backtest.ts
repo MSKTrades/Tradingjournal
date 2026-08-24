@@ -312,8 +312,21 @@ async function addDrawing(sql: ReturnType<typeof db>, p: any) {
 // keeping the windows small keeps every timeframe's fetch fast enough that
 // a cold cache (all 6 timeframes fetched in parallel) still comfortably
 // fits inside this function's time budget.
-const SMC_WINDOW_DAYS: Record<string, number> = { '1m': 3, '5m': 7, '15m': 14, '1h': 60, '4h': 180, '1d': 500 };
-const SMC_CACHE_TTL_SECONDS: Record<string, number> = { '1m': 300, '5m': 300, '15m': 900, '1h': 900, '4h': 3600, '1d': 3600 };
+// Shrunk from the original 3/7/14/60/180/500 after production evidence (see
+// getSmcCandlesForTf) showed even a heavily-throttled internal fetch still
+// tripped Dukascopy's rate limit on every file-hungry window. Fewer days =
+// fewer underlying daily/monthly files dukascopy-node has to pull per
+// request, which is the actual lever that matters here - halving 15m/5m/4h's
+// windows roughly halves their file counts (15m: 14->7 files, 5m: 7->4,
+// 4h: ~6->~3), cutting the total requests fired in one pull.
+const SMC_WINDOW_DAYS: Record<string, number> = { '1m': 3, '5m': 4, '15m': 7, '1h': 60, '4h': 90, '1d': 500 };
+// Lengthened alongside the window shrink above: the goal isn't just
+// surviving one cold fetch, it's not re-triggering Dukascopy at all once a
+// timeframe has succeeded. Switching timeframe tabs, reloading the page, or
+// (as actually happened) checking several pairs back-to-back within a few
+// minutes was re-hitting Dukascopy well within the old TTLs. Longer TTLs
+// mean a successful fetch stays good through that kind of normal browsing.
+const SMC_CACHE_TTL_SECONDS: Record<string, number> = { '1m': 450, '5m': 600, '15m': 1500, '1h': 1500, '4h': 5400, '1d': 7200 };
 const SMC_FETCH_TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'] as const;
 
 // Weekly candles for the SMC page: dukascopy-node's own Timeframe type has
@@ -374,36 +387,80 @@ async function getSmcCandlesForTf(sql: ReturnType<typeof db>, pair: string, tf: 
   const from = new Date(to.getTime() - days * 86400 * 1000);
   let raw: any[];
   try {
-    raw = (await getHistoricalRates({
+    // --- Second pass at this, based on real production 429s -----------------
+    // The first fix here (batchSize: 3, retryCount: 3) was a guess I could
+    // never test live - and production logs after it shipped showed it
+    // wasn't enough: 4h/1h/15m/5m/1m all still failed on a cold pair. Reading
+    // dukascopy-node's actual retry code (node_modules/dukascopy-node/dist/
+    // index.js, fetchBuffer/fetchBatch) turned up why retryCount was very
+    // likely making things WORSE, not better: retries happen PER FILE, and
+    // every file in a batch retries CONCURRENTLY (Promise.all), each on its
+    // own short pauseBetweenRetriesMs. So the moment Dukascopy starts
+    // rate-limiting, batchSize=3 + retryCount=3 doesn't back off - it fires
+    // 3 concurrent requests, retries all 3 again ~1.2-1.8s later, and again,
+    // up to 4 attempts each = up to 12 requests per single batch, repeated
+    // across every remaining batch, all within a few seconds. That's hammering
+    // an endpoint that just told us to slow down, which is the opposite of
+    // what a 429 means.
+    //
+    // This pass removes that compounding: batchSize is now 1 (fully serial
+    // file fetches, no internal concurrency at all), and retryCount is
+    // trimmed to 1 (one quick internal retry per file, for a genuinely
+    // transient blip) instead of 3. Note this can't go all the way to
+    // retryCount: 0 - I tried that first, and local testing against this
+    // dukascopy-node version caught a real bug in that plan before it
+    // shipped: with retryCount 0, the library's failAfterRetryCount check
+    // (`retryCount > 0 && failAfterRetryCount`) never fires, so a failed file
+    // does NOT throw - it silently resolves as an empty buffer, and
+    // getHistoricalRates returns as if it "succeeded" with less (or zero)
+    // data. That would have broken every downstream failure behavior at
+    // once: no exception for the outer retry below to react to, no stale-
+    // cache fallback, and the UI's "temporarily unavailable - try
+    // refreshing" notice would silently become an empty "No data" tab
+    // instead, with nothing logged to explain why. retryCount: 1 keeps a real
+    // exception on the failure path while still capping the damage to one
+    // extra request per file, and since batchSize is 1 there's no
+    // concurrency to compound it with - and a file that ultimately fails
+    // throws immediately rather than letting the batch continue on to the
+    // rest, so a block is detected (and this whole call gives up) on the
+    // very first file rather than after working through the entire window.
+    //
+    // On top of that per-file behavior, there's exactly ONE whole-call retry
+    // below, after several full seconds of pause - long enough to plausibly
+    // be outside Dukascopy's rate-limit window, and only one attempt so a
+    // genuine block still fails fast into the stale-cache fallback a few
+    // lines down instead of burning the rest of this function's time budget.
+    // Paired with the shrunk SMC_WINDOW_DAYS above (fewer files needed in the
+    // first place) and the longer SMC_CACHE_TTL_SECONDS (fewer repeat
+    // fetches once one succeeds), this is a meaningfully different approach
+    // from the last attempt, not just a smaller version of the same knob
+    // turn - but I still can't fire a real request AT Dukascopy from where
+    // I'm working (only confirmed the retry-path mechanics against local
+    // fixtures), so whether this actually clears the rate limit is still
+    // unverified against the live feed. If 4h/1h/15m/5m still fail after
+    // this ships, the logs will at least show whether it's the *first*
+    // attempt failing (Dukascopy's limit is tighter than this accounts for)
+    // or the *retry* failing too (the backoff pause itself needs
+    // lengthening).
+    const dukaOpts = {
       instrument: pair.toLowerCase() as any,
       dates: { from, to },
       timeframe: dukaTf as any,
-      priceType: 'bid',
-      format: 'json',
+      priceType: 'bid' as const,
+      format: 'json' as const,
       useCache: false,
-      // Dukascopy's public feed rate-limits by request burst. Sequencing the
-      // six timeframes below (see smcCandles) turned out to only be HALF the
-      // fix: dukascopy-node fetches the underlying daily/monthly/yearly data
-      // files for one timeframe in its OWN internal batches too, and its
-      // default is batchSize=10 with only a 1s pause between batches. A
-      // file-hungry window - 15m over a 14-day lookback needs 14 daily
-      // files, 5m over 7 days needs 7 - was firing up to 10 of those file
-      // requests at Dukascopy CONCURRENTLY from inside a single call, which
-      // is enough to trip the rate limit on its own even with every
-      // timeframe's top-level call already sequenced one-at-a-time. That's
-      // why 15m/5m/4h (the file-hungriest windows) were the ones actually
-      // seen failing on a cold cache, while 1h/1d (2 files each) sailed
-      // through - and why the failures cascaded to neighboring timeframes
-      // fetched shortly after, since Dukascopy's cooldown outlasts a single
-      // request. Capping batchSize here keeps every single timeframe's OWN
-      // fetch under that burst threshold too, not just the sequence across
-      // timeframes.
-      batchSize: 3,
-      pauseBetweenBatchesMs: 1200,
-      retryCount: 3,
-      pauseBetweenRetriesMs: 1200 + Math.floor(Math.random() * 600),
+      batchSize: 1,
+      pauseBetweenBatchesMs: 1500,
+      retryCount: 1,
+      pauseBetweenRetriesMs: 1000,
       failAfterRetryCount: true,
-    })) as any[];
+    };
+    try {
+      raw = (await getHistoricalRates(dukaOpts)) as any[];
+    } catch (firstErr) {
+      await new Promise(resolve => setTimeout(resolve, 4000 + Math.floor(Math.random() * 1500)));
+      raw = (await getHistoricalRates(dukaOpts)) as any[];
+    }
   } catch (e: any) {
     // A fetch failure falls back to whatever's cached (even if stale)
     // rather than breaking the whole page - one timeframe being a bit

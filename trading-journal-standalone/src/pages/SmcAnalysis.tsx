@@ -130,6 +130,15 @@ export default function SmcAnalysis() {
     const nextErrors: Record<string, string> = {};
     for (let i = 0; i < CANDLE_FETCH_ORDER.length; i++) {
       const tf = CANDLE_FETCH_ORDER[i];
+      // A small stagger before every request after the first. These six
+      // calls are separate serverless invocations that each pull a handful
+      // of files from Dukascopy - firing them back-to-back the instant one
+      // resolves gives Dukascopy no breathing room between them. This is
+      // deliberately small (it shouldn't make the page feel slow) but real
+      // production evidence showed the previous zero-gap version still
+      // tripped the rate limit on almost every intraday timeframe.
+      if (i > 0) await new Promise(resolve => setTimeout(resolve, 600));
+      if (loadTokenRef.current !== myToken) return; // superseded during the stagger
       try {
         const data = await api.get(`/backtest?resource=smc_candles_tf&pair=${encodeURIComponent(p)}&tf=${tf}`);
         if (loadTokenRef.current !== myToken) return; // superseded mid-flight
