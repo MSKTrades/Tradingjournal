@@ -1,5 +1,5 @@
 // Domain model for the Smart Money Concepts (SMC) Analysis feature, built
-// around Lewis Kelly / Prosperity Academy's framework as described to us:
+// around a standard ICT/SMC market-structure-hierarchy framework:
 // market structure hierarchy (Orderflow/External -> Trend/Internal ->
 // Sub-structure), liquidity dynamics (ERL vs IRL: EQH/EQL, FVGs,
 // inducement), and Premium/Discount arrays (50% equilibrium on the active

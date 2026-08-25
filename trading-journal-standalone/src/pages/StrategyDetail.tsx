@@ -99,9 +99,21 @@ export default function StrategyDetail() {
     refetchTrades();
   }
 
-  async function handleAddCol(name: string, type: string) {
+  async function handleAddCol(name: string, type: string, accountIds?: number[]) {
     const col_key = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    await api.post('/columns', { name, col_key, data_type: type, account_id: activeAccountId });
+    if (accountIds && accountIds.length > 0) {
+      await api.post('/columns', { name, col_key, data_type: type, account_ids: accountIds });
+    } else {
+      await api.post('/columns', { name, col_key, data_type: type, account_id: activeAccountId });
+    }
+    refetchCols();
+  }
+  async function handleRenameCol(id: number, name: string) {
+    await api.put('/columns', { id, name });
+    refetchCols();
+  }
+  async function handleDeleteCol(id: number) {
+    await api.del(`/columns?id=${id}`);
     refetchCols();
   }
 
@@ -299,6 +311,8 @@ export default function StrategyDetail() {
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
         onAddCustomColumn={handleAddCol}
+        onDeleteCustomColumn={handleDeleteCol}
+        onRenameCustomColumn={handleRenameCol}
       />
     </div>
   );

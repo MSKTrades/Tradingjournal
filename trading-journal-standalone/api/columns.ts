@@ -549,6 +549,44 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(rows[0]);
       return;
     }
+    // Multi-account creation: pass account_ids (an array) instead of a
+    // single account_id to provision the SAME field (identical name AND
+    // col_key) on every one of those accounts in one call, mirroring how a
+    // Strategy's own "Applies To" picker already works. This exists because
+    // custom fields used to only ever get created one account at a time
+    // (whichever account happened to be active) - a strategy meant to run
+    // across several accounts, or a field a trader wants everywhere, needed
+    // manually re-adding on each account separately, and it was extremely
+    // easy for the name to be typed slightly differently the second time
+    // (extra space, different capitalization/punctuation), silently
+    // deriving a DIFFERENT col_key on that account. Since a strategy's
+    // Filter Conditions and the Summary page both match a field purely by
+    // its col_key string against trades.extra_data, that divergence is
+    // exactly what made a condition or a summary total quietly stop picking
+    // up values on some accounts but not others - not a bug in the lookup
+    // itself, but a data-entry footgun this endpoint removes by deriving
+    // the col_key ONCE here and reusing it for every account in the list.
+    if (Array.isArray(p.account_ids)) {
+      const ids = p.account_ids.map((x: any) => Number(x)).filter((x: number) => x && !isNaN(x));
+      if (ids.length === 0) { res.status(400).json({ error: 'account_ids must contain at least one account id' }); return; }
+      const ownRows = await sql.unsafe('SELECT id FROM accounts WHERE id = ANY($1) AND user_id = $2', [ids, userId]);
+      const ownedIds = new Set(ownRows.map((r: any) => r.id));
+      const results: any[] = [];
+      for (const accountId of ids) {
+        if (!ownedIds.has(accountId)) continue; // silently skip accounts this user doesn't own rather than 404ing the whole batch
+        const existing = await sql.unsafe('SELECT * FROM custom_columns WHERE account_id = $1 AND col_key = $2', [accountId, p.col_key]);
+        if (existing.length > 0) { results.push(existing[0]); continue; }
+        const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM custom_columns WHERE account_id = $1', [accountId]);
+        const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
+        const rows = await sql.unsafe(
+          `INSERT INTO custom_columns (name, col_key, data_type, sort_order, account_id) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          [p.name, p.col_key, p.data_type ?? 'text', nextOrder, accountId]
+        );
+        results.push(rows[0]);
+      }
+      res.status(200).json({ columns: results });
+      return;
+    }
     const accountId = Number(p.account_id);
     if (!accountId || isNaN(accountId)) { res.status(400).json({ error: 'account_id is required' }); return; }
     const ownRows = await sql.unsafe('SELECT 1 FROM accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
@@ -565,6 +603,28 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       `INSERT INTO custom_columns (name, col_key, data_type, sort_order, account_id) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [p.name, p.col_key, p.data_type ?? 'text', nextOrder, accountId]
     );
+    res.status(200).json(rows[0]);
+  } else if (req.method === 'PUT') {
+    // Rename only - col_key is deliberately immutable once created. It's
+    // the literal key strategies' Filter Conditions and every trade's
+    // extra_data already reference; changing it would silently disconnect
+    // every existing condition and every already-logged value from this
+    // field with no way for the user to notice until numbers stopped
+    // adding up. The display name has no such downstream dependency, so
+    // it's free to rename any time - "I created this field with the wrong
+    // label" is fixed here without touching data.
+    const p = req.body;
+    const id = Number(p.id);
+    const name = String(p.name ?? '').trim();
+    if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
+    if (!name) { res.status(400).json({ error: 'name is required' }); return; }
+    const rows = await sql.unsafe(
+      `UPDATE custom_columns cc SET name = $1 FROM accounts a
+       WHERE cc.id = $2 AND a.id = cc.account_id AND a.user_id = $3
+       RETURNING cc.*`,
+      [name, id, userId]
+    );
+    if (!rows[0]) { res.status(404).json({ error: 'Custom field not found' }); return; }
     res.status(200).json(rows[0]);
   } else if (req.method === 'DELETE') {
     const id = Number(req.query.id);
@@ -588,12 +648,21 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json({ deleted: 1 });
       return;
     }
-    await sql.unsafe(
+    // RETURNING + checking the row count matters here (found while testing
+    // the new rename/delete UI): without it, a delete attempt against a
+    // field id that exists but belongs to a different user's account
+    // silently matches zero rows yet still reports {"deleted": 1} back to
+    // the caller - nothing is actually leaked or removed since the WHERE
+    // clause already scopes by user_id, but the UI would show a false
+    // "deleted" confirmation for a field that's still sitting there.
+    const deletedRows = await sql.unsafe(
       `DELETE FROM custom_columns cc USING accounts a
-       WHERE cc.id = $1 AND a.id = cc.account_id AND a.user_id = $2`,
+       WHERE cc.id = $1 AND a.id = cc.account_id AND a.user_id = $2
+       RETURNING cc.id`,
       [id, userId]
     );
-    res.status(200).json({ deleted: 1 });
+    if (deletedRows.length === 0) { res.status(404).json({ error: 'Custom field not found' }); return; }
+    res.status(200).json({ deleted: deletedRows.length });
   } else {
     res.status(405).json({ error: 'Method not allowed' });
   }

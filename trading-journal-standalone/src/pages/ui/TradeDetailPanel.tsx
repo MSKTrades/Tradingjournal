@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3, Pencil, Check, Trash2 } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
@@ -68,7 +68,13 @@ type Props = {
   trades: Trade[];
   onSave: (t: TradePayload) => Promise<void>;
   onClose: () => void;
-  onAddCustomColumn: (name: string, type: string) => Promise<void>;
+  onAddCustomColumn: (name: string, type: string, accountIds?: number[]) => Promise<void>;
+  // Optional so any existing caller that hasn't wired these up yet still
+  // compiles - they just won't show the rename/delete affordance below
+  // (matches how onAddCustomColumn already handled a missing account list
+  // before this).
+  onDeleteCustomColumn?: (id: number) => Promise<void>;
+  onRenameCustomColumn?: (id: number, name: string) => Promise<void>;
 };
 
 const INSTRUMENTS = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'GBPJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAGUSD'];
@@ -197,6 +203,7 @@ function NumField({ label, value, onChange, step = 0.01, min, placeholder }: {
 
 export default function TradeDetailPanel({
   open, trade, customColumns, checklists, nextTradeNumber, trades, onSave, onClose, onAddCustomColumn,
+  onDeleteCustomColumn, onRenameCustomColumn,
 }: Props) {
   const { accounts, activeAccountId } = useAccount();
   const [form, setForm] = useState<TradePayload>(() => empty(activeAccountId ?? 0, nextTradeNumber));
@@ -206,6 +213,17 @@ export default function TradeDetailPanel({
   const [addingField, setAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState('text');
+  // Which OTHER accounts (besides whichever is active right now) to also
+  // create the new field on - see handleAddField below and the comment on
+  // ManageColumnsDialog's matching picker for why this exists.
+  const [newFieldAccountIds, setNewFieldAccountIds] = useState<number[]>([]);
+  const otherAccountsForNewField = accounts.filter(a => a.id !== activeAccountId);
+  // Inline rename of an existing custom field's label (not its col_key -
+  // see the comment on api/columns.ts's PUT handler for why the key itself
+  // never changes).
+  const [editingColId, setEditingColId] = useState<number | null>(null);
+  const [editingColName, setEditingColName] = useState('');
+  const [renamingCol, setRenamingCol] = useState(false);
   const { data: rawTagGroups, refetch: refetchTagGroups } = useFetch<TagGroup[]>('/columns?resource=tag_groups');
   const tagGroups: TagGroup[] = rawTagGroups ?? [];
 
@@ -413,11 +431,36 @@ export default function TradeDetailPanel({
     if (!trimmed) return;
     setAddingField(true);
     try {
-      await onAddCustomColumn(trimmed, newFieldType);
+      const ids = newFieldAccountIds.length > 0 && activeAccountId ? [activeAccountId, ...newFieldAccountIds] : undefined;
+      await onAddCustomColumn(trimmed, newFieldType, ids);
       setNewFieldName('');
       setNewFieldType('text');
+      setNewFieldAccountIds([]);
     } finally {
       setAddingField(false);
+    }
+  }
+  function toggleNewFieldAccount(id: number) {
+    setNewFieldAccountIds(prev => prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]);
+  }
+
+  function startEditCol(colId: number, name: string) {
+    setEditingColId(colId);
+    setEditingColName(name);
+  }
+  function cancelEditCol() {
+    setEditingColId(null);
+    setEditingColName('');
+  }
+  async function saveEditCol() {
+    const trimmed = editingColName.trim();
+    if (!trimmed || editingColId == null || !onRenameCustomColumn) { cancelEditCol(); return; }
+    setRenamingCol(true);
+    try {
+      await onRenameCustomColumn(editingColId, trimmed);
+      cancelEditCol();
+    } finally {
+      setRenamingCol(false);
     }
   }
 
@@ -676,15 +719,47 @@ export default function TradeDetailPanel({
               subtitle={customColumns.length ? `${customColumns.length} custom field${customColumns.length === 1 ? '' : 's'}` : 'Add your own fields for anything else you track'}
             >
               {customColumns.length > 0 && customColumns.map(col => (
-                <FieldRow key={col.col_key} label={col.name}>
-                  <Input
-                    type={col.data_type === 'number' ? 'number' : 'text'}
-                    value={String(form.extra_data[col.col_key] ?? '')}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setExtra(col.col_key, col.data_type === 'number' ? Number(e.target.value) : e.target.value)
-                    }
-                  />
-                </FieldRow>
+                editingColId === col.id ? (
+                  <div key={col.col_key} className="flex items-center gap-1.5">
+                    <Input
+                      autoFocus
+                      value={editingColName}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditingColName(e.target.value)}
+                      onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') saveEditCol(); if (e.key === 'Escape') cancelEditCol(); }}
+                      className={cn('text-xs', FIELD_LABEL_WIDTH)}
+                    />
+                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-green-600 dark:text-green-400" disabled={renamingCol} onClick={saveEditCol}>
+                      <Check className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground" onClick={cancelEditCol}>
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div key={col.col_key} className="flex items-center gap-1 group">
+                    <FieldRow label={col.name}>
+                      <Input
+                        type={col.data_type === 'number' ? 'number' : 'text'}
+                        value={String(form.extra_data[col.col_key] ?? '')}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setExtra(col.col_key, col.data_type === 'number' ? Number(e.target.value) : e.target.value)
+                        }
+                      />
+                    </FieldRow>
+                    {onRenameCustomColumn && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                        onClick={() => startEditCol(col.id, col.name)} title="Rename field">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                    {onDeleteCustomColumn && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => onDeleteCustomColumn(col.id)} title="Delete field">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                )
               ))}
 
               {!addingField ? (
@@ -711,10 +786,30 @@ export default function TradeDetailPanel({
                       <option value="boolean">Yes / No</option>
                     </Select>
                     <Button size="sm" onClick={handleAddField} disabled={!newFieldName.trim()}>Add</Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setAddingField(false); setNewFieldName(''); }}>
+                    <Button size="sm" variant="ghost" onClick={() => { setAddingField(false); setNewFieldName(''); setNewFieldAccountIds([]); }}>
                       <X className="w-3.5 h-3.5" />
                     </Button>
                   </div>
+                  {otherAccountsForNewField.length > 0 && (
+                    <div className="flex flex-col gap-1">
+                      <p className="text-[11px] text-muted-foreground">Also add to (besides {activeAccountId ? accounts.find(a => a.id === activeAccountId)?.name ?? 'this account' : 'this account'}):</p>
+                      <div className="flex flex-wrap gap-1">
+                        {otherAccountsForNewField.map(a => (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => toggleNewFieldAccount(a.id)}
+                            className={cn(
+                              'px-1.5 py-0.5 rounded text-[11px] font-medium border transition-colors',
+                              newFieldAccountIds.includes(a.id) ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-border hover:border-foreground/40'
+                            )}
+                          >
+                            {a.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </CollapsibleSection>

@@ -257,7 +257,7 @@ export default function SmcAnalysis() {
         <div>
           <h1 className="text-xl font-bold">Smart Money Concepts Analysis</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Live structure, liquidity, Order Blocks and FVGs across 7 timeframes — read against Lewis Kelly's
+            Live structure, liquidity, Order Blocks and FVGs across 7 timeframes — read against a standard ICT/SMC
             market-structure-hierarchy / PD-array framework. Second opinion only — see the note at the bottom before acting on anything here.
           </p>
         </div>

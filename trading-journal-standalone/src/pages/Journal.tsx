@@ -490,11 +490,24 @@ export default function Journal() {
     });
   }
 
-  async function handleAddCol(name: string, type: string) {
+  async function handleAddCol(name: string, type: string, accountIds?: number[]) {
     const col_key = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    // Scoped to whichever account is currently active — a field added here
-    // only shows up on this account going forward, not every account.
-    await api.post('/columns', { name, col_key, data_type: type, account_id: activeAccountId });
+    // Scoped to whichever account is currently active by default — a field
+    // added here only shows up on this account going forward, not every
+    // account. Passing accountIds (from the "Also add to" picker) instead
+    // creates the SAME name+col_key on every one of those accounts in one
+    // call, so a field meant for a strategy that spans several accounts
+    // actually has a matching key on all of them - see the comment on
+    // api/columns.ts's account_ids branch for why that matters.
+    if (accountIds && accountIds.length > 0) {
+      await api.post('/columns', { name, col_key, data_type: type, account_ids: accountIds });
+    } else {
+      await api.post('/columns', { name, col_key, data_type: type, account_id: activeAccountId });
+    }
+    refetchCols();
+  }
+  async function handleRenameCol(id: number, name: string) {
+    await api.put('/columns', { id, name });
     refetchCols();
   }
 
@@ -640,6 +653,8 @@ export default function Journal() {
         onSave={handleSave}
         onClose={() => setDialogOpen(false)}
         onAddCustomColumn={handleAddCol}
+        onDeleteCustomColumn={async (id: number) => { await api.del(`/columns?id=${id}`); refetchCols(); }}
+        onRenameCustomColumn={handleRenameCol}
       />
 
       <ImportTradesDialog
@@ -659,8 +674,11 @@ export default function Journal() {
         defaultVisibility={visibility}
         onToggleDefault={toggleVis}
         customColumns={customCols}
+        accounts={accounts}
+        activeAccountId={activeAccountId}
         onAddCustomColumn={handleAddCol}
         onDeleteCustomColumn={async (id: number) => { await api.del(`/columns?id=${id}`); refetchCols(); }}
+        onRenameCustomColumn={handleRenameCol}
       />
     </div>
   );
