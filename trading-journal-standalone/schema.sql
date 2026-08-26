@@ -72,6 +72,27 @@ CREATE TABLE IF NOT EXISTS trades (
   created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Where a trade row came from. 'manual' (the default) is every trade anyone
+-- has ever typed in themselves or bulk-imported from a spreadsheet - nothing
+-- changes for those. 'mt_sync' marks a trade that was pulled automatically
+-- from a connected MT4/MT5 broker account (see mt_connections below) rather
+-- than entered by hand. This distinction matters in exactly one place right
+-- now - recalcAccountCapital() in _db.js - because a synced trade already
+-- carries its *real* dollar profit/loss straight from the broker, whereas a
+-- manual trade only has a % position size + an RR multiple and needs that
+-- formula to derive a dollar amount. Without this column, recalc would try
+-- to run broker-reported P/L back through the %-risk formula and mangle it.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+-- The broker's own id for this trade (MetaApi/MT4/MT5's positionId) - only
+-- set for source='mt_sync' rows. This is what makes re-syncing idempotent:
+-- the same closed position fetched twice updates the same trade row instead
+-- of creating a duplicate.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS external_id TEXT;
+-- Partial: only applies to synced rows, so it can never conflict with (or
+-- constrain) manually-entered trades, which have no external_id at all.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_mt_sync_dedup
+  ON trades (account_id, source, external_id) WHERE source = 'mt_sync';
+
 CREATE TABLE IF NOT EXISTS strategies (
   id             SERIAL PRIMARY KEY,
   name           TEXT NOT NULL,
@@ -574,6 +595,37 @@ ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+
+-- One row per PipEcho account connected to a real MT4/MT5 broker account
+-- (FTMO, The5ers, or any other prop firm/broker running MT4 or MT5) via
+-- MetaApi.cloud, so trades can be pulled in automatically instead of typed
+-- by hand. Deliberately, there is no password column here anywhere - the
+-- investor password the user types into the "Connect Broker" form is sent
+-- once to MetaApi to provision the account and is never written to this
+-- database. metaapi_account_id is MetaApi's own reference to that
+-- provisioned account, and everything after the initial connect (status
+-- checks, syncing deals) is done by looking that id up again, not by
+-- re-authenticating with a stored password. Needs both accounts and users
+-- to already exist, which is why this lives down here rather than next to
+-- the accounts table above - users isn't defined until this point in the
+-- file.
+CREATE TABLE IF NOT EXISTS mt_connections (
+  id                  SERIAL PRIMARY KEY,
+  account_id          INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  metaapi_account_id  TEXT NOT NULL,          -- MetaApi's id for the provisioned account
+  platform            TEXT NOT NULL,          -- 'mt4' | 'mt5'
+  login               TEXT NOT NULL,          -- broker account number (not secret)
+  server              TEXT NOT NULL,          -- broker's MT4/5 server name, e.g. "FTMO-Server"
+  region              TEXT,                    -- MetaApi region this account was provisioned into
+  state               TEXT NOT NULL DEFAULT 'provisioning',   -- provisioning | deployed | error | removed
+  last_error          TEXT,
+  last_synced_at      TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(account_id)  -- one broker connection per PipEcho account, keeps the UI/flow simple for v1
+);
+
+CREATE INDEX IF NOT EXISTS idx_mt_connections_user ON mt_connections (user_id);
 
 -- ============================================================================
 -- MIGRATION: scope custom_columns to a single account instead of showing

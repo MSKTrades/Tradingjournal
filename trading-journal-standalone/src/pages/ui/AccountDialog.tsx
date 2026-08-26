@@ -5,6 +5,7 @@ import { Input, Label, Switch } from '../../lib/ui/form';
 import { Trash2 } from 'lucide-react';
 import { Account } from '../data/types';
 import { AccountPatch, NewAccountPayload } from '../../lib/accounts';
+import BrokerConnect from './BrokerConnect';
 
 type Props = {
   open: boolean;
@@ -168,6 +169,16 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
               <Label>Active (shown in the account switcher)</Label>
             </div>
           )}
+
+          {/* Connect a real MT4/MT5 broker account (FTMO, The5ers, or any
+              other prop firm/broker on those platforms) so trades sync in
+              automatically instead of being typed by hand. Only shown once
+              the account already exists (same reasoning as the risk limits
+              above - there's nothing to connect yet on a still-unsaved
+              account), and lives in its own component since connecting,
+              syncing, and disconnecting each have their own request/loading
+              state that doesn't belong mixed into this form's. */}
+          {account && <BrokerConnect accountId={account.id} />}
 
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>

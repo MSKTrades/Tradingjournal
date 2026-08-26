@@ -47,7 +47,7 @@ export async function recalcAccountCapital(sql, accountId) {
   const startingBalance = Number(acctRows[0]?.starting_balance ?? 0);
 
   const trades = await sql.unsafe(
-    `SELECT id, position_size, profit_loss, rr FROM trades
+    `SELECT id, position_size, profit_loss, rr, source, gain_loss AS existing_gain_loss FROM trades
      WHERE account_id = $1
      ORDER BY
        COALESCE(trade_number, 999999) ASC,
@@ -96,7 +96,18 @@ export async function recalcAccountCapital(sql, accountId) {
     // at all (rr === null), so a Loss that's never had an RR value keeps
     // computing exactly as it always did.
     const rrVal = t.rr != null ? Number(t.rr) : null;
-    const gainLoss = t.profit_loss === 'Breakeven' ? 0
+    // A trade synced from a real MT4/MT5 broker account (source='mt_sync')
+    // already carries its real dollar profit/loss straight from the broker
+    // (see api/_metaapi.ts's syncAccount, which computes it from the sum of
+    // the position's deals) - position_size for those rows isn't "% of
+    // capital risked" the way a manually-logged trade's is, it's a lot size
+    // in extra_data, so running it through the %-risk formula below would
+    // produce a meaningless number. Trust the stored value for those instead
+    // of recomputing it - this UPDATE still writes it back below, just
+    // unchanged, so the chain (start/end capital) still flows through it
+    // correctly.
+    const gainLoss = t.source === 'mt_sync' ? Number(t.existing_gain_loss ?? 0)
+                    : t.profit_loss === 'Breakeven' ? 0
                     : t.profit_loss === 'Loss' ? (rrVal != null ? -Math.abs(dollarRisk * rrVal) : -dollarRisk)
                     : t.profit_loss === 'Profit' ? dollarRisk * (rrVal ?? 0)
                     : 0;
