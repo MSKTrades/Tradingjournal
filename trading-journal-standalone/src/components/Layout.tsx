@@ -17,20 +17,20 @@ const NAV_ITEMS = [
   { to: '/performance',  label: 'Performance', icon: TrendingUp, disabled: false },
   { to: '/strategies',   label: 'Strategies',  icon: Settings,   disabled: false },
   { to: '/checklists',   label: 'Checklists',  icon: ListChecks, disabled: false },
+  // Chart Replay & Backtesting - open to every signed-in user (free or
+  // paid), not just the admin account. See App.tsx and api/backtest.ts's
+  // resource=datasets/trades/fetch/drawings for where the actual (now
+  // removed) admin gate used to live.
+  { to: '/backtest',     label: 'Backtest',    icon: History,    disabled: false },
 ];
 
 // Appended only for the admin account (see lib/admin.ts) — everyone else's
 // sidebar never shows either of these items at all, not even disabled/
-// greyed out, so their existence isn't hinted at to other users. Backtest
-// joined this list because it isn't ready for everyone yet (still being
-// built/tested) - see App.tsx (BacktestGate) and api/backtest.ts for the
-// route- and API-level gates this pairs with; hiding the link is just the
-// UX to match, not the real access control.
-const BACKTEST_NAV_ITEM = { to: '/backtest', label: 'Backtest', icon: History, disabled: false };
-// Smart Money Concepts Analysis - same admin-only reasoning as Backtest
-// above (still being built/tested, explicitly restricted to just the admin
-// account) - see App.tsx's SmcGate and api/backtest.ts's smc_* resources
-// for the route- and API-level gates this pairs with.
+// greyed out, so their existence isn't hinted at to other users.
+// Smart Money Concepts Analysis stays admin-only per an explicit, repeated
+// instruction ("keep it to my account, don't release to anyone else") -
+// see App.tsx's SmcGate and api/backtest.ts's SMC_ONLY_RESOURCES for the
+// route- and API-level gates this pairs with.
 const SMC_NAV_ITEM = { to: '/smc-analysis', label: 'SMC Analysis', icon: Radar, disabled: false };
 const ADMIN_NAV_ITEM = { to: '/admin', label: 'Admin', icon: ShieldCheck, disabled: false };
 
@@ -42,7 +42,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(COLLAPSE_KEY) === '1');
-  const navItems = isAdminEmail(user?.email) ? [...NAV_ITEMS, BACKTEST_NAV_ITEM, SMC_NAV_ITEM, ADMIN_NAV_ITEM] : NAV_ITEMS;
+  const navItems = isAdminEmail(user?.email) ? [...NAV_ITEMS, SMC_NAV_ITEM, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   async function handleLogout() {
     await logout();

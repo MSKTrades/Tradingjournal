@@ -15,13 +15,13 @@ function condLabel(c: Condition): string {
 
 export default function Strategies() {
   const { data: rawStrategies, loading, refetch } = useFetch<Strategy[]>('/strategies');
-  const { accounts } = useAccount();
+  const { accounts, activeAccountId } = useAccount();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editStrat, setEditStrat] = useState<Strategy | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-const strategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
+const allStrategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
   ...s,
   conditions: Array.isArray(s.conditions)
     ? s.conditions
@@ -36,6 +36,19 @@ const strategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
   tp2_rr: s.tp2_rr != null ? Number(s.tp2_rr) : null,
   split_percent: s.split_percent != null ? Number(s.split_percent) : null,
 }));
+
+  // A strategy with an empty account_ids array applies to every account
+  // (including ones created later); a non-empty array scopes it to just
+  // those accounts. This page used to render every strategy regardless of
+  // the account currently selected in the sidebar, which meant a strategy
+  // scoped to "London Reversal _ GU" would still show up while viewing a
+  // brand-new, unrelated account - directly contradicting the "won't show
+  // up anywhere else, including new accounts" copy in the Add/Edit dialog.
+  // Filtering here is what actually makes that promise true.
+  const strategies = activeAccountId == null
+    ? allStrategies
+    : allStrategies.filter(s => !s.account_ids || s.account_ids.length === 0 || s.account_ids.includes(activeAccountId));
+  const hiddenCount = allStrategies.length - strategies.length;
 
   function accountsLabel(s: Strategy): string {
     if (!s.account_ids || s.account_ids.length === 0) return 'All accounts';
@@ -69,6 +82,11 @@ const strategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
           <p className="text-sm text-muted-foreground">
             Define filter rules and TP targets — the Summary page calculates results automatically.
           </p>
+          {hiddenCount > 0 && (
+            <p className="text-xs text-muted-foreground mt-1">
+              {hiddenCount} more {hiddenCount === 1 ? 'strategy is' : 'strategies are'} scoped to other accounts and hidden here — switch accounts to see {hiddenCount === 1 ? 'it' : 'them'}, or edit its Applies To to include this one.
+            </p>
+          )}
         </div>
         <Button size="sm" onClick={() => { setEditStrat(null); setDialogOpen(true); }}>
           <Plus className="w-4 h-4 mr-1" /> Add Strategy
@@ -77,9 +95,16 @@ const strategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
 
       {loading && <div className="text-center py-16 text-muted-foreground">Loading…</div>}
 
-      {!loading && strategies.length === 0 && (
+      {!loading && strategies.length === 0 && allStrategies.length === 0 && (
         <div className="text-center py-16 text-muted-foreground">
           No strategies defined. Click <strong>Add Strategy</strong> to create one.
+        </div>
+      )}
+
+      {!loading && strategies.length === 0 && allStrategies.length > 0 && (
+        <div className="text-center py-16 text-muted-foreground">
+          No strategies apply to this account. {hiddenCount} {hiddenCount === 1 ? 'strategy is' : 'strategies are'} scoped
+          to other accounts — switch accounts, or click <strong>Add Strategy</strong> to create one for this account.
         </div>
       )}
 

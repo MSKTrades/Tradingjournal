@@ -71,13 +71,15 @@ import { getUserFromRequest, isAdminEmail } from './_auth.js';
 //     to be set in Vercel; without it this resource returns a clear error
 //     rather than silently failing.
 //
-// Backtest isn't ready for other users yet (still being built/tested), so
-// the whole file is gated to the admin account only, same pattern and same
-// isAdminEmail check as api/columns.ts's resource=admin_stats - a 404, not
-// a 401/403, so a non-admin request can't even tell this route exists.
-// This is the REAL gate; Layout.tsx hiding the sidebar link and App.tsx
-// swapping in BacktestComingSoon for anyone else are just the UX to match -
-// neither of those stops a direct request to this URL on their own.
+// Backtest (resource=datasets/trades/fetch/drawings) is open to any logged-in
+// user, free or paid - Layout.tsx and App.tsx show/hide the sidebar link and
+// swap in the real page to match. SMC Analysis (resource=smc_* - see
+// SMC_ONLY_RESOURCES below) is a separate, still-admin-only feature living in
+// this same file purely because of the Vercel Hobby 12-function cap; it keeps
+// the isAdminEmail check, same pattern as api/columns.ts's resource=admin_stats
+// - a 404, not a 401/403, so a non-admin request can't even tell that resource
+// exists. Layout.tsx hiding the SMC sidebar link and App.tsx swapping in
+// SmcComingSoon for anyone else are just the UX to match that real gate.
 
 // Same public Blob store api/upload.ts uploads screenshots/candles to — see
 // that file's note on why the forexblob_ prefixed token is tried first.
@@ -225,17 +227,24 @@ async function fetchChunk(sql: ReturnType<typeof db>, p: any) {
   return { added: fresh.length, total: merged.length, dataset };
 }
 
-async function listTrades(sql: ReturnType<typeof db>, datasetId: number | null) {
+// backtest_trades and chart_drawings used to have no owner at all - fine
+// when this whole feature was gated to one admin account, but now that any
+// logged-in user can reach Backtest, every read/write here is scoped by
+// user_id so people aren't stepping on each other's practice trades and
+// scribbles on a shared dataset. chart_datasets itself (the actual candle
+// data) deliberately stays unscoped - that's real market data, the same
+// GBPUSD 1h candles for everyone, so sharing it is correct, not a bug.
+async function listTrades(sql: ReturnType<typeof db>, datasetId: number | null, userId: number) {
   if (datasetId) {
     return sql.unsafe(
-      'SELECT * FROM backtest_trades WHERE dataset_id = $1 ORDER BY entry_time DESC, id DESC',
-      [datasetId]
+      'SELECT * FROM backtest_trades WHERE dataset_id = $1 AND user_id = $2 ORDER BY entry_time DESC, id DESC',
+      [datasetId, userId]
     );
   }
-  return sql.unsafe('SELECT * FROM backtest_trades ORDER BY entry_time DESC, id DESC');
+  return sql.unsafe('SELECT * FROM backtest_trades WHERE user_id = $1 ORDER BY entry_time DESC, id DESC', [userId]);
 }
 
-async function addTrade(sql: ReturnType<typeof db>, p: any) {
+async function addTrade(sql: ReturnType<typeof db>, p: any, userId: number) {
   const datasetId = Number(p.dataset_id);
   if (!datasetId || isNaN(datasetId)) throw new Error('dataset_id is required');
   if (p.entry_price == null) throw new Error('entry_price is required');
@@ -243,8 +252,8 @@ async function addTrade(sql: ReturnType<typeof db>, p: any) {
 
   const rows = await sql.unsafe(
     `INSERT INTO backtest_trades
-       (dataset_id, direction, entry_price, sl_price, tp_price, entry_time, exit_time, exit_price, result, rr, notes, tags)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+       (dataset_id, direction, entry_price, sl_price, tp_price, entry_time, exit_time, exit_price, result, rr, notes, tags, user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)
      RETURNING *`,
     [
       datasetId, p.direction ?? 'Long', p.entry_price, p.sl_price ?? null, p.tp_price ?? null,
@@ -254,21 +263,23 @@ async function addTrade(sql: ReturnType<typeof db>, p: any) {
       // double-encode it (see the note in api/trades/index.ts for the bug
       // this caused there).
       p.tags ?? [],
+      userId,
     ]
   );
   return rows[0];
 }
 
-async function updateTrade(sql: ReturnType<typeof db>, id: number, p: any) {
+async function updateTrade(sql: ReturnType<typeof db>, id: number, p: any, userId: number) {
   const rows = await sql.unsafe(
     `UPDATE backtest_trades SET
        direction=$1, entry_price=$2, sl_price=$3, tp_price=$4, entry_time=$5,
        exit_time=$6, exit_price=$7, result=$8, rr=$9, notes=$10, tags=$11::jsonb
-     WHERE id=$12
+     WHERE id=$12 AND user_id=$13
      RETURNING *`,
     [
       p.direction ?? 'Long', p.entry_price, p.sl_price ?? null, p.tp_price ?? null, p.entry_time,
       p.exit_time ?? null, p.exit_price ?? null, p.result ?? null, p.rr ?? null, p.notes ?? null, p.tags ?? [], id,
+      userId,
     ]
   );
   return rows[0];
@@ -276,11 +287,11 @@ async function updateTrade(sql: ReturnType<typeof db>, id: number, p: any) {
 
 const DRAWING_TYPES = ['trendline', 'horizontal', 'rectangle', 'fib'];
 
-async function listDrawings(sql: ReturnType<typeof db>, datasetId: number) {
-  return sql.unsafe('SELECT * FROM chart_drawings WHERE dataset_id = $1 ORDER BY id ASC', [datasetId]);
+async function listDrawings(sql: ReturnType<typeof db>, datasetId: number, userId: number) {
+  return sql.unsafe('SELECT * FROM chart_drawings WHERE dataset_id = $1 AND user_id = $2 ORDER BY id ASC', [datasetId, userId]);
 }
 
-async function addDrawing(sql: ReturnType<typeof db>, p: any) {
+async function addDrawing(sql: ReturnType<typeof db>, p: any, userId: number) {
   const datasetId = Number(p.dataset_id);
   if (!datasetId || isNaN(datasetId)) throw new Error('dataset_id is required');
   const type = String(p.type ?? '').trim();
@@ -288,8 +299,8 @@ async function addDrawing(sql: ReturnType<typeof db>, p: any) {
   if (!Array.isArray(p.points) || p.points.length === 0) throw new Error('points are required');
 
   const rows = await sql.unsafe(
-    `INSERT INTO chart_drawings (dataset_id, type, points, color)
-     VALUES ($1, $2, $3::jsonb, $4)
+    `INSERT INTO chart_drawings (dataset_id, type, points, color, user_id)
+     VALUES ($1, $2, $3::jsonb, $4, $5)
      RETURNING *`,
     [
       datasetId, type,
@@ -298,6 +309,7 @@ async function addDrawing(sql: ReturnType<typeof db>, p: any) {
       // serialize it itself, so pre-stringifying would double-encode it.
       p.points,
       String(p.color ?? '#3b82f6'),
+      userId,
     ]
   );
   return rows[0];
@@ -722,27 +734,43 @@ async function listSmcChartMarkups(sql: ReturnType<typeof db>, pair: string | nu
   return sql.unsafe('SELECT * FROM smc_chart_markups ORDER BY created_at DESC LIMIT 30');
 }
 
+// Only these resources are the actual SMC Analysis feature (src/pages/SmcAnalysis.tsx)
+// - kept admin-only (404, not 401/403, so a non-admin request can't even
+// tell the resource exists - same reasoning as before). Everything else in
+// this file is the Backtest / Chart Replay feature, which is now open to
+// any logged-in user (free or paid) - see the per-resource user_id scoping
+// added to trades/drawings above, and the comment above listTrades.
+const SMC_ONLY_RESOURCES = new Set([
+  'smc_candles', 'smc_candles_tf', 'smc_markups', 'smc_chart_markups', 'smc_chart_analyze',
+]);
+
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
 
   const requester = await getUserFromRequest(req, sql);
-  if (!requester || !isAdminEmail(requester.email)) { res.status(404).json({ error: 'Not found' }); return; }
+  if (!requester) { res.status(401).json({ error: 'Not authenticated' }); return; }
+  const userId = requester.id;
 
   const resource = (req.method === 'POST' ? req.body?.resource : req.query.resource) as string | undefined;
+
+  if (SMC_ONLY_RESOURCES.has(resource ?? '') && !isAdminEmail(requester.email)) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
 
   if (req.method === 'GET') {
     if (resource === 'datasets') { res.status(200).json(await listDatasets(sql)); return; }
     if (resource === 'trades') {
       const datasetIdParam = req.query.dataset_id;
       const datasetId = datasetIdParam ? Number(Array.isArray(datasetIdParam) ? datasetIdParam[0] : datasetIdParam) : null;
-      res.status(200).json(await listTrades(sql, datasetId && !isNaN(datasetId) ? datasetId : null));
+      res.status(200).json(await listTrades(sql, datasetId && !isNaN(datasetId) ? datasetId : null, userId));
       return;
     }
     if (resource === 'drawings') {
       const datasetIdParam = req.query.dataset_id;
       const datasetId = datasetIdParam ? Number(Array.isArray(datasetIdParam) ? datasetIdParam[0] : datasetIdParam) : NaN;
       if (!datasetId || isNaN(datasetId)) { res.status(400).json({ error: 'dataset_id is required' }); return; }
-      res.status(200).json(await listDrawings(sql, datasetId));
+      res.status(200).json(await listDrawings(sql, datasetId, userId));
       return;
     }
     if (resource === 'smc_candles') {
@@ -776,9 +804,9 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", "smc_candles", "smc_candles_tf", "smc_markups", or "smc_chart_markups"' });
   } else if (req.method === 'POST') {
     if (resource === 'datasets') { res.status(200).json(await upsertDataset(sql, req.body)); return; }
-    if (resource === 'trades') { res.status(200).json(await addTrade(sql, req.body)); return; }
+    if (resource === 'trades') { res.status(200).json(await addTrade(sql, req.body, userId)); return; }
     if (resource === 'fetch') { res.status(200).json(await fetchChunk(sql, req.body)); return; }
-    if (resource === 'drawings') { res.status(200).json(await addDrawing(sql, req.body)); return; }
+    if (resource === 'drawings') { res.status(200).json(await addDrawing(sql, req.body, userId)); return; }
     if (resource === 'smc_markups') { res.status(200).json(await addSmcMarkup(sql, req.body)); return; }
     if (resource === 'smc_chart_analyze') {
       // Every other resource in this file lets withApi's catch-all turn any
@@ -805,24 +833,37 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   } else if (req.method === 'PUT') {
     const id = Number(req.query.id);
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
-    if (resource === 'trades') { res.status(200).json(await updateTrade(sql, id, req.body)); return; }
+    if (resource === 'trades') {
+      const updated = await updateTrade(sql, id, req.body, userId);
+      if (!updated) { res.status(404).json({ error: 'Trade not found' }); return; }
+      res.status(200).json(updated);
+      return;
+    }
     res.status(400).json({ error: 'resource must be "trades"' });
   } else if (req.method === 'DELETE') {
     const id = Number(req.query.id);
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
     if (resource === 'datasets') {
+      // Deleting a dataset wipes the shared candle data (and cascades to
+      // every user's practice trades/drawings on it) for everyone who
+      // replays that pair/timeframe, not just the caller - kept admin-only
+      // so one user can't grief the shared pool, even though fetching
+      // *new* datasets is open to everyone (see resource=fetch above).
+      if (!isAdminEmail(requester.email)) { res.status(404).json({ error: 'Not found' }); return; }
       await sql.unsafe('DELETE FROM chart_datasets WHERE id = $1', [id]); // cascades to backtest_trades, chart_drawings
       res.status(200).json({ deleted: 1 });
       return;
     }
     if (resource === 'trades') {
-      await sql.unsafe('DELETE FROM backtest_trades WHERE id = $1', [id]);
-      res.status(200).json({ deleted: 1 });
+      const deletedRows = await sql.unsafe('DELETE FROM backtest_trades WHERE id = $1 AND user_id = $2 RETURNING id', [id, userId]);
+      if (deletedRows.length === 0) { res.status(404).json({ error: 'Trade not found' }); return; }
+      res.status(200).json({ deleted: deletedRows.length });
       return;
     }
     if (resource === 'drawings') {
-      await sql.unsafe('DELETE FROM chart_drawings WHERE id = $1', [id]);
-      res.status(200).json({ deleted: 1 });
+      const deletedRows = await sql.unsafe('DELETE FROM chart_drawings WHERE id = $1 AND user_id = $2 RETURNING id', [id, userId]);
+      if (deletedRows.length === 0) { res.status(404).json({ error: 'Drawing not found' }); return; }
+      res.status(200).json({ deleted: deletedRows.length });
       return;
     }
     if (resource === 'smc_markups') {

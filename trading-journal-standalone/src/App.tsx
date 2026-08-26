@@ -19,23 +19,23 @@ import StrategyDetail from './pages/StrategyDetail';
 import Checklists from './pages/Checklists';
 import Admin from './pages/Admin';
 import Backtest from './pages/Backtest';
-import BacktestComingSoon from './pages/BacktestComingSoon';
 import SmcAnalysis from './pages/SmcAnalysis';
 import SmcComingSoon from './pages/SmcComingSoon';
 import { isAdminEmail } from './lib/admin';
-// Chart Replay & Backtesting was gated behind BacktestComingSoon while we
-// figured out TradingView's charting library situation — that's resolved
+// Chart Replay & Backtesting is open to every signed-in user, free or paid
 // (this page has always been built on `lightweight-charts`, TradingView's
 // separate free/open-source Apache-2.0 library, not the commercially-
 // licensed "Advanced Charts" product - no license, fee, or approval needed,
 // just the attribution link their Apache NOTICE requires, see
-// ReplayChart.tsx's chart options). It's gated again now for a different
-// reason: the feature itself (drawing tools, replay, etc.) is still being
-// built and tested and isn't ready to hand to every user yet. BacktestGate
-// below reuses the same BacktestComingSoon placeholder for that - same
-// isAdminEmail check Layout.tsx uses to hide the sidebar link, and the real
-// access control lives server-side in api/backtest.ts (this is UX, not
-// security - see that file's note).
+// ReplayChart.tsx's chart options). It used to be gated to the admin account
+// only while the feature (drawing tools, replay, etc.) was still being built
+// and tested - that gate is gone now, both here and server-side in
+// api/backtest.ts's resource=datasets/trades/fetch/drawings, which are also
+// open to any logged-in user (see that file's note on why user_id scoping
+// was added to trades/drawings as part of opening this up). SMC Analysis
+// (SmcGate below) is a separate, still-admin-only feature that happens to
+// live in the same api/backtest.ts file because of the Vercel Hobby
+// 12-function cap.
 
 /** Splash shown while the very first /columns?resource=auth check is in
  * flight, so logged-in visitors don't see a flash of the landing page (and
@@ -103,24 +103,13 @@ function AuthedShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Stands in for the real Backtest page for anyone but the admin account -
- * same reasoning as the /admin route below, but shown as the friendly
- * "coming soon" placeholder rather than a bare 404, since a nav item
- * pointing at a 404 would look broken rather than intentional. The actual
- * access control is server-side (api/backtest.ts 404s the API itself for
- * non-admins) - this just keeps a non-admin who lands here (an old
- * bookmark, a shared link) from seeing a half-finished feature. */
-function BacktestGate() {
-  const { user } = useAuth();
-  return isAdminEmail(user?.email) ? <Backtest /> : <BacktestComingSoon />;
-}
-
-/** Same pattern as BacktestGate above, for the Smart Money Concepts
- * Analysis page - restricted to just the admin account per an explicit,
- * repeated instruction ("keep it to my account, don't release to anyone
- * else"). The real access control is server-side: api/backtest.ts's
- * resource=smc_candles/smc_markups both 404 for anyone but the admin,
- * same as every other Backtest resource - this is the UX to match. */
+/** Gate for the Smart Money Concepts Analysis page - restricted to just the
+ * admin account per an explicit, repeated instruction ("keep it to my
+ * account, don't release to anyone else"). Unlike Backtest (which now has
+ * no gate at all - see the note above), this one stays. The real access
+ * control is server-side: api/backtest.ts's SMC_ONLY_RESOURCES (smc_candles,
+ * smc_markups, etc.) all 404 for anyone but the admin - this is the UX to
+ * match. */
 function SmcGate() {
   const { user } = useAuth();
   return isAdminEmail(user?.email) ? <SmcAnalysis /> : <SmcComingSoon />;
@@ -145,7 +134,7 @@ export default function App() {
             <Route path="/strategies" element={<Protected><AuthedShell><Strategies /></AuthedShell></Protected>} />
             <Route path="/strategies/:id" element={<Protected><AuthedShell><StrategyDetail /></AuthedShell></Protected>} />
             <Route path="/checklists" element={<Protected><AuthedShell><Checklists /></AuthedShell></Protected>} />
-            <Route path="/backtest" element={<Protected><AuthedShell><BacktestGate /></AuthedShell></Protected>} />
+            <Route path="/backtest" element={<Protected><AuthedShell><Backtest /></AuthedShell></Protected>} />
             <Route path="/smc-analysis" element={<Protected><AuthedShell><SmcGate /></AuthedShell></Protected>} />
             {/* No client-side email check here on purpose — the API
                 (?resource=admin_stats) is the real gate and 404s anyone but
