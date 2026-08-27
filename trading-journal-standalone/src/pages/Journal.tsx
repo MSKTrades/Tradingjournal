@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { Button } from '../lib/ui/button';
 import { Badge, Checkbox } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
-import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, FileUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, FileUp, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
@@ -367,6 +367,53 @@ function JournalPagination({
   );
 }
 
+// Journal export (CSV) - a plain client-side download, no API round-trip
+// needed since the trades are already loaded in the browser. Deliberately
+// exports every default + custom column (not just whichever ones happen to
+// be toggled visible right now) plus Tags, since the point of exporting is
+// a complete record for your own books/taxes/backups, not a screenshot of
+// the current view. It does respect the active filter bar though - trading
+// "just this month" or "just GBPUSD" out is the main reason to reach for
+// export in the first place.
+function escapeCsvField(value: string): string {
+  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function csvCellValue(trade: Trade, key: string, customColKeys: Set<string>): string {
+  const raw = customColKeys.has(key) ? trade.extra_data?.[key] : trade[key as keyof Trade];
+  if (raw === null || raw === undefined) return '';
+  if (key.startsWith('reached_')) return raw ? 'Yes' : 'No';
+  if (key === 'trade_placed_at' || key === 'date_closed') return String(raw).split('T')[0] ?? String(raw);
+  if (typeof raw === 'object') return '';
+  return String(raw);
+}
+
+function exportTradesToCsv(trades: Trade[], cols: { key: string; label: string }[], customCols: CustomColumn[], accountName: string) {
+  const customColKeys = new Set(customCols.map(c => c.col_key));
+  const headers = [...cols.map(c => c.label), ...customCols.map(c => c.name), 'Tags'];
+  const lines = trades.map(t => {
+    const cells = [
+      ...cols.map(c => csvCellValue(t, c.key, customColKeys)),
+      ...customCols.map(c => csvCellValue(t, c.col_key, customColKeys)),
+      (t.tags ?? []).join('; '),
+    ];
+    return cells.map(escapeCsvField).join(',');
+  });
+  const csv = [headers.map(escapeCsvField).join(','), ...lines].join('\r\n');
+  // Leading BOM so Excel (which otherwise guesses the wrong encoding for a
+  // plain UTF-8 CSV) renders any non-ASCII characters correctly on open.
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `${accountName.replace(/[^a-z0-9]+/gi, '_') || 'journal'}_${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export default function Journal() {
   const { accounts, loading: accountsLoading, activeAccountId, activeAccount } = useAccount();
   const { data: rawTrades, loading, refetch: refetchTrades } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
@@ -552,6 +599,15 @@ export default function Journal() {
           </Button>
           <Button variant="outline" size="sm" disabled={!activeAccountId} onClick={() => setImportOpen(true)}>
             <FileUp className="w-4 h-4 mr-1" /> Import Excel
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={filtered.length === 0}
+            title="Export the currently filtered trades to a CSV file"
+            onClick={() => exportTradesToCsv(filtered, DEFAULT_COLS, customCols, activeAccount?.name ?? 'journal')}
+          >
+            <Download className="w-4 h-4 mr-1" /> Export CSV
           </Button>
           <Button size="sm" disabled={!activeAccountId} onClick={() => { setEditTrade(null); setDialogOpen(true); }}>
             <Plus className="w-4 h-4 mr-1" /> Add Trade
