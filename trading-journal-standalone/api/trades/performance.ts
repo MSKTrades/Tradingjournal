@@ -5,7 +5,8 @@ import { requireUserId, ownsAccount } from '../_auth.js';
 const WEEKDAY_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-type Condition = { field: string; op: string; value: number };
+type Condition = { field: string; op: string; value: number | string };
+const TAG_CONDITION_FIELD = 'has_tag';
 
 // --- Same filter helpers as summary/index.ts, duplicated here on purpose so
 // this endpoint has no dependency on that file and can't be broken by
@@ -38,11 +39,45 @@ function matchesTime(trade: any, timeStart: string | null, timeEnd: string | nul
   return true;
 }
 
+// Mirrors api/summary/index.ts's getFieldValue exactly - see that file's
+// comment for why the three legacy SMC keys alias into extra_data rather
+// than reading the (still-present, but no longer written to) raw columns.
+// This copy had drifted out of sync with that one: it only ever recognized
+// those three hardcoded keys and returned null for anything else, which
+// meant a strategy condition on ANY other custom field (added via Manage
+// Columns) silently matched zero trades here - evalCondition(null, ...) is
+// always false - even though the exact same condition worked correctly on
+// the Summary page. Bringing this back in line with summary/index.ts fixes
+// that for good instead of just patching the one field someone happens to
+// report next.
+const RAW_NUMERIC_FIELDS: Record<string, string> = {
+  rr: 'rr',
+  max_rr: 'max_rr',
+  entry_price: 'entry_price',
+  tp_price: 'tp_price',
+  sl_price: 'sl_price',
+  gain_loss: 'gain_loss',
+  gain_loss_pct: 'gain_loss_pct',
+  position_size: 'position_size',
+  partial_1: 'partial_1',
+  partial_2: 'partial_2',
+};
+
+const LEGACY_EXTRA_DATA_ALIASES: Record<string, string> = {
+  cisd_break: 'cisd_break',
+  inverse_candles: 'inverse_candle_size',
+  gap_from_asia_h: 'distance_from_asia',
+};
+
 function getFieldValue(trade: any, field: string): number | null {
-  if (field === 'cisd_break') return trade.cisd_break != null ? Number(trade.cisd_break) : null;
-  if (field === 'inverse_candles') return trade.inverse_candle_size != null ? Number(trade.inverse_candle_size) : null;
-  if (field === 'gap_from_asia_h') return trade.distance_from_asia != null ? Number(trade.distance_from_asia) : null;
-  return null;
+  const rawKey = RAW_NUMERIC_FIELDS[field];
+  if (rawKey) {
+    const v = trade[rawKey];
+    return v != null ? Number(v) : null;
+  }
+  const extraKey = LEGACY_EXTRA_DATA_ALIASES[field] ?? field;
+  const v = trade.extra_data?.[extraKey];
+  return v != null && v !== '' && !isNaN(Number(v)) ? Number(v) : null;
 }
 
 function evalCondition(val: number | null, op: string, threshold: number): boolean {
@@ -56,6 +91,18 @@ function evalCondition(val: number | null, op: string, threshold: number): boole
     case '!=': return val !== threshold;
     default: return false;
   }
+}
+
+// Same reasoning as summary/index.ts's matchesTagCondition - a condition on
+// TAG_CONDITION_FIELD carries a tag name in `value`, not a number, so it's
+// checked against trade.tags directly instead of going through
+// getFieldValue/evalCondition.
+function matchesCondition(trade: any, cond: Condition): boolean {
+  if (cond.field === TAG_CONDITION_FIELD) {
+    const has = (trade.tags ?? []).includes(String(cond.value));
+    return cond.op === '!has' ? !has : has;
+  }
+  return evalCondition(getFieldValue(trade, cond.field), cond.op, Number(cond.value));
 }
 
 function isWin(t: any): boolean {
@@ -154,7 +201,9 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   let trades: any[] = await sql.unsafe(
     `SELECT id, trade_placed_at, trade_executed_at, coin_token, profit_loss, gain_loss, gain_loss_pct,
             start_capital, end_capital, cisd_break, inverse_candle_size, distance_from_asia,
-            reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, rr, session_in
+            reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, rr, session_in,
+            entry_price, tp_price, sl_price, position_size, partial_1, partial_2,
+            extra_data, tags
      FROM trades
      WHERE trade_placed_at IS NOT NULL AND account_id = $1
      ORDER BY trade_placed_at ASC, COALESCE(trade_number, 999999) ASC, created_at ASC`,
@@ -178,7 +227,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       if (!matchesDay(trade, days)) return false;
       if (!matchesTime(trade, timeStart, timeEnd)) return false;
       if (!conditions.length) return true;
-      return conditions.every(c => evalCondition(getFieldValue(trade, c.field), c.op, Number(c.value)));
+      return conditions.every(c => matchesCondition(trade, c));
     });
   }
 

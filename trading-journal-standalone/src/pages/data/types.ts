@@ -92,7 +92,22 @@ export type NoteBlock =
   | { type: 'text'; value: string }
   | { type: 'image'; url: string };
 
-export type Condition = { field: string; op: string; value: number };
+// `value` is a plain number for every ordinary numeric field condition
+// (rr < 2, entry_price >= 1.27, etc). The one exception is the reserved
+// `field: 'has_tag'` (see TAG_CONDITION_FIELD below) - there, `value` holds
+// a tag NAME instead, so a strategy can require "this trade is/isn't
+// tagged X" alongside its numeric conditions.
+export type Condition = { field: string; op: string; value: number | string };
+
+// Reserved condition field key for "does this trade have tag X" - kept out
+// of CONDITION_FIELDS/custom columns entirely (it's not a number you're
+// comparing, it's a tag name), and given its own tiny op set (TAG_OPS)
+// instead of the numeric OPS list. StrategyDialog.tsx checks for this exact
+// key to switch a condition row's UI from op+number to has/doesn't-have+tag
+// picker; api/summary/index.ts and api/trades/performance.ts check for it
+// server-side to match against trade.tags instead of a numeric field.
+export const TAG_CONDITION_FIELD = 'has_tag';
+export const TAG_OPS = ['has', '!has'] as const;
 
 export type Strategy = {
   id: number;
@@ -269,6 +284,7 @@ export const FIELD_LABELS: Record<string, string> = {
   position_size: 'Position Size (%)',
   partial_1: 'Partial 1 (%)',
   partial_2: 'Partial 2 (%)',
+  has_tag: 'Tag',
 };
 
 // The built-in numeric fields every trade always has, for every account,

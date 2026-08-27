@@ -375,6 +375,16 @@ export default function Journal() {
   const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
   const allTags: Tag[] = rawTags ?? [];
   const [filters, setFilters] = useState<PerfFilters>(emptyFilters);
+  // Tags themselves aren't scoped to one account - the same tag pool is
+  // meant to be reusable everywhere you apply one to a trade (see the
+  // Tags picker inside TradeDetailPanel, which does use the full allTags
+  // list for exactly that reason). But the Tags FILTER here is different:
+  // showing every tag you've ever created across every account - most of
+  // which can't possibly match a single trade in whichever account is
+  // currently active - just reads as broken ("why is Asia in here, I don't
+  // use that tag on this account"). Narrowing the filter's own option list
+  // to tags actually present on at least one trade in this account fixes
+  // that without touching how tags themselves work.
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [colDialogOpen, setColDialogOpen] = useState(false);
@@ -392,6 +402,8 @@ export default function Journal() {
   const [pageSize, setPageSize] = useState(25);
 
   const trades: Trade[] = rawTrades ?? [];
+  const usedTagNames = new Set(trades.flatMap(t => t.tags ?? []));
+  const accountTagOptions = allTags.filter(t => usedTagNames.has(t.name));
   const customCols: CustomColumn[] = rawCols ?? [];
   const checklists: Checklist[] = rawChecklists ?? [];
   const nextTradeNumber = trades.length === 0 ? 1 : Math.max(0, ...trades.map(t => t.trade_number ?? 0)) + 1;
@@ -553,7 +565,7 @@ export default function Journal() {
         </div>
       )}
 
-      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={allTags} />
+      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={accountTagOptions} />
 
       <JournalInsights trades={filtered} allTrades={trades} account={activeAccount} />
 

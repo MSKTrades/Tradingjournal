@@ -64,22 +64,36 @@ function useChecklistCompliance(trades: Trade[], checklists: Checklist[]) {
           const pct = total > 0 ? Math.round((followed / total) * 100) : null;
           return { item, followed, broken, total, pct };
         });
-        const totalChecks = ruleStats.reduce((s, r) => s + r.total, 0);
-        const totalFollowed = ruleStats.reduce((s, r) => s + r.followed, 0);
-        const overallPct = totalChecks > 0 ? Math.round((totalFollowed / totalChecks) * 100) : null;
-
         // "Followed the checklist" means every single rule was explicitly
         // checked off — one broken (or ungraded) rule puts a trade in the
-        // other bucket. That's a stricter bar than the overall follow rate
-        // above, but it's the honest reading of "did I follow my rules on
-        // this trade" — this is what actually answers whether following
-        // the checklist correlates with a better result.
+        // other bucket. This is a stricter, trade-level bar than "what
+        // fraction of individual rule-checks were followed" would be, but
+        // it's the honest reading of "did I follow my rules on this trade"
+        // — and it's what the headline Overall Follow Rate below is now
+        // built from too (see that comment), so the two numbers in this
+        // widget can't quietly disagree with each other.
         const fullCompliance = cl.items.length > 0
           ? clTrades.filter(t => cl.items.every(item => t.checklist_results?.[String(item.id)] === true))
           : [];
         const notFullCompliance = cl.items.length > 0
           ? clTrades.filter(t => !cl.items.every(item => t.checklist_results?.[String(item.id)] === true))
           : [];
+
+        // Deliberately trade-level (fully-compliant trades ÷ graded trades),
+        // not an average of the per-rule Follow % column to its right. That
+        // per-check average used to drive this number, which meant it could
+        // read 100% ("Overall Follow Rate") while the All-Rules-Followed /
+        // Not-Fully-Followed cards right next to it showed real trades in
+        // the "not fully followed" bucket - e.g. every individually-graded
+        // rule-check came back true, but a rule nobody graded on 2 of the 5
+        // trades still correctly counts those 2 as not fully followed. Two
+        // numbers in the same glance disagreeing like that reads as a bug
+        // even though each was technically answering a different question -
+        // this makes the headline answer the SAME question ("did the whole
+        // checklist get followed on this trade") as the cards beside it.
+        const overallPct = cl.items.length > 0 && clTrades.length > 0
+          ? Math.round((fullCompliance.length / clTrades.length) * 100)
+          : null;
 
         return {
           checklist: cl,
@@ -124,6 +138,9 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
                 <CardContent className="pt-4 pb-3">
                   <p className="text-xs text-muted-foreground">Overall Follow Rate</p>
                   <p className="text-2xl font-bold">{overallPct === null ? '—' : `${overallPct}%`}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {fullCompliance.count}/{enabledCount} trades followed every rule
+                  </p>
                 </CardContent>
               </Card>
               <Card className="lg:col-span-6">

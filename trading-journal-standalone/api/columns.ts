@@ -475,7 +475,26 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     // to this user gets the same empty-list treatment, not a 403 — no need
     // to reveal whether that id exists at all.
     const accountIdParam = req.query.account_id;
-    const accountId = Number(Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam);
+    const rawAccountId = Array.isArray(accountIdParam) ? accountIdParam[0] : accountIdParam;
+    // account_id=all is for callers that need to know about a field
+    // regardless of which single account happens to be active right now -
+    // e.g. StrategyDialog's condition-field picker, since a strategy can
+    // apply to a specific OTHER account (or several) than whichever one is
+    // active in the switcher while you're editing it. Still scoped to this
+    // user's own accounts via the join below, same as the single-account
+    // case - just not narrowed to one of them.
+    if (rawAccountId === 'all') {
+      const rows = await sql.unsafe(
+        `SELECT cc.* FROM custom_columns cc
+         JOIN accounts a ON a.id = cc.account_id
+         WHERE a.user_id = $1
+         ORDER BY cc.account_id ASC, cc.sort_order ASC, cc.id ASC`,
+        [userId]
+      );
+      res.status(200).json(rows);
+      return;
+    }
+    const accountId = Number(rawAccountId);
     if (!accountId || isNaN(accountId)) { res.status(200).json([]); return; }
     const rows = await sql.unsafe(
       `SELECT cc.* FROM custom_columns cc

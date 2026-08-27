@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Button } from '../../lib/ui/button';
 import { Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trash2, Plus } from 'lucide-react';
-import { Strategy, Condition, CustomColumn, CONDITION_FIELDS, OPS, WEEKDAYS } from '../data/types';
+import { Strategy, Condition, CustomColumn, Tag, CONDITION_FIELDS, OPS, WEEKDAYS, TAG_CONDITION_FIELD, TAG_OPS } from '../data/types';
 import { useFetch } from '../../lib/api';
 import { useAccount } from '../../lib/accounts';
 
@@ -83,19 +83,40 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   // didn't build their journal around that original strategy), so an
   // account only sees them here if it actually has a matching
   // custom_columns row - same as any other custom field.
-  // Custom fields are scoped per account, so this pulls in whichever
-  // account is currently active in the account switcher - matches how the
-  // rest of the app (Journal, Strategy Detail) already scopes custom
-  // columns, and means a condition field only shows up here if it's
-  // actually one you've defined on the account you're working in.
-  const { accounts, activeAccountId } = useAccount();
-  const { data: rawCols } = useFetch<CustomColumn[]>(`/columns?account_id=${activeAccountId ?? ''}`);
+  // Custom fields are scoped per account, but a strategy's "Applies To"
+  // can point at a SPECIFIC account (or several) that isn't necessarily
+  // the one currently active in the switcher - e.g. editing a GBPUSD
+  // strategy while EURUSD is the active account. Scoping this list to only
+  // the active account meant a condition already using a field from the
+  // strategy's own target account would silently fail to match any option
+  // in the dropdown (the browser just falls back to showing whichever
+  // option happens to be first), which looked exactly like the field had
+  // been swapped out from under you. Fetching every account's custom
+  // fields (account_id=all - still scoped to this user's own accounts
+  // server-side) and deduping by col_key fixes that regardless of which
+  // account is active or which account(s) the strategy applies to.
+  const { accounts } = useAccount();
+  const { data: rawCols } = useFetch<CustomColumn[]>('/columns?account_id=all');
   const allFields = useMemo(() => {
-    const custom = (rawCols ?? [])
-      .filter(c => c.data_type === 'number')
-      .map(c => ({ key: c.col_key, label: c.name }));
+    const seen = new Set<string>();
+    const custom: { key: string; label: string }[] = [];
+    for (const c of rawCols ?? []) {
+      if (c.data_type !== 'number' || seen.has(c.col_key)) continue;
+      seen.add(c.col_key);
+      custom.push({ key: c.col_key, label: c.name });
+    }
     return [...CONDITION_FIELDS, ...custom];
   }, [rawCols]);
+
+  // Tags aren't a number to compare against - a strategy condition on a tag
+  // is "does/doesn't this trade have tag X" (see TAG_CONDITION_FIELD) - so
+  // they're offered as one extra option in the same field dropdown, and
+  // picking it swaps the rest of that condition row's UI (op + value) from
+  // the numeric one to a has/doesn't-have + tag picker below. Tags aren't
+  // account-scoped (same pool everywhere, like the tag picker on a trade
+  // itself), so this isn't filtered by account the way custom fields are.
+  const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
+  const allTags: Tag[] = rawTags ?? [];
 
   useEffect(() => {
     if (open) {
@@ -113,6 +134,19 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   }
   function updateCondition(i: number, patch: Partial<Condition>) {
     setForm(prev => ({ ...prev, conditions: prev.conditions.map((c, idx) => idx === i ? { ...c, ...patch } : c) }));
+  }
+  // Switching a condition row's field to/from "Has Tag" needs to reset op
+  // and value too, not just field - a numeric op like "<=" and a number
+  // value make no sense once the row becomes a tag condition, and vice
+  // versa. Keeping this as its own function (rather than inlining into the
+  // field <Select>'s onChange) is what makes that reset obvious rather than
+  // something you'd have to notice was missing.
+  function updateConditionField(i: number, field: string) {
+    if (field === TAG_CONDITION_FIELD) {
+      updateCondition(i, { field, op: 'has', value: allTags[0]?.name ?? '' });
+    } else {
+      updateCondition(i, { field, op: '<=', value: 0 });
+    }
   }
   function removeCondition(i: number) {
     setForm(prev => ({ ...prev, conditions: prev.conditions.filter((_, idx) => idx !== i) }));
@@ -182,23 +216,52 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
                 sliver. Stacking it above op/value/delete means it always has
                 the dialog's full width to show its label. */}
             <div className="flex flex-col gap-3">
-              {form.conditions.map((cond, i) => (
-                <div key={i} className="flex flex-col gap-1.5 p-2 rounded-md border border-border/60">
-                  <Select value={cond.field} onChange={e => updateCondition(i, { field: e.target.value })} className="w-full text-xs">
-                    {allFields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
-                  </Select>
-                  <div className="flex items-center gap-2">
-                    <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-16 text-xs shrink-0">
-                      {OPS.map(op => <option key={op} value={op}>{op}</option>)}
+              {form.conditions.map((cond, i) => {
+                const isTag = cond.field === TAG_CONDITION_FIELD;
+                return (
+                  <div key={i} className="flex flex-col gap-1.5 p-2 rounded-md border border-border/60">
+                    <Select value={cond.field} onChange={e => updateConditionField(i, e.target.value)} className="w-full text-xs">
+                      {allFields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+                      <option value={TAG_CONDITION_FIELD}>Has Tag</option>
                     </Select>
-                    <Input type="number" step={0.01} className="flex-1 min-w-0 text-xs" value={cond.value}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateCondition(i, { value: Number(e.target.value) })} />
-                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeCondition(i)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    {isTag ? (
+                      <div className="flex items-center gap-2">
+                        <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-32 text-xs shrink-0">
+                          {TAG_OPS.map(op => <option key={op} value={op}>{op === '!has' ? "doesn't have" : 'has'}</option>)}
+                        </Select>
+                        {allTags.length > 0 ? (
+                          <Select value={String(cond.value)} onChange={e => updateCondition(i, { value: e.target.value })} className="flex-1 min-w-0 text-xs">
+                            {allTags.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                          </Select>
+                        ) : (
+                          <Input className="flex-1 min-w-0 text-xs" value={String(cond.value)} placeholder="Tag name"
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateCondition(i, { value: e.target.value })} />
+                        )}
+                        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeCondition(i)}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-16 text-xs shrink-0">
+                          {OPS.map(op => <option key={op} value={op}>{op}</option>)}
+                        </Select>
+                        <Input type="number" step={0.01} className="flex-1 min-w-0 text-xs" value={cond.value as number}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateCondition(i, { value: Number(e.target.value) })} />
+                        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeCondition(i)}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
+                    {isTag && allTags.length === 0 && (
+                      <p className="text-[11px] text-muted-foreground">
+                        No tags created yet — type one above, or add it to a trade first from the Journal so it's
+                        reusable here too.
+                      </p>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

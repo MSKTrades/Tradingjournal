@@ -505,65 +505,14 @@ CREATE TABLE IF NOT EXISTS chart_datasets (
   UNIQUE(pair, timeframe)                -- re-uploading the same pair/timeframe replaces it (upsert)
 );
 
--- One row per practice trade you place while stepping/playing through a
--- chart_datasets replay. entry_time/exit_time are candle timestamps *within
--- the replay*, not wall-clock time. result stays NULL while the trade is
--- still open in the replay (i.e. the replay hasn't reached a candle whose
--- high/low touches sl_price or tp_price yet, and you haven't closed it by
--- hand either). user_id scopes each row to whoever placed it - Backtest is
--- open to every signed-in user now, not just one admin account, and without
--- this a shared dataset's practice trades would be visible/editable by
--- anyone who opens that dataset.
-CREATE TABLE IF NOT EXISTS backtest_trades (
-  id            SERIAL PRIMARY KEY,
-  dataset_id    INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
-  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  direction     TEXT NOT NULL DEFAULT 'Long',   -- 'Long' | 'Short'
-  entry_price   NUMERIC NOT NULL,
-  sl_price      NUMERIC,
-  tp_price      NUMERIC,
-  entry_time    TIMESTAMPTZ NOT NULL,
-  exit_time     TIMESTAMPTZ,
-  exit_price    NUMERIC,
-  result        TEXT,                            -- 'Profit' | 'Loss' | null while open
-  rr            NUMERIC,                          -- R-multiple actually achieved on close
-  notes         TEXT,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_backtest_trades_dataset ON backtest_trades (dataset_id);
-CREATE INDEX IF NOT EXISTS idx_backtest_trades_user ON backtest_trades (user_id);
-
--- Trend lines / horizontal lines / rectangles / Fibonacci retracements drawn
--- on a chart_datasets replay chart. The candle data (chart_datasets) is
--- shared across every user - real market data, same for everyone - but a
--- drawing is scoped to whoever drew it via user_id (added when Backtest
--- opened up beyond the one admin account; previously drawings were shared
--- too, since there was only ever one person using this feature). `points`
--- holds however many {time, price} anchor points the drawing type needs
--- (every type currently supported uses one or two) as JSON rather than
--- fixed columns, so a future drawing type with a different point count
--- doesn't need a schema change.
-CREATE TABLE IF NOT EXISTS chart_drawings (
-  id            SERIAL PRIMARY KEY,
-  dataset_id    INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
-  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type          TEXT NOT NULL,          -- 'trendline' | 'horizontal' | 'rectangle' | 'fib'
-  points        JSONB NOT NULL,         -- [{time, price}, ...]
-  color         TEXT NOT NULL DEFAULT '#3b82f6',
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_chart_drawings_dataset ON chart_drawings (dataset_id);
-CREATE INDEX IF NOT EXISTS idx_chart_drawings_user ON chart_drawings (user_id);
-
--- Quality/mistake tags on practice trades (e.g. "A+ Setup", "Off-Plan",
--- "FOMO"), same idea as trades.tags on the real Journal. Deliberately
--- shares that same `tags` table/vocabulary rather than a second tag list -
--- one pool of tag names across real and practice trades means the same
--- "Off-Plan" you use in the Journal shows up here too, instead of you
--- having to redefine it.
-ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- backtest_trades and chart_drawings (both reference users(id) via user_id)
+-- are defined further down, right after the users table - see the note
+-- there for why (same reason mt_connections lives there instead of next to
+-- accounts: a table can't reference users(id) before users exists yet, and
+-- on a truly fresh database this file runs top to bottom in one pass). The
+-- ALTER TABLE that used to sit right here (adding backtest_trades.tags)
+-- moved down there with it, for the same reason - it can't run before the
+-- table it alters exists either.
 
 -- ============================================================================
 -- Auth. One row per person who can sign in. `users` IS now referenced by
@@ -595,6 +544,68 @@ ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+
+-- One row per practice trade you place while stepping/playing through a
+-- chart_datasets replay. entry_time/exit_time are candle timestamps *within
+-- the replay*, not wall-clock time. result stays NULL while the trade is
+-- still open in the replay (i.e. the replay hasn't reached a candle whose
+-- high/low touches sl_price or tp_price yet, and you haven't closed it by
+-- hand either). user_id scopes each row to whoever placed it - Backtest is
+-- open to every signed-in user now, not just one admin account, and without
+-- this a shared dataset's practice trades would be visible/editable by
+-- anyone who opens that dataset. Lives here (after users, not next to
+-- chart_datasets above) because it references users(id) - see the note left
+-- in chart_datasets' section.
+CREATE TABLE IF NOT EXISTS backtest_trades (
+  id            SERIAL PRIMARY KEY,
+  dataset_id    INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  direction     TEXT NOT NULL DEFAULT 'Long',   -- 'Long' | 'Short'
+  entry_price   NUMERIC NOT NULL,
+  sl_price      NUMERIC,
+  tp_price      NUMERIC,
+  entry_time    TIMESTAMPTZ NOT NULL,
+  exit_time     TIMESTAMPTZ,
+  exit_price    NUMERIC,
+  result        TEXT,                            -- 'Profit' | 'Loss' | null while open
+  rr            NUMERIC,                          -- R-multiple actually achieved on close
+  notes         TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_trades_dataset ON backtest_trades (dataset_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_trades_user ON backtest_trades (user_id);
+
+-- Quality/mistake tags on practice trades (e.g. "A+ Setup", "Off-Plan",
+-- "FOMO"), same idea as trades.tags on the real Journal. Deliberately
+-- shares that same `tags` table/vocabulary rather than a second tag list -
+-- one pool of tag names across real and practice trades means the same
+-- "Off-Plan" you use in the Journal shows up here too, instead of you
+-- having to redefine it.
+ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- Trend lines / horizontal lines / rectangles / Fibonacci retracements drawn
+-- on a chart_datasets replay chart. The candle data (chart_datasets) is
+-- shared across every user - real market data, same for everyone - but a
+-- drawing is scoped to whoever drew it via user_id (added when Backtest
+-- opened up beyond the one admin account; previously drawings were shared
+-- too, since there was only ever one person using this feature). `points`
+-- holds however many {time, price} anchor points the drawing type needs
+-- (every type currently supported uses one or two) as JSON rather than
+-- fixed columns, so a future drawing type with a different point count
+-- doesn't need a schema change.
+CREATE TABLE IF NOT EXISTS chart_drawings (
+  id            SERIAL PRIMARY KEY,
+  dataset_id    INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type          TEXT NOT NULL,          -- 'trendline' | 'horizontal' | 'rectangle' | 'fib'
+  points        JSONB NOT NULL,         -- [{time, price}, ...]
+  color         TEXT NOT NULL DEFAULT '#3b82f6',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chart_drawings_dataset ON chart_drawings (dataset_id);
+CREATE INDEX IF NOT EXISTS idx_chart_drawings_user ON chart_drawings (user_id);
 
 -- One row per PipEcho account connected to a real MT4/MT5 broker account
 -- (FTMO, The5ers, or any other prop firm/broker running MT4 or MT5) via

@@ -11,11 +11,14 @@ import { Button } from '../lib/ui/button';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import {
-  StrategyResult, Trade, CustomColumn, Checklist, Condition, FIELD_LABELS, WEEKDAYS, fmtMoney,
+  StrategyResult, Trade, CustomColumn, Checklist, Condition, FIELD_LABELS, WEEKDAYS, TAG_CONDITION_FIELD, fmtMoney,
 } from './data/types';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
 
 function condLabel(c: Condition): string {
+  if (c.field === TAG_CONDITION_FIELD) {
+    return c.op === '!has' ? `Not tagged "${c.value}"` : `Tagged "${c.value}"`;
+  }
   const field = FIELD_LABELS[c.field] ?? c.field;
   return `${field} ${c.op} ${c.value}`;
 }

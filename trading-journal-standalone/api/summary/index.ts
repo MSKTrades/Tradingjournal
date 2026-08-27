@@ -26,9 +26,15 @@ type Trade = {
   partial_1: number | null;
   partial_2: number | null;
   extra_data: Record<string, unknown> | null;
+  tags: string[] | null;
 };
 
-type Condition = { field: string; op: string; value: number };
+// value is a number for every ordinary field, or a tag name (string) for
+// the reserved TAG_CONDITION_FIELD - see the matching note on evalCondition
+// below and src/pages/data/types.ts's Condition type for the frontend side
+// of this.
+type Condition = { field: string; op: string; value: number | string };
+const TAG_CONDITION_FIELD = 'has_tag';
 
 type FFRawEvent = {
   title?: string;
@@ -263,6 +269,21 @@ function evalCondition(val: number | null, op: string, threshold: number): boole
   }
 }
 
+// A strategy condition can also require a trade to (not) carry a specific
+// tag, using the reserved field TAG_CONDITION_FIELD - `value` there is the
+// tag name itself, not a number, so it's checked separately from the
+// numeric evalCondition path above rather than trying to coerce a tag name
+// through Number(cond.value).
+function matchesTagCondition(trade: Trade, op: string, tagName: string): boolean {
+  const has = (trade.tags ?? []).includes(tagName);
+  return op === '!has' ? !has : has;
+}
+
+function matchesCondition(trade: Trade, cond: Condition): boolean {
+  if (cond.field === TAG_CONDITION_FIELD) return matchesTagCondition(trade, cond.op, String(cond.value));
+  return evalCondition(getFieldValue(trade, cond.field), cond.op, Number(cond.value));
+}
+
 function getReached(trade: Trade, tp: number): boolean {
   if (tp <= 2) return Boolean(trade.reached_1r2);
   if (tp <= 3) return Boolean(trade.reached_1r3);
@@ -328,7 +349,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
                inverse_candle_size, distance_from_asia,
                reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, profit_loss,
                rr, entry_price, tp_price, sl_price, gain_loss, gain_loss_pct,
-               position_size, partial_1, partial_2, extra_data
+               position_size, partial_1, partial_2, extra_data, tags
         FROM trades
         WHERE account_id = $1
       `, [accountId]),
@@ -378,9 +399,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         if (!matchesDay(trade, strategy.days)) return false;
         if (!matchesTime(trade, strategy.time_start, strategy.time_end)) return false;
         if (!strategy.conditions.length) return true;
-        return strategy.conditions.every((cond) =>
-          evalCondition(getFieldValue(trade, cond.field), cond.op, Number(cond.value))
-        );
+        return strategy.conditions.every((cond) => matchesCondition(trade, cond));
       });
 
       const tradeResults = qualifying.map((trade) => ({

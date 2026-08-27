@@ -6,9 +6,12 @@ import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import StrategyDialog, { StrategyPayload } from './ui/StrategyDialog';
-import { Strategy, Condition, FIELD_LABELS, WEEKDAYS } from './data/types';
+import { Strategy, Condition, FIELD_LABELS, WEEKDAYS, TAG_CONDITION_FIELD } from './data/types';
 
 function condLabel(c: Condition): string {
+  if (c.field === TAG_CONDITION_FIELD) {
+    return c.op === '!has' ? `Not tagged "${c.value}"` : `Tagged "${c.value}"`;
+  }
   const field = FIELD_LABELS[c.field] ?? c.field;
   return `${field} ${c.op} ${c.value}`;
 }

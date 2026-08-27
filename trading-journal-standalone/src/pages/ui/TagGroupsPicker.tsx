@@ -57,7 +57,14 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
                 <button
                   key={o.id}
                   type="button"
-                  onClick={() => { onToggle(o.name); setOpen(false); }}
+                  // Deliberately does NOT close the popover - picking several
+                  // options for one trade (e.g. every EMA it's above) used to
+                  // mean reopening this exact popover once per option, which
+                  // is the opposite of what a multi-select picker should feel
+                  // like. It now stays open so you can click through several
+                  // in a row; the overlay below (or clicking elsewhere) is
+                  // still how you close it when you're done.
+                  onClick={() => onToggle(o.name)}
                   className="flex items-center gap-2 w-full px-1.5 py-1 rounded text-xs text-left hover:bg-accent"
                 >
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: o.color }} />
@@ -69,6 +76,11 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
               {input.trim() !== '' && !exactExists && (
                 <button
                   type="button"
+                  // Creating a brand new option is a more deliberate,
+                  // one-off action (typing a new value in) than toggling an
+                  // existing one, so this still closes the popover after -
+                  // matches how "+ New Account" and similar one-shot create
+                  // actions behave elsewhere in the app.
                   onClick={() => { onCreate(input.trim()); setInput(''); setOpen(false); }}
                   className="flex items-center gap-2 w-full px-1.5 py-1 rounded text-xs text-left hover:bg-accent text-primary"
                 >

@@ -547,6 +547,15 @@ export default function Performance() {
   const { data: rawTradesForHourly } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
   const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
   const allTags: Tag[] = rawTags ?? [];
+  // Same reasoning as Journal.tsx's accountTagOptions: tags are a shared,
+  // reusable pool across every account, but the Tags FILTER should only
+  // offer tags that could actually match a trade in the account you're
+  // currently looking at - otherwise it lists tags from other accounts
+  // that will never produce a result here.
+  const accountTagOptions = useMemo(() => {
+    const used = new Set((rawTradesForHourly ?? []).flatMap(t => t.tags ?? []));
+    return allTags.filter(t => used.has(t.name));
+  }, [rawTradesForHourly, allTags]);
 
   const [filters, setFilters] = useState<PerfFilters>(emptyFilters);
 
@@ -622,7 +631,7 @@ export default function Performance() {
         </div>
       </div>
 
-      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={allTags} />
+      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={accountTagOptions} />
 
       {loading && <div className="text-center py-16 text-muted-foreground">Loading…</div>}
 
