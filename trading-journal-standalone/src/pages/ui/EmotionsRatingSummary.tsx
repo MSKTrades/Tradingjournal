@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Smile, Star } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../lib/ui/card';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../lib/ui/table';
 import { Trade, fmtMoney } from '../data/types';
 import { summarizeOutcome } from '../data/risk';
 import { EMOTIONS_POSITIVE, EMOTIONS_CAUTION } from './TradeDetailPanel';
@@ -81,22 +82,40 @@ export default function EmotionsRatingSummary({ trades }: { trades: Trade[] }) {
           {emotionRows.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">No trades tagged with an emotion yet.</p>
           ) : (
-            <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
-              {emotionRows.map(row => (
-                <div key={row.name} className="flex items-center gap-2 text-xs py-1 border-b border-border/50 last:border-0">
-                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium border shrink-0 ${GROUP_BADGE_CLASS[row.group]}`}>
-                    {row.name}
-                  </span>
-                  <span className="text-muted-foreground shrink-0">{row.count}x</span>
-                  <span className="text-muted-foreground shrink-0">{row.winRate === null ? '—' : `${row.winRate}%`}</span>
-                  <span className={`font-mono font-medium shrink-0 ${row.totalGL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-                    {fmtMoney(row.totalGL)}
-                  </span>
-                  {row.avgRating != null && (
-                    <span className="text-muted-foreground truncate">★{row.avgRating} avg</span>
-                  )}
-                </div>
-              ))}
+            <div className="overflow-x-auto">
+              <Table className="text-xs">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="h-7 px-2 text-[11px]">Emotion</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Trades</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Wins</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Losses</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Win %</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Net $</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {emotionRows.map(row => (
+                    <TableRow key={row.name}>
+                      <TableCell className="p-2 whitespace-nowrap">
+                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium border ${GROUP_BADGE_CLASS[row.group]}`}>
+                          {row.name}
+                        </span>
+                        {row.avgRating != null && (
+                          <span className="ml-1.5 text-[11px] text-muted-foreground">★{row.avgRating}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="p-2 text-right">{row.count}</TableCell>
+                      <TableCell className="p-2 text-right">{row.wins}</TableCell>
+                      <TableCell className="p-2 text-right">{row.losses}</TableCell>
+                      <TableCell className="p-2 text-right">{row.winRate === null ? '—' : `${row.winRate}%`}</TableCell>
+                      <TableCell className={`p-2 text-right font-mono font-medium ${row.totalGL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                        {fmtMoney(row.totalGL)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           )}
         </div>
@@ -106,24 +125,42 @@ export default function EmotionsRatingSummary({ trades }: { trades: Trade[] }) {
           {ratingRows.length === 0 ? (
             <p className="text-xs text-muted-foreground italic">No trades rated yet.</p>
           ) : (
-            <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1">
-              {ratingRows.map(row => (
-                <div key={row.rating} className="flex items-center gap-2 text-xs py-1 border-b border-border/50 last:border-0">
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    {[1, 2, 3, 4, 5].map(n => (
-                      <Star
-                        key={n}
-                        className={`w-3 h-3 ${n <= row.rating ? 'fill-yellow-500 text-yellow-500' : 'fill-none text-muted-foreground'}`}
-                      />
-                    ))}
-                  </div>
-                  <span className="text-muted-foreground shrink-0">{row.count}x</span>
-                  <span className="text-muted-foreground shrink-0">{row.winRate === null ? '—' : `${row.winRate}%`}</span>
-                  <span className={`font-mono font-medium shrink-0 ${row.totalGL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-                    {fmtMoney(row.totalGL)}
-                  </span>
-                </div>
-              ))}
+            <div className="overflow-x-auto">
+              <Table className="text-xs">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="h-7 px-2 text-[11px]">Rating</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Trades</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Wins</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Losses</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Win %</TableHead>
+                    <TableHead className="h-7 px-2 text-[11px] text-right">Net $</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ratingRows.map(row => (
+                    <TableRow key={row.rating}>
+                      <TableCell className="p-2 whitespace-nowrap">
+                        <div className="flex items-center gap-0.5">
+                          {[1, 2, 3, 4, 5].map(n => (
+                            <Star
+                              key={n}
+                              className={`w-3 h-3 ${n <= row.rating ? 'fill-yellow-500 text-yellow-500' : 'fill-none text-muted-foreground'}`}
+                            />
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="p-2 text-right">{row.count}</TableCell>
+                      <TableCell className="p-2 text-right">{row.wins}</TableCell>
+                      <TableCell className="p-2 text-right">{row.losses}</TableCell>
+                      <TableCell className="p-2 text-right">{row.winRate === null ? '—' : `${row.winRate}%`}</TableCell>
+                      <TableCell className={`p-2 text-right font-mono font-medium ${row.totalGL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                        {fmtMoney(row.totalGL)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           )}
         </div>

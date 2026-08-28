@@ -722,7 +722,7 @@ export default function Summary() {
 
       <ChecklistCompliance trades={trades} checklists={checklists} />
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start mb-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
         <RiskGuardrail account={activeAccount} trades={trades} />
         {activeAccount && <PropPnlLedger accountId={activeAccount.id} />}
         <EmotionsRatingSummary trades={trades} />
