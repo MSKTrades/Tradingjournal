@@ -485,6 +485,16 @@ CREATE TABLE IF NOT EXISTS tag_group_options (
 -- more than one option per group is allowed, same as the flat tags list).
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS tag_selections JSONB NOT NULL DEFAULT '{}'::jsonb;
 
+-- Emotions + Trade Rating capture, added to the info bar at the top of the
+-- trade panel's right column - entirely separate from the tags/
+-- tag_selections system above. `emotions` is a fixed, curated list of
+-- mindset labels (not free-form, not user-editable - see EMOTIONS in
+-- TradeDetailPanel.tsx) rendered as multi-select toggle chips. `trade_rating`
+-- is a 1-5 self-graded rating of execution quality (did you follow your
+-- process), independent of whether the trade won or lost.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS emotions TEXT[];
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS trade_rating SMALLINT CHECK (trade_rating BETWEEN 1 AND 5);
+
 -- ============================================================================
 -- Chart Replay / Backtesting. Deliberately separate from `trades` /
 -- `accounts` — this is you rehearsing against historical candles, not real

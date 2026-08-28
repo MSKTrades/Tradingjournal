@@ -92,8 +92,9 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         partial_1=$29, partial_2=$30, reached_1r2=$31, reached_1r3=$32, reached_1r4=$33, reached_1r5=$34,
         max_rr=$35, comments=$36, extra_data=$37::jsonb, screenshots=$38::jsonb, notes_blocks=$39::jsonb,
         checklist_enabled=$40, checklist_id=$41, checklist_results=$42::jsonb, tags=$43::jsonb, tag_selections=$44::jsonb,
-        gross_profit=$45, commission=$46, net_profit=$47
-      WHERE id=$48`,
+        emotions=$45, trade_rating=$46,
+        gross_profit=$47, commission=$48, net_profit=$49
+      WHERE id=$50`,
       [
         newAccountId,
         p.trade_number,
@@ -107,6 +108,10 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.reached_1r2 ?? false, p.reached_1r3 ?? false, p.reached_1r4 ?? false, p.reached_1r5 ?? false,
         p.max_rr, comments, p.extra_data ?? {}, screenshots, p.notes_blocks ?? [],
         p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, p.tags ?? [], p.tag_selections ?? {},
+        // emotions is a native Postgres TEXT[] column (unlike tags, which is
+        // JSONB) - passed as a plain JS array with no ::jsonb cast, so the
+        // driver encodes it as a real Postgres array instead of JSON text.
+        p.emotions ?? [], p.trade_rating ?? null,
         p.gross_profit ?? null, p.commission ?? null, netProfit, id,
       ]
     );

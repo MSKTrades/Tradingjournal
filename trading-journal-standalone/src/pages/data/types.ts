@@ -93,6 +93,14 @@ export type Trade = {
   checklist_enabled: boolean;
   checklist_id: number | null;
   checklist_results: Record<string, boolean>; // keyed by ChecklistItem id (as string, since it round-trips through JSON)
+  // Emotions + Trade Rating - entirely separate from the tags/tag_selections
+  // system above. `emotions` is a fixed, curated list of mindset labels
+  // (not free-form, not user-editable - see EMOTIONS in TradeDetailPanel.tsx)
+  // rendered as multi-select toggle chips. `trade_rating` is a 1-5
+  // self-graded rating of execution quality (did you follow your process),
+  // independent of whether the trade won or lost - null when ungraded.
+  emotions: string[];
+  trade_rating: number | null;
   created_at: string;
 };
 

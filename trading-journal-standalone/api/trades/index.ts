@@ -94,12 +94,14 @@ async function addTrade(p: any) {
       date_closed, time_closed, closed_session, trade_duration,
       partial_1, partial_2, reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr,
       comments, extra_data, screenshots, notes_blocks, checklist_enabled, checklist_id, checklist_results, tags, tag_selections,
+      emotions, trade_rating,
       gross_profit, commission, net_profit
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
       $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,
       $36,$37::jsonb,$38::jsonb,$39::jsonb,$40,$41,$42::jsonb,$43::jsonb,$44::jsonb,
-      $45,$46,$47
+      $45,$46,
+      $47,$48,$49
     ) RETURNING id`,
     [
       accountId,
@@ -116,6 +118,10 @@ async function addTrade(p: any) {
       // note by deriveFromNotesBlocks below for why.
       p.max_rr, comments, p.extra_data ?? {}, screenshots, p.notes_blocks ?? [],
       p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, p.tags ?? [], p.tag_selections ?? {},
+      // emotions is a native Postgres TEXT[] column (unlike tags, which is
+      // JSONB) - passed as a plain JS array with no ::jsonb cast, so the
+      // driver encodes it as a real Postgres array instead of JSON text.
+      p.emotions ?? [], p.trade_rating ?? null,
       p.gross_profit ?? null, p.commission ?? null, netProfit,
     ]
   );

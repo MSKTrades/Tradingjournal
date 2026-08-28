@@ -738,11 +738,11 @@ export default function Summary() {
         </div>
       )}
 
+      <ChecklistCompliance trades={trades} checklists={checklists} />
+
       <RiskGuardrail account={activeAccount} trades={trades} />
 
       {activeAccount && <PropPnlLedger accountId={activeAccount.id} />}
-
-      <ChecklistCompliance trades={trades} checklists={checklists} />
 
       <NewsWidget />
 

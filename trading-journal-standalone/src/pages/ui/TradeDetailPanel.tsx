@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3, Pencil, Check, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3, Pencil, Check, Trash2, Star, Smile } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
@@ -79,6 +79,16 @@ type Props = {
 
 const INSTRUMENTS = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'GBPJPY', 'AUDUSD', 'USDCAD', 'BTCUSD', 'ETHUSD', 'XAGUSD'];
 
+// Fixed, curated emotion list for the Emotions picker in the right column's
+// info bar - deliberately NOT free-form/user-editable (unlike Tags below,
+// which is a whole separate system). Split into two visual groups purely
+// for scannability: positive/disciplined states first, caution states
+// second, reusing the same green/amber color vocabulary RiskGuardrail.tsx's
+// statusColor already uses for "good" vs "watch out" rather than inventing
+// new colors.
+const EMOTIONS_POSITIVE = ['Calm', 'Confident', 'Disciplined', 'Patient'];
+const EMOTIONS_CAUTION = ['FOMO', 'Impatient', 'Revenge Trade', 'Tilted'];
+
 function empty(accountId: number, tradeNumber: number): TradePayload {
   return {
     account_id: accountId,
@@ -100,11 +110,19 @@ function empty(accountId: number, tradeNumber: number): TradePayload {
     reached_1r2: false, reached_1r3: false, reached_1r4: false, reached_1r5: false,
     max_rr: null, comments: null, extra_data: {}, screenshots: [], notes_blocks: [],
     checklist_enabled: false, checklist_id: null, checklist_results: {},
+    emotions: [], trade_rating: null,
   };
 }
 
 function fromTrade(t: Trade): TradePayload {
-  return { ...t, notes_blocks: t.notes_blocks ?? [], screenshots: t.screenshots ?? [], tags: t.tags ?? [], tag_selections: t.tag_selections ?? {} };
+  return {
+    ...t, notes_blocks: t.notes_blocks ?? [], screenshots: t.screenshots ?? [], tags: t.tags ?? [], tag_selections: t.tag_selections ?? {},
+    // Older trades saved before this feature existed won't have `emotions`
+    // at all - default it to [] so the toggle-chip UI below doesn't crash
+    // on .includes(). trade_rating is already nullable, so it needs no
+    // equivalent fallback.
+    emotions: t.emotions ?? [],
+  };
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -387,6 +405,19 @@ export default function TradeDetailPanel({
 
   function setChecklistResult(itemId: number, value: boolean) {
     setForm(p => ({ ...p, checklist_results: { ...p.checklist_results, [String(itemId)]: value } }));
+  }
+
+  // Multi-select toggle for the fixed Emotions list - adds/removes `name`
+  // from form.emotions, same on/off pattern as a checkbox.
+  function toggleEmotion(name: string) {
+    set('emotions', form.emotions.includes(name) ? form.emotions.filter(e => e !== name) : [...form.emotions, name]);
+  }
+  // Single-select for Trade Rating, with click-to-clear: clicking the star
+  // at the currently-selected position again resets to null instead of
+  // re-setting the same value, so a misclick is a second click to undo
+  // rather than needing some separate "clear" affordance.
+  function setTradeRating(n: number) {
+    set('trade_rating', form.trade_rating === n ? null : n);
   }
 
   // Small typed helper so each <NumField> call site below doesn't have to
@@ -970,6 +1001,82 @@ export default function TradeDetailPanel({
                 <span className="text-sm font-medium">
                   {form.date_closed ? (form.trade_duration ?? '—') : 'Trade still open'}
                 </span>
+              </div>
+            </div>
+
+            {/* Emotions + Trade Rating - a new, prominent capture point
+                separate from the Tags system at the bottom of the left
+                column. Placed right below the Checklist/News Day/Duration
+                info bar above, per feedback that a Tags-based "Mindset"
+                group was too buried in a long form to actually get used. */}
+            <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 mb-4 flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Smile className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="text-xs text-muted-foreground shrink-0">Emotions</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {EMOTIONS_POSITIVE.map(name => (
+                    <button
+                      key={name}
+                      type="button"
+                      aria-pressed={form.emotions.includes(name)}
+                      onClick={() => toggleEmotion(name)}
+                      className={cn(
+                        'px-2 py-1 rounded-full text-xs font-medium border transition-colors',
+                        form.emotions.includes(name)
+                          ? 'border-green-500 bg-green-500/15 text-green-700 dark:text-green-300'
+                          : 'border-border bg-transparent text-muted-foreground hover:border-foreground/40'
+                      )}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                  {EMOTIONS_CAUTION.map(name => (
+                    <button
+                      key={name}
+                      type="button"
+                      aria-pressed={form.emotions.includes(name)}
+                      onClick={() => toggleEmotion(name)}
+                      className={cn(
+                        'px-2 py-1 rounded-full text-xs font-medium border transition-colors',
+                        form.emotions.includes(name)
+                          ? 'border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                          : 'border-border bg-transparent text-muted-foreground hover:border-foreground/40'
+                      )}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Star className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="text-xs text-muted-foreground shrink-0">Trade Rating</span>
+                <div className="flex items-center gap-0.5">
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button
+                      key={n}
+                      type="button"
+                      aria-label={`Rate ${n}`}
+                      aria-pressed={form.trade_rating === n}
+                      onClick={() => setTradeRating(n)}
+                      className="p-0.5 text-muted-foreground hover:text-yellow-500"
+                      title="Click again to clear"
+                    >
+                      <Star
+                        className={cn(
+                          'w-4 h-4',
+                          form.trade_rating != null && n <= form.trade_rating
+                            ? 'fill-yellow-500 text-yellow-500'
+                            : 'fill-none'
+                        )}
+                      />
+                    </button>
+                  ))}
+                  {form.trade_rating != null && (
+                    <span className="text-xs text-muted-foreground ml-1.5">{form.trade_rating}/5</span>
+                  )}
+                </div>
               </div>
             </div>
 
