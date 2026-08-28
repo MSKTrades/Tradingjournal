@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { randomBytes } from 'node:crypto';
 import { db, withApi, recalcAccountCapital } from './_db.js';
 import { requireUserId, ownsAccount } from './_auth.js';
 import { provisionAccount, getAccountStatus, removeAccount, fetchDealsByTimeRange, groupClosedPositions, toTradeRow } from './_metaapi.js';
@@ -216,8 +217,180 @@ async function deleteLedgerEntry(sql: ReturnType<typeof db>, userId: number, id:
   return { deleted: 1 };
 }
 
+// --- Public Track Record ------------------------------------------------
+//
+// Lives here as resource= branches, same reasoning as mt_connect/ledger
+// above. Two of the three pieces below are normal, authenticated,
+// ownsAccount-gated branches (regenerate_share_token, and the
+// public_share_* fields folded into the existing PUT below). The read side
+// (public_track_record) is the one deliberately UNAUTHENTICATED branch on
+// this whole endpoint - see the carve-out in the default export below - a
+// visitor with nothing but the unguessable token in the URL, no PipEcho
+// cookie at all, needs to be able to load it.
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// Walks the trade list once, in the same chronological order they're
+// queried in, and produces every number the public track-record page needs
+// - win/loss counts, the equity curve, total return, and max/current
+// drawdown. Deliberately a self-contained port of src/pages/data/risk.ts's
+// computeDrawdown rather than an import of it (that file is client TS,
+// awkward to pull into a Vercel API file) - kept consistent with it by
+// walking the same "running peak, distance below it" shape, just over the
+// equity curve expressed as a % of starting_balance (equity / startingBalance
+// * 100, so it starts at 100) instead of raw dollars.
+//
+// Why percent instead of dollars: public_share_show_dollars may be false,
+// meaning the account owner specifically doesn't want their real account
+// size exposed - if raw per-trade dollar gain_loss ever left the server, a
+// technically curious visitor could reconstruct the dollar starting balance
+// from the network response even with the UI never displaying it. Walking
+// the % curve here and only exposing dollar figures elsewhere in the
+// response when showDollars is true is a real privacy boundary, not just a
+// UI toggle.
+//
+// Because the % curve is just the dollar curve rescaled by a constant
+// (divide by startingBalance, multiply by 100), walking peak/drawdown over
+// it directly is equivalent to walking the dollar curve and converting
+// afterwards - so the dollar totals below (returned only when the caller
+// asks for them) are derived back out of the already-computed % numbers
+// rather than tracked as a second parallel walk.
+//
+// Zero trades is not special-cased - every accumulator below is already
+// initialized to its correct empty-state value (equity pinned at
+// startingBalance, peak at 100, drawdowns at 0), so an account that enabled
+// sharing before logging a single trade falls out of the same code path
+// with totalTrades: 0, equityCurve: [], winRate: null, and every % figure at
+// 0, rather than erroring or dividing by zero.
+function computeTrackRecordStats(trades: any[], startingBalance: number) {
+  const totalTrades = trades.length;
+  let wins = 0;
+  let losses = 0;
+  for (const t of trades) {
+    if (t.profit_loss === 'Profit') wins++;
+    else if (t.profit_loss === 'Loss') losses++;
+  }
+  const decided = wins + losses;
+  const winRate = decided > 0 ? Math.round((wins / decided) * 100) : null;
+
+  const startDate = totalTrades > 0 ? String(trades[0].trade_placed_at).slice(0, 10) : null;
+  const endDate = totalTrades > 0 ? String(trades[totalTrades - 1].trade_placed_at).slice(0, 10) : null;
+
+  let equity = startingBalance;
+  let peakPct = 100;
+  let maxDrawdownPct = 0;
+  let currentDrawdownPct = 0;
+  const equityCurve: { idx: number; date: string; pct: number }[] = [];
+
+  trades.forEach((t, i) => {
+    equity += Number(t.gain_loss ?? 0);
+    // startingBalance === 0 would otherwise divide-by-zero into
+    // NaN/Infinity, which JSON.stringify silently turns into `null` -
+    // pinning pct at 100 (no change from a zero base) keeps the response a
+    // real, sane number instead.
+    const pct = startingBalance !== 0 ? (equity / startingBalance) * 100 : 100;
+    if (pct > peakPct) peakPct = pct;
+    const ddPct = peakPct - pct;
+    if (ddPct > maxDrawdownPct) maxDrawdownPct = ddPct;
+    currentDrawdownPct = ddPct;
+    equityCurve.push({ idx: i + 1, date: String(t.trade_placed_at).slice(0, 10), pct: round2(pct) });
+  });
+
+  const totalReturnPct = startingBalance !== 0 ? ((equity - startingBalance) / startingBalance) * 100 : 0;
+
+  return {
+    startDate,
+    endDate,
+    totalTrades,
+    wins,
+    losses,
+    winRate,
+    totalReturnPct: round2(totalReturnPct),
+    maxDrawdownPct: round2(maxDrawdownPct),
+    currentDrawdownPct: round2(currentDrawdownPct),
+    equityCurve,
+    // Derived from the % figures above (see the big comment up top), not a
+    // second walk - startingBalance is a real dollar amount even when the
+    // caller won't be shown it.
+    totalReturnDollar: round2(equity - startingBalance),
+    maxDrawdownDollar: round2((maxDrawdownPct / 100) * startingBalance),
+  };
+}
+
+async function handlePublicTrackRecord(req: VercelRequest, res: VercelResponse, sql: ReturnType<typeof db>) {
+  const token = String(req.query.token ?? '').trim();
+  if (!token) { res.status(400).json({ error: 'token is required' }); return; }
+
+  const rows = await sql.unsafe(
+    `SELECT id, name, public_share_name, public_share_enabled, public_share_show_dollars, starting_balance
+     FROM accounts WHERE public_share_token = $1`,
+    [token]
+  );
+  const account = rows[0];
+  // A wrong/unknown token and a right token whose owner has since turned
+  // sharing off must look identical to the caller - anything else would let
+  // a visitor distinguish "this link never existed" from "this link used to
+  // work", which leaks more than intended about an account that isn't
+  // theirs.
+  if (!account || !account.public_share_enabled) { res.status(404).json({ error: 'Not found' }); return; }
+
+  const startingBalance = Number(account.starting_balance ?? 0);
+  const showDollars = !!account.public_share_show_dollars;
+
+  const trades = await sql.unsafe(
+    `SELECT trade_placed_at, gain_loss, profit_loss FROM trades
+     WHERE account_id = $1 AND trade_placed_at IS NOT NULL
+     ORDER BY trade_placed_at ASC, id ASC`,
+    [account.id]
+  );
+
+  const stats = computeTrackRecordStats(trades, startingBalance);
+
+  res.status(200).json({
+    displayName: account.public_share_name || account.name,
+    startDate: stats.startDate,
+    endDate: stats.endDate,
+    totalTrades: stats.totalTrades,
+    wins: stats.wins,
+    losses: stats.losses,
+    winRate: stats.winRate,
+    totalReturnPct: stats.totalReturnPct,
+    maxDrawdownPct: stats.maxDrawdownPct,
+    currentDrawdownPct: stats.currentDrawdownPct,
+    equityCurve: stats.equityCurve,
+    showDollars,
+    totalReturnDollar: showDollars ? stats.totalReturnDollar : null,
+    maxDrawdownDollar: showDollars ? stats.maxDrawdownDollar : null,
+    startingBalanceDollar: showDollars ? startingBalance : null,
+    lastUpdated: new Date().toISOString(),
+  });
+}
+
+async function handleRegenerateShareToken(sql: ReturnType<typeof db>, userId: number, accountId: number) {
+  if (!accountId || !(await ownsAccount(sql, accountId, userId))) throw new Error('Account not found');
+  const token = randomBytes(24).toString('base64url');
+  await sql.unsafe('UPDATE accounts SET public_share_token = $1 WHERE id = $2', [token, accountId]);
+  return { public_share_token: token };
+}
+
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
+
+  // resource= is parsed BEFORE the auth check specifically so the public,
+  // unauthenticated track-record branch immediately below can run for a
+  // visitor with zero cookies. Every other resource branch (and the plain
+  // account CRUD beneath all of it) still requires requireUserId exactly as
+  // before - this is a narrow, surgical carve-out for that one read-only
+  // public resource, not a general reordering of the auth check.
+  const resource = (req.method === 'POST' ? req.body?.resource : req.query.resource) as string | undefined;
+
+  if (resource === 'public_track_record' && req.method === 'GET') {
+    await handlePublicTrackRecord(req, res, sql);
+    return;
+  }
+
   const userId = await requireUserId(req, res, sql);
   if (!userId) return;
 
@@ -225,7 +398,6 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   // completely separate from the plain account CRUD below, which has no
   // concept of `resource` at all and must keep working exactly as before
   // for every request that doesn't pass one.
-  const resource = (req.method === 'POST' ? req.body?.resource : req.query.resource) as string | undefined;
   if (resource) {
     try {
       if (resource === 'mt_connect' && req.method === 'POST') {
@@ -254,6 +426,10 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       }
       if (resource === 'ledger' && req.method === 'DELETE') {
         res.status(200).json(await deleteLedgerEntry(sql, userId, Number(req.query.id)));
+        return;
+      }
+      if (resource === 'regenerate_share_token' && req.method === 'POST') {
+        res.status(200).json(await handleRegenerateShareToken(sql, userId, Number(req.body?.account_id)));
         return;
       }
       res.status(404).json({ error: 'Not found' });
@@ -287,15 +463,29 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const name = String(p?.name ?? '').trim();
     if (!name) { res.status(400).json({ error: 'Account name is required' }); return; }
 
+    const publicShareEnabled = p.public_share_enabled ?? false;
+    // Generated up front, unconditionally, and only actually used by the
+    // CASE below when this update is the one turning sharing on for an
+    // account that doesn't have a token yet - one round trip either way,
+    // rather than a separate SELECT to check the existing token first.
+    // Generating (and discarding) a random token on every save that doesn't
+    // need it is a non-issue - it's never written anywhere unless the CASE
+    // picks it.
+    const candidateShareToken = randomBytes(24).toString('base64url');
+
     const rows = await sql.unsafe(
       `UPDATE accounts SET
         name = $1, type = $2, starting_balance = $3, active = $4, sort_order = $5,
-        daily_loss_limit_pct = $6, max_drawdown_limit_pct = $7, consistency_rule_pct = $8
-       WHERE id = $9 AND user_id = $10
+        daily_loss_limit_pct = $6, max_drawdown_limit_pct = $7, consistency_rule_pct = $8,
+        public_share_enabled = $9, public_share_name = $10, public_share_show_dollars = $11,
+        public_share_token = CASE WHEN $9 AND public_share_token IS NULL THEN $12 ELSE public_share_token END
+       WHERE id = $13 AND user_id = $14
        RETURNING *`,
       [
         name, p.type ?? null, p.starting_balance ?? null, p.active ?? true, p.sort_order ?? 0,
-        p.daily_loss_limit_pct ?? null, p.max_drawdown_limit_pct ?? null, p.consistency_rule_pct ?? null, id, userId,
+        p.daily_loss_limit_pct ?? null, p.max_drawdown_limit_pct ?? null, p.consistency_rule_pct ?? null,
+        publicShareEnabled, p.public_share_name ?? null, p.public_share_show_dollars ?? false,
+        candidateShareToken, id, userId,
       ]
     );
 

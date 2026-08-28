@@ -14,7 +14,7 @@ export default function RuleChecklist({ rules }: { rules: RuleCheck[] }) {
         <li key={r.id} className="flex items-start gap-2 text-xs">
           <span className={
             r.pass === true ? 'text-green-600 dark:text-green-400 mt-0.5 shrink-0'
-              : r.pass === false ? 'text-red-500 dark:text-red-400 mt-0.5 shrink-0'
+              : r.pass === false ? 'text-red-400 dark:text-red-300 mt-0.5 shrink-0'
               : 'text-amber-500 mt-0.5 shrink-0'
           }>
             {r.pass === true ? <Check className="w-3.5 h-3.5" /> : r.pass === false ? <X className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}

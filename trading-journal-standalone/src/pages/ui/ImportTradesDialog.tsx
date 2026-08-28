@@ -476,7 +476,7 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
                       <TableCell className="text-xs py-1 px-2">{t.direction}</TableCell>
                       <TableCell className="text-xs py-1 px-2">{t.cisd_break ?? '—'}</TableCell>
                       <TableCell className="text-xs py-1 px-2">{t.inverse_candle_size ?? '—'}</TableCell>
-                      <TableCell className={`text-xs py-1 px-2 font-semibold ${t.profit_loss === 'Profit' ? 'text-green-600 dark:text-green-400' : t.profit_loss === 'Loss' ? 'text-red-500 dark:text-red-400' : ''}`}>
+                      <TableCell className={`text-xs py-1 px-2 font-semibold ${t.profit_loss === 'Profit' ? 'text-green-600 dark:text-green-400' : t.profit_loss === 'Loss' ? 'text-red-400 dark:text-red-300' : ''}`}>
                         {t.profit_loss ?? '—'}
                       </TableCell>
                       <TableCell className="text-xs py-1 px-2">{t.rr ?? '—'}</TableCell>

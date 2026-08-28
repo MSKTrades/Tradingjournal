@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../lib/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../lib/ui/table';
-import { Trade, TagGroup, fmtMoney } from '../data/types';
+import { Trade, TagGroup, fmtMoney, plColor } from '../data/types';
 import { summarizeOutcome } from '../data/risk';
 import { useFetch } from '../../lib/api';
 
@@ -102,7 +102,7 @@ export default function ExecutionMistakeSummary({ trades }: { trades: Trade[] })
                     <TableCell className="p-2 text-right">{row.wins}</TableCell>
                     <TableCell className="p-2 text-right">{row.losses}</TableCell>
                     <TableCell className="p-2 text-right">{row.winRate === null ? '—' : `${row.winRate}%`}</TableCell>
-                    <TableCell className={`p-2 text-right font-mono font-medium ${row.totalGL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                    <TableCell className={`p-2 text-right font-mono font-medium ${plColor(row.totalGL)}`}>
                       {fmtMoney(row.totalGL)}
                     </TableCell>
                   </TableRow>

@@ -157,7 +157,7 @@ const GROUP_BADGE_CLASS: Record<'positive' | 'caution', string> = {
 
 function StatBlock({ label, value, accent = 'none', sub }: { label: string; value: string; accent?: 'green' | 'red' | 'none'; sub?: string }) {
   const color = accent === 'green' ? 'text-green-600 dark:text-green-400'
-    : accent === 'red' ? 'text-red-500 dark:text-red-400'
+    : accent === 'red' ? 'text-red-400 dark:text-red-300'
     : '';
   return (
     <div>

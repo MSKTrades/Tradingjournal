@@ -11,7 +11,7 @@ import { Button } from '../lib/ui/button';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import {
-  StrategyResult, Trade, CustomColumn, Checklist, Condition, FIELD_LABELS, WEEKDAYS, TAG_CONDITION_FIELD, fmtMoney,
+  StrategyResult, Trade, CustomColumn, Checklist, Condition, FIELD_LABELS, WEEKDAYS, TAG_CONDITION_FIELD, fmtMoney, plColor,
 } from './data/types';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
 
@@ -206,7 +206,7 @@ export default function StrategyDetail() {
         <Card>
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-muted-foreground">Total R</p>
-            <p className={`text-2xl font-bold ${strategy.total_r >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+            <p className={`text-2xl font-bold ${plColor(strategy.total_r)}`}>
               {strategy.total_r > 0 ? '+' : ''}{strategy.total_r}R
             </p>
           </CardContent>
@@ -214,7 +214,7 @@ export default function StrategyDetail() {
         <Card>
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-muted-foreground">Avg R / Trade</p>
-            <p className={`text-2xl font-bold ${strategy.avg_r >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+            <p className={`text-2xl font-bold ${plColor(strategy.avg_r)}`}>
               {strategy.avg_r > 0 ? '+' : ''}{strategy.avg_r}R
             </p>
           </CardContent>
@@ -275,7 +275,7 @@ export default function StrategyDetail() {
                         <TableCell colSpan={4} className="text-xs font-semibold text-muted-foreground bg-muted/40 py-1.5">
                           {group.label}
                         </TableCell>
-                        <TableCell className={`text-right text-xs font-semibold bg-muted/40 py-1.5 font-mono ${group.total >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                        <TableCell className={`text-right text-xs font-semibold bg-muted/40 py-1.5 font-mono ${plColor(group.total)}`}>
                           {fmtMoney(group.total)}
                         </TableCell>
                       </TableRow>
@@ -293,7 +293,7 @@ export default function StrategyDetail() {
                             {t.profit_loss === 'Loss' && <Badge className="bg-red-500/20 text-red-700 dark:text-red-300 border-red-400/30 text-xs">Loss</Badge>}
                             {!t.profit_loss && <Badge variant="secondary" className="text-xs">—</Badge>}
                           </TableCell>
-                          <TableCell className={`text-right font-mono ${Number(t.gain_loss ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                          <TableCell className={`text-right font-mono ${plColor(Number(t.gain_loss ?? 0))}`}>
                             {fmtMoney(t.gain_loss)}
                           </TableCell>
                         </TableRow>

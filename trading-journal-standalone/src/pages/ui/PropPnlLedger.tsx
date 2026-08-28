@@ -4,7 +4,7 @@ import { Button } from '../../lib/ui/button';
 import { Input, Label, Badge } from '../../lib/ui/form';
 import { Wallet, Trash2 } from 'lucide-react';
 import { api, useFetch } from '../../lib/api';
-import { LedgerEntry, fmtMoney } from '../data/types';
+import { LedgerEntry, fmtMoney, plColor } from '../data/types';
 
 // Local-date "today" (not UTC) - same reasoning already used for
 // trade_placed_at / todayISODate() elsewhere in this app (see risk.ts,
@@ -112,7 +112,7 @@ export default function PropPnlLedger({ accountId }: { accountId: number }) {
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Net Position</p>
-            <p className={`text-lg font-bold ${net >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+            <p className={`text-lg font-bold ${plColor(net)}`}>
               {fmtMoney(net)}
             </p>
           </div>

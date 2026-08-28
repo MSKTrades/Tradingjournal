@@ -33,6 +33,27 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS max_drawdown_limit_pct NUMERIC;
 -- from being logged if this is exceeded, same as the other two.
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS consistency_rule_pct NUMERIC;
 
+-- Public Track Record: lets an account owner flip on a read-only, unguessable
+-- public URL (/track/{token}) showing that account's performance to anyone
+-- with the link, no login required - e.g. to show a prop firm or investor
+-- proof of results without handing out a PipEcho login. public_share_token
+-- is generated server-side (randomBytes(24).toString('base64url'), see
+-- api/accounts.ts) the first time public_share_enabled is turned on, never
+-- guessable/sequential like the account's own id, and stays stable across
+-- future toggles so a previously-shared link keeps working until the owner
+-- explicitly hits Regenerate. public_share_name lets the owner show a
+-- different name to visitors than the account's real name (NULL = fall back
+-- to accounts.name). public_share_show_dollars defaults to false - with it
+-- off, the public API response (see handlePublicTrackRecord) only ever
+-- returns percentages, never this account's real starting balance or dollar
+-- P/L, which is a privacy boundary enforced server-side, not just a UI
+-- toggle.
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS public_share_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS public_share_token TEXT UNIQUE;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS public_share_name TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS public_share_show_dollars BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_accounts_public_share_token ON accounts(public_share_token) WHERE public_share_token IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS trades (
   id                     SERIAL PRIMARY KEY,
   account_id             INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,

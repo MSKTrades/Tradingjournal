@@ -15,6 +15,19 @@ export type Account = {
   // profit. NULL = not tracked. Purely informational, same as the two
   // above - see schema.sql.
   consistency_rule_pct: number | null;
+  // Public Track Record - a shareable, unguessable public URL
+  // (/track/{token}) showing a read-only summary of this account's
+  // performance, no login required. public_share_token is server-generated
+  // (see api/accounts.ts) the first time public_share_enabled is turned on,
+  // and NULL until then. public_share_name lets the owner show a different
+  // name to visitors than this account's real name (NULL = fall back to
+  // name). public_share_show_dollars defaults to false - off means visitors
+  // only ever see percentages, never the real starting balance or dollar
+  // P/L. See schema.sql.
+  public_share_enabled: boolean;
+  public_share_token: string | null;
+  public_share_name: string | null;
+  public_share_show_dollars: boolean;
 };
 
 // One cash movement to/from the prop firm for an account - a challenge fee
@@ -381,7 +394,12 @@ export function fmtPct(v: number | null | undefined): string {
 
 export function plColor(v: number | null | undefined): string {
   if (v == null) return 'text-muted-foreground';
-  return Number(v) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
+  // Softened one step lighter on the loss side (red-500/red-400 -> red-400/
+  // red-300) - a wall of alarm-red P/L numbers reads badly for trading
+  // psychology, so losses still read clearly as losses without being the
+  // loudest thing on the screen. Wins are left as-is; this is specifically
+  // about dialing back red, not re-balancing the whole win/loss contrast.
+  return Number(v) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-400 dark:text-red-300';
 }
 
 // --- Chart Replay / Backtesting -------------------------------------------

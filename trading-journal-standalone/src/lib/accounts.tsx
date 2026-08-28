@@ -22,6 +22,12 @@ export type AccountPatch = {
   daily_loss_limit_pct: number | null;
   max_drawdown_limit_pct: number | null;
   consistency_rule_pct: number | null;
+  // Public Track Record fields - optional because AccountDialog only ever
+  // sends these when editing an existing account (a brand-new account has
+  // no id yet to attach a share token to). See schema.sql / api/accounts.ts.
+  public_share_enabled?: boolean;
+  public_share_name?: string | null;
+  public_share_show_dollars?: boolean;
 };
 
 type AccountContextValue = {

@@ -664,7 +664,7 @@ export default function TradeDetailPanel({
                   'h-9 flex items-center px-3 rounded-md border border-border bg-muted/30 text-sm font-mono',
                   form.net_profit == null
                     ? 'text-muted-foreground'
-                    : cn('font-bold', form.net_profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')
+                    : cn('font-bold', form.net_profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-400 dark:text-red-300')
                 )}>
                   {form.net_profit != null ? fmtMoney(form.net_profit) : 'Enter Gross Profit/Loss above'}
                 </div>
@@ -720,7 +720,7 @@ export default function TradeDetailPanel({
                   </div>
                   <div className={cn('rounded-lg border p-2 text-center', (trade.gain_loss ?? 0) >= 0 ? 'border-green-500/30 bg-green-500/10' : 'border-red-500/30 bg-red-500/10')}>
                     <p className="text-[10px] text-muted-foreground">Gain / Loss</p>
-                    <p className={cn('text-sm font-bold', (trade.gain_loss ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')}>
+                    <p className={cn('text-sm font-bold', (trade.gain_loss ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-400 dark:text-red-300')}>
                       {fmtMoney(trade.gain_loss)}
                     </p>
                   </div>
@@ -966,7 +966,11 @@ export default function TradeDetailPanel({
                                 <span className={cn(
                                   'px-1.5 py-0.5 rounded-full text-[10px] font-medium',
                                   e.impact.toLowerCase() === 'high'
-                                    ? 'bg-red-500/20 text-red-600 dark:text-red-400'
+                                    // "High impact" is a heads-up/caution badge, not a
+                                    // loss indicator - matches the app's dark-orange
+                                    // "pay attention" convention (RiskGuardrail etc.)
+                                    // rather than alarm-red.
+                                    ? 'bg-orange-700/20 text-orange-700 dark:text-orange-400'
                                     : 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400'
                                 )}>
                                   {e.impact}
@@ -1011,8 +1015,8 @@ export default function TradeDetailPanel({
                 group was too buried in a long form to actually get used. */}
             <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 mb-4 flex flex-col gap-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Smile className="w-4 h-4 text-muted-foreground shrink-0" />
-                <span className="text-xs text-muted-foreground shrink-0">Emotions</span>
+                <Smile className="w-4 h-4 text-primary shrink-0" />
+                <span className="text-xs font-bold text-primary shrink-0">Emotions</span>
                 <div className="flex flex-wrap gap-1.5">
                   {EMOTIONS_POSITIVE.map(name => (
                     <button
@@ -1050,8 +1054,8 @@ export default function TradeDetailPanel({
               </div>
 
               <div className="flex items-center gap-2">
-                <Star className="w-4 h-4 text-muted-foreground shrink-0" />
-                <span className="text-xs text-muted-foreground shrink-0">Trade Rating</span>
+                <Star className="w-4 h-4 text-primary shrink-0" />
+                <span className="text-xs font-bold text-primary shrink-0">Trade Rating</span>
                 <div className="flex items-center gap-0.5">
                   {[1, 2, 3, 4, 5].map(n => (
                     <button

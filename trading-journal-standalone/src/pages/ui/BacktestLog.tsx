@@ -5,7 +5,7 @@ import { Input } from '../../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../lib/ui/table';
 import { Button } from '../../lib/ui/button';
 import { X, Plus } from 'lucide-react';
-import { BacktestTrade, Tag } from '../data/types';
+import { BacktestTrade, Tag, plColor } from '../data/types';
 
 type Props = {
   trades: BacktestTrade[];
@@ -178,7 +178,7 @@ export default function BacktestLog({ trades, allTags, onCloseTrade, onDeleteTra
         </CardContent></Card>
         <Card><CardContent className="pt-3 pb-2.5">
           <p className="text-xs text-muted-foreground">Total R</p>
-          <p className={`text-xl font-bold ${stats.totalR >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+          <p className={`text-xl font-bold ${plColor(stats.totalR)}`}>
             {stats.totalR > 0 ? '+' : ''}{stats.totalR}R
           </p>
         </CardContent></Card>
@@ -194,17 +194,17 @@ export default function BacktestLog({ trades, allTags, onCloseTrade, onDeleteTra
         </CardContent></Card>
         <Card><CardContent className="pt-3 pb-2.5">
           <p className="text-xs text-muted-foreground">Max Drawdown</p>
-          <p className="text-xl font-bold text-red-500 dark:text-red-400">{stats.closed > 0 ? `-${stats.maxDrawdown}R` : '—'}</p>
+          <p className="text-xl font-bold text-red-400 dark:text-red-300">{stats.closed > 0 ? `-${stats.maxDrawdown}R` : '—'}</p>
         </CardContent></Card>
         <Card><CardContent className="pt-3 pb-2.5">
           <p className="text-xs text-muted-foreground">Long</p>
           <p className="text-xl font-bold">{stats.long.count > 0 ? `${stats.long.winRate}%` : '—'}</p>
-          <p className={`text-xs ${stats.long.totalR >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{stats.long.count > 0 ? `${stats.long.totalR > 0 ? '+' : ''}${stats.long.totalR}R (${stats.long.count})` : '0 trades'}</p>
+          <p className={`text-xs ${plColor(stats.long.totalR)}`}>{stats.long.count > 0 ? `${stats.long.totalR > 0 ? '+' : ''}${stats.long.totalR}R (${stats.long.count})` : '0 trades'}</p>
         </CardContent></Card>
         <Card><CardContent className="pt-3 pb-2.5">
           <p className="text-xs text-muted-foreground">Short</p>
           <p className="text-xl font-bold">{stats.short.count > 0 ? `${stats.short.winRate}%` : '—'}</p>
-          <p className={`text-xs ${stats.short.totalR >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{stats.short.count > 0 ? `${stats.short.totalR > 0 ? '+' : ''}${stats.short.totalR}R (${stats.short.count})` : '0 trades'}</p>
+          <p className={`text-xs ${plColor(stats.short.totalR)}`}>{stats.short.count > 0 ? `${stats.short.totalR > 0 ? '+' : ''}${stats.short.totalR}R (${stats.short.count})` : '0 trades'}</p>
         </CardContent></Card>
       </div>
 
@@ -244,7 +244,7 @@ export default function BacktestLog({ trades, allTags, onCloseTrade, onDeleteTra
                           <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => onCloseTrade(t)}>Close</Button>
                         )}
                       </TableCell>
-                      <TableCell className={`text-right font-mono ${t.rr == null ? 'text-muted-foreground' : Number(t.rr) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                      <TableCell className={`text-right font-mono ${plColor(t.rr)}`}>
                         {t.rr != null ? `${Number(t.rr) > 0 ? '+' : ''}${Number(t.rr).toFixed(2)}R` : '—'}
                       </TableCell>
                       <TableCell className="min-w-[140px]">

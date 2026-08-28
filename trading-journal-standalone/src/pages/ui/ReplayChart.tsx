@@ -633,7 +633,7 @@ export default function ReplayChart({ candles, visibleCount, trades, height = 48
         return [entryMarker, {
           time: exitTimeSec,
           position: 'inBar' as const,
-          color: t.result === 'Profit' ? '#22c55e' : '#ef4444',
+          color: t.result === 'Profit' ? '#22c55e' : '#f87171',
           shape: 'circle' as const,
           text: t.result === 'Profit' ? 'Win' : 'Loss',
         }];

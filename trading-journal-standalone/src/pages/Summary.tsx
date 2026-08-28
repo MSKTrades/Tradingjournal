@@ -7,7 +7,7 @@ import { TrendingUp, TrendingDown, Target, RefreshCw, ListChecks, Newspaper, Glo
 import { Button } from '../lib/ui/button';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney } from './data/types';
+import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney, plColor } from './data/types';
 import CurrencyFlag from './ui/CurrencyFlag';
 import RiskGuardrail from './ui/RiskGuardrail';
 import PropPnlLedger from './ui/PropPnlLedger';
@@ -144,7 +144,7 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
                         <TableRow key={r.item.id}>
                           <TableCell className="text-sm">{r.item.text}</TableCell>
                           <TableCell className="text-center text-green-600 dark:text-green-400">{r.followed}</TableCell>
-                          <TableCell className="text-center text-red-500 dark:text-red-400">{r.broken}</TableCell>
+                          <TableCell className="text-center text-red-400 dark:text-red-300">{r.broken}</TableCell>
                           <TableCell className="text-center">{r.pct === null ? '—' : `${r.pct}%`}</TableCell>
                         </TableRow>
                       ))}
@@ -165,7 +165,7 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
                           {fullCompliance.winRate === null ? 'No wins/losses yet' : `${fullCompliance.winRate}% win rate`}
                           {' '}({fullCompliance.wins}W / {fullCompliance.losses}L)
                           {' '}&middot;{' '}
-                          <span className={fullCompliance.totalGL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}>
+                          <span className={plColor(fullCompliance.totalGL)}>
                             {fullCompliance.totalGL > 0 ? '+' : ''}{fmtMoney(fullCompliance.totalGL)} total
                           </span>
                         </p>
@@ -185,7 +185,7 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
                           {notFullCompliance.winRate === null ? 'No wins/losses yet' : `${notFullCompliance.winRate}% win rate`}
                           {' '}({notFullCompliance.wins}W / {notFullCompliance.losses}L)
                           {' '}&middot;{' '}
-                          <span className={notFullCompliance.totalGL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}>
+                          <span className={plColor(notFullCompliance.totalGL)}>
                             {notFullCompliance.totalGL > 0 ? '+' : ''}{fmtMoney(notFullCompliance.totalGL)} total
                           </span>
                         </p>
@@ -706,14 +706,14 @@ export default function Summary() {
                   <TableCell className="font-medium text-primary hover:underline">{r.name}</TableCell>
                   <TableCell className="text-center">{r.total_trades}</TableCell>
                   <TableCell className="text-center text-green-600 dark:text-green-400">{r.wins}</TableCell>
-                  <TableCell className="text-center text-red-500 dark:text-red-400">{r.losses}</TableCell>
+                  <TableCell className="text-center text-red-400 dark:text-red-300">{r.losses}</TableCell>
                   <TableCell className="text-center">{r.win_rate}%</TableCell>
-                  <TableCell className={`text-center font-mono ${r.profit_factor !== null && r.profit_factor < 1 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                  <TableCell className={`text-center font-mono ${r.profit_factor !== null && r.profit_factor < 1 ? 'text-red-400 dark:text-red-300' : 'text-green-600 dark:text-green-400'}`}>
                     {fmtPF(r.profit_factor)}
                   </TableCell>
                   <TableCell className="text-center"><RBadge r={r.total_r} /></TableCell>
                   <TableCell className="text-center">
-                    <span className={r.avg_r >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}>
+                    <span className={plColor(r.avg_r)}>
                       {r.avg_r > 0 ? '+' : ''}{r.avg_r}R
                     </span>
                   </TableCell>

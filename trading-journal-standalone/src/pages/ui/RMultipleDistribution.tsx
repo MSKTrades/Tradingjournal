@@ -22,8 +22,9 @@ const BUCKETS: { label: string; test: (r: number) => boolean }[] = [
 // Losing buckets get a red shade, winning buckets a green shade - a simple
 // two-tone split (rather than a full magnitude gradient) since this is a
 // small summary card, not a data-viz showcase. Index lines up 1:1 with
-// BUCKETS above.
-const BUCKET_COLORS = ['#dc2626', '#f87171', '#4ade80', '#22c55e', '#16a34a', '#15803d', '#166534'];
+// BUCKETS above. Red end kept soft on purpose - a wall of dark red for a
+// bucket of losing trades reads as punitive, not informative.
+const BUCKET_COLORS = ['#ef4444', '#f87171', '#4ade80', '#22c55e', '#16a34a', '#15803d', '#166534'];
 
 type BucketDatum = { label: string; count: number };
 

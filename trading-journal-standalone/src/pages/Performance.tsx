@@ -181,10 +181,10 @@ function SummaryCards({ rows }: { rows: PeriodRow[] }) {
       {cards.map(c => (
         <Card key={c.label}>
           <CardContent className="pt-4 pb-3 flex items-center gap-3">
-            <c.icon className={`w-8 h-8 opacity-60 ${c.pos ? 'text-green-500' : 'text-red-500'}`} />
+            <c.icon className={`w-8 h-8 opacity-60 ${c.pos ? 'text-green-500' : 'text-red-400'}`} />
             <div className="min-w-0">
               <p className="text-xs text-muted-foreground truncate">{c.label}</p>
-              <p className={`text-lg font-bold ${c.pos ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{c.value}</p>
+              <p className={`text-lg font-bold ${c.pos ? 'text-green-600 dark:text-green-400' : 'text-red-400 dark:text-red-300'}`}>{c.value}</p>
               <p className="text-xs text-muted-foreground truncate">{c.sub}</p>
             </div>
           </CardContent>
@@ -227,7 +227,7 @@ function ExpectancyCards({ stats }: { stats?: AdvancedStats }) {
                 <span className="text-2xl font-bold">{fmtMoney(s.expectancy)}</span>
                 <div className="flex gap-2 text-xs font-mono">
                   <span className="text-green-500">{fmtMoney(s.avg_win)}</span>
-                  <span className="text-red-500">{fmtMoney(s.avg_loss)}</span>
+                  <span className={plColor(s.avg_loss)}>{fmtMoney(s.avg_loss)}</span>
                 </div>
               </div>
             </CardContent>
@@ -334,12 +334,12 @@ function HeatmapView({ monthly }: { monthly: PeriodRow[] }) {
                   const isPos = match.pct_return > 0;
                   const isNeg = match.pct_return < 0;
                   return (
-                    <td key={i} className={`p-2 rounded-md text-center text-xs font-mono font-medium ${isPos ? 'bg-green-500/10 text-green-500' : isNeg ? 'bg-red-500/10 text-red-500' : 'bg-muted text-muted-foreground'}`}>
+                    <td key={i} className={`p-2 rounded-md text-center text-xs font-mono font-medium ${isPos ? 'bg-green-500/10 text-green-500' : isNeg ? 'bg-red-500/10 text-red-400' : 'bg-muted text-muted-foreground'}`}>
                       {isPos ? '+' : ''}{match.pct_return.toFixed(2)}%
                     </td>
                   );
                 })}
-                <td className={`p-2 rounded-md text-center text-sm font-bold font-mono border border-border ${ytdTotal > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                <td className={`p-2 rounded-md text-center text-sm font-bold font-mono border border-border ${ytdTotal > 0 ? 'text-green-500' : 'text-red-400'}`}>
                   {ytdTotal > 0 ? '+' : ''}{ytdTotal.toFixed(2)}%
                 </td>
               </tr>
@@ -448,7 +448,7 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
                       {dailyData && <span className="text-xs text-zinc-300">{dailyData.total_trades} trade{dailyData.total_trades > 1 ? 's' : ''}</span>}
                     </div>
                     {dailyData && (
-                      <div className={`text-base font-bold font-mono ${isPos ? 'text-green-500' : 'text-red-500'}`}>
+                      <div className={`text-base font-bold font-mono ${isPos ? 'text-green-500' : 'text-red-400'}`}>
                         {isPos ? '+' : ''}{fmtMoney(dailyData.total_gain)}
                       </div>
                     )}
@@ -462,7 +462,7 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
                   <span className="text-xs text-zinc-300">{weeklyTrades} trades</span>
                   <span className="text-xs font-bold">w{wIdx + 1}</span>
                 </div>
-                <div className={`text-base font-bold font-mono ${weeklyGains > 0 ? 'text-green-500' : weeklyGains < 0 ? 'text-red-500' : 'text-zinc-500'}`}>
+                <div className={`text-base font-bold font-mono ${weeklyGains > 0 ? 'text-green-500' : weeklyGains < 0 ? 'text-red-400' : 'text-zinc-500'}`}>
                    {weeklyGains > 0 ? '+' : ''}{fmtMoney(weeklyGains)}
                 </div>
               </div>
@@ -488,10 +488,10 @@ function DrawdownSection({ trades, startingBalance }: { trades: Trade[]; startin
           <p className="text-sm font-semibold">Drawdown</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
             <span className="text-muted-foreground">
-              Max: <span className="font-mono font-semibold text-red-500 dark:text-red-400">{fmtMoney(dd.maxDDDollar)} ({dd.maxDDPct.toFixed(1)}%)</span>
+              Max: <span className="font-mono font-semibold text-red-400 dark:text-red-300">{fmtMoney(dd.maxDDDollar)} ({dd.maxDDPct.toFixed(1)}%)</span>
             </span>
             <span className="text-muted-foreground">
-              Current: <span className="font-mono font-semibold text-red-500 dark:text-red-400">{fmtMoney(dd.currentDDDollar)} ({dd.currentDDPct.toFixed(1)}%)</span>
+              Current: <span className="font-mono font-semibold text-red-400 dark:text-red-300">{fmtMoney(dd.currentDDDollar)} ({dd.currentDDPct.toFixed(1)}%)</span>
             </span>
             {/* Depth alone doesn't say how long the account was stuck underwater -
                 two accounts can both bottom out at -5% and be very different
@@ -791,7 +791,7 @@ export default function Performance() {
                           <TableCell className="font-semibold">{fmtPeriod(r.period, true)}</TableCell>
                           <TableCell className="text-center">{r.total_trades}</TableCell>
                           <TableCell className="text-center">{r.win_rate}%</TableCell>
-                          <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                          <TableCell className={`text-center font-mono ${plColor(r.pct_return)}`}>
                             {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
                           </TableCell>
                           <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
@@ -836,7 +836,7 @@ export default function Performance() {
                           <TableCell className="font-semibold">{r.period}</TableCell>
                           <TableCell className="text-center">{r.total_trades}</TableCell>
                           <TableCell className="text-center">{r.win_rate}%</TableCell>
-                          <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                          <TableCell className={`text-center font-mono ${plColor(r.pct_return)}`}>
                             {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
                           </TableCell>
                           <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
@@ -883,9 +883,9 @@ export default function Performance() {
                           <TableCell className="font-semibold">{r.period}</TableCell>
                           <TableCell className="text-center">{r.total_trades}</TableCell>
                           <TableCell className="text-center text-green-600 dark:text-green-400">{r.wins}</TableCell>
-                          <TableCell className="text-center text-red-500 dark:text-red-400">{r.losses}</TableCell>
+                          <TableCell className="text-center text-red-400 dark:text-red-300">{r.losses}</TableCell>
                           <TableCell className="text-center">{r.win_rate}%</TableCell>
-                          <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                          <TableCell className={`text-center font-mono ${plColor(r.pct_return)}`}>
                             {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
                           </TableCell>
                           <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
@@ -940,7 +940,7 @@ export default function Performance() {
                               <TableCell className="text-center">{r.win_rate}%</TableCell>
                               <TableCell className="text-center">{r.avg_rr !== null ? `${r.avg_rr}R` : '—'}</TableCell>
                               <TableCell className="text-center">{fmtPF(r.profit_factor)}</TableCell>
-                              <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                              <TableCell className={`text-center font-mono ${plColor(r.pct_return)}`}>
                                 {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
                               </TableCell>
                               <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
@@ -1005,7 +1005,7 @@ export default function Performance() {
                               <TableCell className="text-center">{r.win_rate}%</TableCell>
                               <TableCell className="text-center">{r.avg_rr !== null ? `${r.avg_rr}R` : '—'}</TableCell>
                               <TableCell className="text-center">{fmtPF(r.profit_factor)}</TableCell>
-                              <TableCell className={`text-center font-mono ${r.pct_return >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                              <TableCell className={`text-center font-mono ${plColor(r.pct_return)}`}>
                                 {r.pct_return > 0 ? '+' : ''}{r.pct_return}%
                               </TableCell>
                               <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, X } from 'lucide-react';
 import { Input } from '../../lib/ui/form';
 import { TagGroup } from '../data/types';
@@ -13,6 +14,75 @@ type Props = {
 
 const FALLBACK_COLOR = '#f59e0b';
 
+// Matches the popover's own w-52 (13rem). Used to decide whether it fits to
+// the right of the trigger or needs to be right-aligned instead.
+const POPOVER_WIDTH = 208;
+// Rough ceiling for the popover's rendered height (search input + mt/mb +
+// the max-h-40 option list + padding). Only used to decide whether to flip
+// the popover above the trigger when there isn't room below - the actual
+// popover is free to be shorter than this, since "open above" anchors off
+// the popover's own bottom edge rather than a fixed top offset.
+const POPOVER_EST_HEIGHT = 240;
+const VIEWPORT_MARGIN = 8;
+
+type PopoverStyle = { top?: number; bottom?: number; left?: number; right?: number } | null;
+
+// Positions the "Add tag" popover relative to its trigger button using
+// viewport coordinates (not the trigger's own offset parent), so it can be
+// rendered through a portal straight onto <body> - see the root-cause note
+// on GroupOptionPicker below for why that matters. Recomputes on open, and
+// on resize/scroll while open, so it tracks the trigger if the surrounding
+// drawer is scrolled.
+function useSmartPopoverPosition(open: boolean, triggerRef: React.RefObject<HTMLButtonElement>) {
+  const [style, setStyle] = useState<PopoverStyle>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setStyle(null);
+      return;
+    }
+
+    function recompute() {
+      const el = triggerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const openAbove = spaceBelow < POPOVER_EST_HEIGHT && spaceAbove > spaceBelow;
+
+      const spaceRight = window.innerWidth - rect.left;
+      const alignRight = spaceRight < POPOVER_WIDTH;
+
+      const next: PopoverStyle = {};
+      if (openAbove) {
+        // Anchor off the bottom edge so the popover grows upward from the
+        // trigger regardless of its actual (possibly shorter-than-estimated)
+        // height, instead of guessing a fixed `top`.
+        next.bottom = Math.max(VIEWPORT_MARGIN, window.innerHeight - rect.top + 4);
+      } else {
+        next.top = rect.bottom + 4;
+      }
+      if (alignRight) {
+        next.right = Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.right);
+      } else {
+        next.left = Math.max(VIEWPORT_MARGIN, rect.left);
+      }
+      setStyle(next);
+    }
+
+    recompute();
+    window.addEventListener('resize', recompute);
+    window.addEventListener('scroll', recompute, true);
+    return () => {
+      window.removeEventListener('resize', recompute);
+      window.removeEventListener('scroll', recompute, true);
+    };
+  }, [open, triggerRef]);
+
+  return style;
+}
+
 // One group row's "+ Add" popover - lets you toggle an existing option for
 // this group on/off, or type a new one and create it on the fly. Options
 // are multi-select (like the flat Tags picker) since a trade can
@@ -25,6 +95,20 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
 }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Root cause of the popover-stuck-in-a-corner bug: this used to be a plain
+  // `position: absolute` div anchored `top-full left-0` off its own trigger
+  // button, with no awareness of viewport edges. TagGroupsPicker renders
+  // inside the trade detail panel's narrow, vertically-scrolling side
+  // drawer, so a trigger near the bottom (and/or right) edge of that
+  // scrollable panel had nowhere to expand into and got clipped/crammed
+  // into the corner - e.g. "Execution Mistakes", which sits low in the tag
+  // groups list. Fixed by measuring the trigger's viewport position
+  // (useSmartPopoverPosition) and rendering the popover through a portal
+  // straight onto <body> as `position: fixed`, so it's never constrained by
+  // the drawer's own overflow clipping and can flip above/below or
+  // left/right-align itself based on actual available space.
+  const popoverStyle = useSmartPopoverPosition(open, triggerRef);
 
   const filtered = group.options.filter(o => input.trim() === '' || o.name.toLowerCase().includes(input.trim().toLowerCase()));
   const exactExists = group.options.some(o => o.name.toLowerCase() === input.trim().toLowerCase());
@@ -32,16 +116,20 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(p => !p)}
         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
       >
         <Plus className="w-3 h-3" /> Add tag
       </button>
-      {open && (
+      {open && createPortal(
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute z-40 top-full left-0 mt-1 w-52 rounded-md border border-border bg-popover text-popover-foreground shadow-lg p-2">
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-50 w-52 rounded-md border border-border bg-popover text-popover-foreground shadow-lg p-2"
+            style={popoverStyle ?? undefined}
+          >
             <Input
               autoFocus
               value={input}
@@ -89,7 +177,8 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
               )}
             </div>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );
@@ -103,18 +192,12 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
 // every group and option here is something you create yourself via
 // "+ Add tag group" / "+ Add tag", since which categories matter (setup
 // confidence, SL reason, timeframe, ...) is entirely trader-specific.
-// Curated starter set for a trading-psychology tag group - high-value
-// enough (mindset is one of the biggest predictors of trade quality) that
-// it shouldn't require typing 8 options in by hand one at a time via
+// Curated starter set for a process/execution-mistake tag group (ICT/SMC
+// intraday London-session forex is the app's domain - see other context -
+// so these lean into that: chasing entries, skipping checklist rules,
+// moving stops, missing the London open, etc) - high-value enough that it
+// shouldn't require typing 8 options in by hand one at a time via
 // GroupOptionPicker above.
-const MINDSET_STARTER_OPTIONS = ['Calm', 'Confident', 'FOMO', 'Impatient', 'Hesitant', 'Overconfident', 'Revenge Trade', 'Tilted'];
-const MINDSET_GROUP_NAME = 'Mindset';
-const MINDSET_GROUP_RE = /mindset|mood|psycholog/i;
-
-// Same starter-pack idea as Mindset above, but for process/execution
-// slip-ups (ICT/SMC intraday London-session forex is the app's domain -
-// see other context - so these lean into that: chasing entries, skipping
-// checklist rules, moving stops, missing the London open, etc).
 const EXEC_MISTAKE_STARTER_OPTIONS = ['Chased Entry', 'Skipped Rule', 'Moved SL', 'Late to London', 'FOMO Entry', 'Oversized', 'No Checklist', 'Revenge Trade'];
 const EXEC_MISTAKE_GROUP_NAME = 'Execution Mistakes';
 const EXEC_MISTAKE_GROUP_RE = /execution mistake|mistake|error/i;
@@ -130,36 +213,9 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
   // ordinary "+ Add tag group" flow does: the parent's onCreateGroup POSTs,
   // refetches, and the newly created group shows up in the `groups` prop on
   // the next render, found by name. So the starter-pack button below
-  // follows that exact same approach - fire onCreateGroup(MINDSET_GROUP_NAME),
+  // follows that exact same approach - fire onCreateGroup(EXEC_MISTAKE_GROUP_NAME),
   // then watch `groups` for that name to appear before firing the 8
   // onCreateOption calls (which need a real group.id).
-  const [starterBusy, setStarterBusy] = useState(false);
-  const starterFiredOptionsRef = useRef(false);
-  const hasMindsetGroup = groups.some(g => MINDSET_GROUP_RE.test(g.name));
-
-  useEffect(() => {
-    if (!starterBusy || starterFiredOptionsRef.current) return;
-    const group = groups.find(g => g.name === MINDSET_GROUP_NAME);
-    if (!group) return;
-    starterFiredOptionsRef.current = true;
-    for (const optionName of MINDSET_STARTER_OPTIONS) {
-      onCreateOption(group.id, group.name, optionName);
-    }
-    setStarterBusy(false);
-  }, [groups, starterBusy, onCreateOption]);
-
-  function addStarterMindsetGroup() {
-    if (starterBusy) return;
-    starterFiredOptionsRef.current = false;
-    setStarterBusy(true);
-    onCreateGroup(MINDSET_GROUP_NAME);
-  }
-
-  // Parallel starter-pack affordance for "Execution Mistakes", mirroring
-  // addStarterMindsetGroup/its useEffect above exactly (own busy/ref state,
-  // own effect watching `groups`) - kept as a fully separate implementation
-  // rather than generalized/shared with the Mindset one so this diff stays
-  // easy to review and low-risk.
   const [execMistakeStarterBusy, setExecMistakeStarterBusy] = useState(false);
   const execMistakeStarterFiredOptionsRef = useRef(false);
   const hasExecMistakeGroup = groups.some(g => EXEC_MISTAKE_GROUP_RE.test(g.name));
@@ -271,16 +327,6 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
           >
             <Plus className="w-3.5 h-3.5" /> Add tag group
           </button>
-          {!hasMindsetGroup && (
-            <button
-              type="button"
-              onClick={addStarterMindsetGroup}
-              disabled={starterBusy}
-              className="text-xs text-muted-foreground hover:text-foreground self-start disabled:opacity-50"
-            >
-              {starterBusy ? 'Adding starter tags…' : '+ Add starter Mindset tags'}
-            </button>
-          )}
           {!hasExecMistakeGroup && (
             <button
               type="button"

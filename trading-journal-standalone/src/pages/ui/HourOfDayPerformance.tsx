@@ -86,7 +86,7 @@ export default function HourOfDayPerformance({ trades }: { trades: Trade[] }) {
                   <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
                   <Bar dataKey="winRate" radius={[3, 3, 0, 0]}>
                     {data.map((d) => (
-                      <Cell key={d.hour} fill={d.totalGL >= 0 ? '#16a34a' : '#dc2626'} />
+                      <Cell key={d.hour} fill={d.totalGL >= 0 ? '#16a34a' : '#f87171'} />
                     ))}
                     <LabelList
                       dataKey="totalGL"

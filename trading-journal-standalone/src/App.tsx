@@ -9,6 +9,7 @@ import Landing from './pages/Landing';
 import Pricing from './pages/Pricing';
 import Blog from './pages/Blog';
 import BlogPost from './pages/BlogPost';
+import TrackRecord from './pages/TrackRecord';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Summary from './pages/Summary';
@@ -127,6 +128,11 @@ export default function App() {
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<BlogPost />} />
+            {/* Public, unauthenticated read-only view of an account's
+                shared performance summary — no Protected/AuthedShell, same
+                as Landing/Pricing/Blog above. Anyone with the link (a prop
+                firm, an investor) can open it without a PipEcho login. */}
+            <Route path="/track/:token" element={<TrackRecord />} />
             <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
             <Route path="/signup" element={<PublicOnly><Signup /></PublicOnly>} />
 

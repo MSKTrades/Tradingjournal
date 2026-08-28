@@ -5,6 +5,7 @@ import { Input, Label, Switch } from '../../lib/ui/form';
 import { Trash2 } from 'lucide-react';
 import { Account } from '../data/types';
 import { AccountPatch, NewAccountPayload } from '../../lib/accounts';
+import { api } from '../../lib/api';
 import BrokerConnect from './BrokerConnect';
 
 type Props = {
@@ -23,10 +24,17 @@ type FormState = {
   daily_loss_limit_pct: string;
   max_drawdown_limit_pct: string;
   consistency_rule_pct: string;
+  public_share_enabled: boolean;
+  public_share_name: string;
+  public_share_show_dollars: boolean;
 };
 
 function emptyForm(): FormState {
-  return { name: '', type: '', starting_balance: '', active: true, daily_loss_limit_pct: '', max_drawdown_limit_pct: '', consistency_rule_pct: '' };
+  return {
+    name: '', type: '', starting_balance: '', active: true,
+    daily_loss_limit_pct: '', max_drawdown_limit_pct: '', consistency_rule_pct: '',
+    public_share_enabled: false, public_share_name: '', public_share_show_dollars: false,
+  };
 }
 
 function fromAccount(a: Account): FormState {
@@ -38,6 +46,9 @@ function fromAccount(a: Account): FormState {
     daily_loss_limit_pct: a.daily_loss_limit_pct != null ? String(a.daily_loss_limit_pct) : '',
     max_drawdown_limit_pct: a.max_drawdown_limit_pct != null ? String(a.max_drawdown_limit_pct) : '',
     consistency_rule_pct: a.consistency_rule_pct != null ? String(a.consistency_rule_pct) : '',
+    public_share_enabled: a.public_share_enabled,
+    public_share_name: a.public_share_name ?? '',
+    public_share_show_dollars: a.public_share_show_dollars,
   };
 }
 
@@ -49,9 +60,19 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The share token itself isn't part of the editable form - it's
+  // server-generated (see api/accounts.ts), never typed by the user. Tracked
+  // separately so "Regenerate Link" can update the shown URL immediately
+  // without a full round trip through onSave/onClose.
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+
   useEffect(() => {
     if (open) {
       setForm(account ? fromAccount(account) : emptyForm());
+      setShareToken(account?.public_share_token ?? null);
+      setCopied(false);
       setError(null);
     }
   }, [open, account]);
@@ -73,6 +94,14 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
         daily_loss_limit_pct: form.daily_loss_limit_pct.trim() === '' ? null : Number(form.daily_loss_limit_pct),
         max_drawdown_limit_pct: form.max_drawdown_limit_pct.trim() === '' ? null : Number(form.max_drawdown_limit_pct),
         consistency_rule_pct: form.consistency_rule_pct.trim() === '' ? null : Number(form.consistency_rule_pct),
+        // Public Track Record fields only apply to an existing account (see
+        // the gating on the section below) - a brand-new account has
+        // nothing to attach a share token to yet.
+        ...(account ? {
+          public_share_enabled: form.public_share_enabled,
+          public_share_name: form.public_share_name.trim() || null,
+          public_share_show_dollars: form.public_share_show_dollars,
+        } : {}),
       };
       await onSave(payload);
       onClose();
@@ -80,6 +109,40 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
       setError(e?.message ?? 'Failed to save account');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleCopyLink() {
+    if (!shareToken) return;
+    const url = `${window.location.origin}/track/${shareToken}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API can throw (e.g. insecure context, permission denied) -
+      // the URL is still right there in the read-only input for a manual
+      // copy, so just leave the "Copied!" state off rather than surfacing
+      // an error for what's a minor convenience feature.
+    }
+  }
+
+  async function handleRegenerateLink() {
+    if (!account) return;
+    if (!window.confirm('Regenerating this link will make the old one stop working for anyone you already sent it to. Continue?')) return;
+    setError(null);
+    setRegenerating(true);
+    try {
+      const res: { public_share_token: string } = await api.post('/accounts', {
+        resource: 'regenerate_share_token',
+        account_id: account.id,
+      });
+      setShareToken(res.public_share_token);
+      setCopied(false);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to regenerate link');
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -191,6 +254,67 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
               syncing, and disconnecting each have their own request/loading
               state that doesn't belong mixed into this form's. */}
           {account && <BrokerConnect accountId={account.id} />}
+
+          {/* Public Track Record - a shareable, unguessable public URL
+              showing a read-only summary of this account's performance to
+              anyone with the link, no login required. Only shown once the
+              account already exists, same reasoning as the sections above -
+              there's no id yet to attach a share token to on a still-unsaved
+              account. */}
+          {account && (
+            <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+              <div className="flex items-center gap-3">
+                <Switch checked={form.public_share_enabled} onCheckedChange={(v) => set('public_share_enabled', v)} />
+                <Label>Enable public track record page</Label>
+              </div>
+
+              {form.public_share_enabled && (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1">
+                    <Label>Display name (optional)</Label>
+                    <Input
+                      value={form.public_share_name}
+                      placeholder={account.name}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('public_share_name', e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Shown to visitors instead of your account name, if you'd rather keep that private.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-3">
+                      <Switch checked={form.public_share_show_dollars} onCheckedChange={(v) => set('public_share_show_dollars', v)} />
+                      <Label>Show dollar amounts</Label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Off by default — visitors only see percentages, not your account size or dollar P/L.
+                    </p>
+                  </div>
+
+                  {shareToken ? (
+                    <div className="flex flex-col gap-1">
+                      <Label>Shareable link</Label>
+                      <div className="flex gap-2">
+                        <Input readOnly value={`${window.location.origin}/track/${shareToken}`} onFocus={(e) => e.currentTarget.select()} />
+                        <Button type="button" variant="outline" size="sm" onClick={handleCopyLink}>
+                          {copied ? 'Copied!' : 'Copy'}
+                        </Button>
+                      </div>
+                      <Button
+                        type="button" variant="outline" size="sm" className="self-start mt-1"
+                        onClick={handleRegenerateLink} disabled={regenerating}
+                      >
+                        {regenerating ? 'Regenerating…' : 'Regenerate Link'}
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Save to generate your link.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
