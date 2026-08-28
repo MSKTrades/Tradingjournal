@@ -101,7 +101,10 @@ export default function PropPnlLedger({ accountId }: { accountId: number }) {
         <div className="grid grid-cols-3 gap-3">
           <div>
             <p className="text-xs text-muted-foreground">Total Fees Paid</p>
-            <p className="text-lg font-bold text-red-500 dark:text-red-400">{fmtMoney(totalFees)}</p>
+            {/* Softened from red to a dark orange - a fee outflow isn't an
+                alarm state the way a breached risk limit is, and this now
+                matches the same orange the Fee badge below uses. */}
+            <p className="text-lg font-bold text-orange-700 dark:text-orange-400">{fmtMoney(totalFees)}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Total Payouts Received</p>
@@ -179,7 +182,7 @@ export default function PropPnlLedger({ accountId }: { accountId: number }) {
                 <span className="text-muted-foreground w-20 shrink-0">{fmtEntryDate(entry.entry_date)}</span>
                 <Badge
                   className={entry.entry_type === 'fee'
-                    ? 'bg-red-500/20 text-red-700 dark:text-red-300 border-red-400/30'
+                    ? 'bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-400/30'
                     : 'bg-green-500/20 text-green-700 dark:text-green-300 border-green-400/30'}
                 >
                   {entry.entry_type === 'fee' ? 'Fee' : 'Payout'}

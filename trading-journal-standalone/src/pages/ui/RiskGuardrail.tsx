@@ -11,8 +11,12 @@ type GaugeProps = {
   sub: string;
 };
 
+// Breach (>=100%) used to be straight red — softened to a dark orange so a
+// breached gauge reads as "pay attention" rather than an alarm-red error
+// state, while staying visibly more severe than the 75-99% tier below it
+// (orange-700 vs orange-500 keeps that progression readable at a glance).
 function statusColor(pct: number): { bar: string; text: string } {
-  if (pct >= 100) return { bar: 'bg-red-500', text: 'text-red-500' };
+  if (pct >= 100) return { bar: 'bg-orange-700', text: 'text-orange-700 dark:text-orange-400' };
   if (pct >= 75) return { bar: 'bg-orange-500', text: 'text-orange-500' };
   if (pct >= 50) return { bar: 'bg-yellow-500', text: 'text-yellow-600 dark:text-yellow-400' };
   return { bar: 'bg-green-500', text: 'text-green-600 dark:text-green-400' };
@@ -68,7 +72,7 @@ export default function RiskGuardrail({ account, trades }: { account: Account | 
   const breached = (showDaily && dailyUsedPct >= 100) || (showMaxDD && maxDDUsedPct >= 100) || (showConsistency && consistencyUsedPct >= 100);
 
   return (
-    <Card className={breached ? 'border-red-500/50' : undefined}>
+    <Card className={breached ? 'border-orange-700/50' : undefined}>
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
           <ShieldAlert className="w-4 h-4 text-muted-foreground" />
@@ -77,7 +81,7 @@ export default function RiskGuardrail({ account, trades }: { account: Account | 
       </CardHeader>
       <CardContent className="pt-0">
         {breached && (
-          <p className="text-xs font-medium text-red-500 mb-3">
+          <p className="text-xs font-medium text-orange-700 dark:text-orange-400 mb-3">
             A limit below has been reached. This is a warning only — PipEcho doesn't block trades — but check
             your challenge/account rules before placing another one today.
           </p>
