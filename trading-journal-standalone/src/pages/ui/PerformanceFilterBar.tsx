@@ -8,10 +8,22 @@ import { WEEKDAYS, Trade } from '../data/types';
 // this shape (see allTagsOnTrade above for why both sources matter).
 export type TagOption = { name: string; color: string };
 
+// One tag GROUP's own option list, scoped to whatever's actually in use
+// (see Journal.tsx/Performance.tsx's accountTagGroups) - what the "Main Tag"
+// chip below offers, and what narrows the "Sub Tag" chip once one is picked.
+export type TagGroupOptions = { name: string; options: TagOption[] };
+
 export type PerfFilters = {
   assets: string[];
   side: string[];
   outcome: string[];
+  // "Main tag" (tag group name, e.g. "1M_Price above") and "sub tag" (the
+  // option within it, e.g. "EMA9") - kept as two separate lists rather than
+  // one combined one because option names get reused across groups all the
+  // time in practice (EMA9 shows up under several different timeframe/
+  // direction groups), so "has EMA9" alone is ambiguous about which group
+  // you mean. See matchesFilters below for exactly how the two combine.
+  tagGroups: string[];
   tags: string[];
   days: number[];
   dateFrom: string | null;
@@ -19,12 +31,12 @@ export type PerfFilters = {
 };
 
 export function emptyFilters(): PerfFilters {
-  return { assets: [], side: [], outcome: [], tags: [], days: [], dateFrom: null, dateTo: null };
+  return { assets: [], side: [], outcome: [], tagGroups: [], tags: [], days: [], dateFrom: null, dateTo: null };
 }
 
 export function isFiltersEmpty(f: PerfFilters): boolean {
   return f.assets.length === 0 && f.side.length === 0 && f.outcome.length === 0
-    && f.tags.length === 0 && f.days.length === 0 && !f.dateFrom && !f.dateTo;
+    && f.tagGroups.length === 0 && f.tags.length === 0 && f.days.length === 0 && !f.dateFrom && !f.dateTo;
 }
 
 // A trade can be tagged through either of two systems that both still
@@ -32,10 +44,10 @@ export function isFiltersEmpty(f: PerfFilters): boolean {
 // Backtest tab's tag picker) and FX Replay-style tag GROUPS (used by the
 // Journal's TradeDetailPanel - each group like "1M_Price above" has its own
 // options like "EMA9"/"EMA21", stored per trade as tag_selections keyed by
-// group name). Anywhere "does this trade have tag X" matters has to check
-// both, or group-based tags (which is what most trades actually use today)
-// silently never match - exported so Journal/Performance can use the same
-// union when building the Tags filter's own option list, not just here.
+// group name). Anywhere "does this trade have tag X, anywhere" matters has
+// to check both, or group-based tags (which is what most trades actually
+// use today) silently never match - exported so Journal/Performance can use
+// the same union when building the Tags filter's own fallback option list.
 export function allTagsOnTrade(t: Trade): string[] {
   return [...(t.tags ?? []), ...Object.values(t.tag_selections ?? {}).flat()];
 }
@@ -47,7 +59,19 @@ export function matchesFilters(t: Trade, filters: PerfFilters): boolean {
   if (filters.assets.length > 0 && !filters.assets.includes((t.coin_token ?? '').trim().toUpperCase())) return false;
   if (filters.side.length > 0 && !filters.side.includes(t.direction)) return false;
   if (filters.outcome.length > 0 && !filters.outcome.includes(t.profit_loss ?? '')) return false;
-  if (filters.tags.length > 0 && !allTagsOnTrade(t).some(tag => filters.tags.includes(tag))) return false;
+  // Main Tag selected: only that group's own selections count, narrowed to
+  // Sub Tag if any are picked too (or "has anything in this group" if not).
+  // No Main Tag selected but Sub Tag is: falls back to the old "has this
+  // value anywhere" search across every source, same as before Main Tag
+  // existed.
+  if (filters.tagGroups.length > 0) {
+    const sel = t.tag_selections ?? {};
+    const matched = filters.tagGroups.some(g => {
+      const values = sel[g] ?? [];
+      return filters.tags.length > 0 ? values.some(v => filters.tags.includes(v)) : values.length > 0;
+    });
+    if (!matched) return false;
+  } else if (filters.tags.length > 0 && !allTagsOnTrade(t).some(tag => filters.tags.includes(tag))) return false;
   if (filters.days.length > 0) {
     if (!t.trade_placed_at) return false;
     const d = new Date(t.trade_placed_at);
@@ -230,7 +254,14 @@ type Props = {
   filters: PerfFilters;
   onChange: (f: PerfFilters) => void;
   assetOptions: string[];
+  // Fallback "Sub Tag" list used when no Main Tag is selected - the union of
+  // the flat tags pool and every used tag group's options (see
+  // Journal.tsx/Performance.tsx's accountTagOptions).
   tagOptions: TagOption[];
+  // Main Tag chip's own options, each carrying its scoped sub-options so
+  // picking a group narrows the Sub Tag chip down to just that group's
+  // values (see Journal.tsx/Performance.tsx's accountTagGroups).
+  tagGroupOptions: TagGroupOptions[];
 };
 
 // FX Replay-style filter bar: a row of dropdown chips plus a row of
@@ -239,7 +270,7 @@ type Props = {
 // cumulative P/L line chart) - see the note in Performance.tsx on why the
 // pre-existing Monthly/Yearly/Weekday/Session/Heatmap/Calendar tabs still
 // run off the server's own aggregation instead.
-export default function PerformanceFilterBar({ filters, onChange, assetOptions, tagOptions }: Props) {
+export default function PerformanceFilterBar({ filters, onChange, assetOptions, tagOptions, tagGroupOptions }: Props) {
   function toggle<K extends 'assets' | 'side' | 'outcome' | 'tags'>(key: K, value: string) {
     const list = filters[key];
     const next = list.includes(value) ? list.filter(v => v !== value) : [...list, value];
@@ -249,6 +280,33 @@ export default function PerformanceFilterBar({ filters, onChange, assetOptions, 
     const next = filters.days.includes(day) ? filters.days.filter(d => d !== day) : [...filters.days, day];
     onChange({ ...filters, days: next });
   }
+  // Toggling Main Tag also prunes any already-selected Sub Tags that don't
+  // belong to the resulting group set - otherwise a Sub Tag picked while
+  // "1M_Price above" was active (e.g. "EMA9") would silently keep filtering
+  // even after switching to "SL hit reason", which doesn't have an EMA9
+  // option at all and would just look like the filter stopped matching
+  // anything.
+  function toggleTagGroup(name: string) {
+    const nextGroups = filters.tagGroups.includes(name)
+      ? filters.tagGroups.filter(g => g !== name)
+      : [...filters.tagGroups, name];
+    const validTags = nextGroups.length > 0
+      ? new Set(nextGroups.flatMap(g => tagGroupOptions.find(x => x.name === g)?.options.map(o => o.name) ?? []))
+      : null; // null = no group selected -> Sub Tag falls back to the full list, nothing to prune
+    onChange({
+      ...filters,
+      tagGroups: nextGroups,
+      tags: validTags ? filters.tags.filter(t => validTags.has(t)) : filters.tags,
+    });
+  }
+
+  // Once a Main Tag is selected, the Sub Tag chip only offers that group's
+  // (or groups') own options - picking "EMA9" under "1M_Price above" should
+  // mean that, not "EMA9" from any of the seven other groups that also
+  // happen to have an EMA9 option.
+  const visibleTagOptions: TagOption[] = filters.tagGroups.length > 0
+    ? filters.tagGroups.flatMap(g => tagGroupOptions.find(x => x.name === g)?.options ?? [])
+    : tagOptions;
 
   const activePills: { key: string; label: string; onRemove: () => void }[] = [
     ...filters.assets.map(a => ({ key: `asset-${a}`, label: a, onRemove: () => toggle('assets', a) })),
@@ -258,6 +316,7 @@ export default function PerformanceFilterBar({ filters, onChange, assetOptions, 
       label: OUTCOME_OPTIONS.find(x => x.value === o)?.label ?? o,
       onRemove: () => toggle('outcome', o),
     })),
+    ...filters.tagGroups.map(g => ({ key: `taggroup-${g}`, label: g, onRemove: () => toggleTagGroup(g) })),
     ...filters.tags.map(t => ({ key: `tag-${t}`, label: t, onRemove: () => toggle('tags', t) })),
     ...filters.days.map(d => ({
       key: `day-${d}`,
@@ -295,10 +354,19 @@ export default function PerformanceFilterBar({ filters, onChange, assetOptions, 
           selected={filters.outcome}
           onToggle={(v) => toggle('outcome', v)}
         />
+        {tagGroupOptions.length > 0 && (
+          <FilterChip
+            label="Main Tag"
+            count={filters.tagGroups.length}
+            options={tagGroupOptions.map(g => ({ value: g.name, label: g.name }))}
+            selected={filters.tagGroups}
+            onToggle={toggleTagGroup}
+          />
+        )}
         <FilterChip
-          label="Tags"
+          label="Sub Tag"
           count={filters.tags.length}
-          options={tagOptions.map(t => ({ value: t.name, label: t.name, color: t.color }))}
+          options={visibleTagOptions.map(t => ({ value: t.name, label: t.name, color: t.color }))}
           selected={filters.tags}
           onToggle={(v) => toggle('tags', v)}
         />

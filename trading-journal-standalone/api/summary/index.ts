@@ -33,8 +33,8 @@ type Trade = {
 // value is a number for every ordinary field, or a tag name (string) for
 // the reserved TAG_CONDITION_FIELD - see the matching note on evalCondition
 // below and src/pages/data/types.ts's Condition type for the frontend side
-// of this.
-type Condition = { field: string; op: string; value: number | string };
+// of this. `group` only applies to a tag condition - see matchesTagCondition.
+type Condition = { field: string; op: string; value: number | string; group?: string };
 const TAG_CONDITION_FIELD = 'has_tag';
 
 type FFRawEvent = {
@@ -278,16 +278,28 @@ function evalCondition(val: number | null, op: string, threshold: number): boole
 // to real trades - the flat `tags` column (still used by the Backtest tab)
 // and tag GROUPS (used by the Journal's TradeDetailPanel, stored per trade
 // in `tag_selections` keyed by group name, e.g. { "1M_Price above":
-// ["EMA9"] }) - so a tag "has" match has to check both, or group-based tags
-// (what most trades actually use) would silently never match.
-function matchesTagCondition(trade: Trade, op: string, tagName: string): boolean {
-  const groupValues = Object.values(trade.tag_selections ?? {}).flat();
-  const has = (trade.tags ?? []).includes(tagName) || groupValues.includes(tagName);
+// ["EMA9"] }).
+//
+// Tag group option names get reused across groups constantly in practice
+// (the same "EMA9" option sits under several different timeframe/direction
+// groups at once), so "has EMA9" with no group specified is ambiguous about
+// which one is meant. When the condition names a specific group (`group` is
+// set), only that group's own selections count; otherwise it falls back to
+// the old flattened search across every source, which is what every
+// condition saved before `group` existed still does.
+function matchesTagCondition(trade: Trade, op: string, tagName: string, group?: string): boolean {
+  let has: boolean;
+  if (group) {
+    has = (trade.tag_selections?.[group] ?? []).includes(tagName);
+  } else {
+    const groupValues = Object.values(trade.tag_selections ?? {}).flat();
+    has = (trade.tags ?? []).includes(tagName) || groupValues.includes(tagName);
+  }
   return op === '!has' ? !has : has;
 }
 
 function matchesCondition(trade: Trade, cond: Condition): boolean {
-  if (cond.field === TAG_CONDITION_FIELD) return matchesTagCondition(trade, cond.op, String(cond.value));
+  if (cond.field === TAG_CONDITION_FIELD) return matchesTagCondition(trade, cond.op, String(cond.value), cond.group);
   return evalCondition(getFieldValue(trade, cond.field), cond.op, Number(cond.value));
 }
 

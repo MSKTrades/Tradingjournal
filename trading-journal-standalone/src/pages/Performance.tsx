@@ -574,6 +574,24 @@ export default function Performance() {
     const used = new Set((rawTradesForHourly ?? []).flatMap(allTagsOnTrade));
     return allTagOptions.filter(t => used.has(t.name));
   }, [rawTradesForHourly, allTagOptions]);
+  // Main Tag chip's own options - same reasoning as Journal.tsx's
+  // accountTagGroups.
+  const accountTagGroups = useMemo(() => {
+    const usedByGroup = new Map<string, Set<string>>();
+    for (const t of rawTradesForHourly ?? []) {
+      for (const [group, values] of Object.entries(t.tag_selections ?? {})) {
+        if (!values || values.length === 0) continue;
+        if (!usedByGroup.has(group)) usedByGroup.set(group, new Set());
+        values.forEach(v => usedByGroup.get(group)!.add(v));
+      }
+    }
+    return (rawTagGroups ?? [])
+      .filter(g => usedByGroup.has(g.name))
+      .map(g => ({
+        name: g.name,
+        options: g.options.filter(o => usedByGroup.get(g.name)!.has(o.name)).map(o => ({ name: o.name, color: o.color })),
+      }));
+  }, [rawTradesForHourly, rawTagGroups]);
 
   const [filters, setFilters] = useState<PerfFilters>(emptyFilters);
 
@@ -649,7 +667,7 @@ export default function Performance() {
         </div>
       </div>
 
-      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={accountTagOptions} />
+      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={accountTagOptions} tagGroupOptions={accountTagGroups} />
 
       {loading && <div className="text-center py-16 text-muted-foreground">Loading…</div>}
 

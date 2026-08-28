@@ -5,7 +5,7 @@ import { requireUserId, ownsAccount } from '../_auth.js';
 const WEEKDAY_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-type Condition = { field: string; op: string; value: number | string };
+type Condition = { field: string; op: string; value: number | string; group?: string };
 const TAG_CONDITION_FIELD = 'has_tag';
 
 // --- Same filter helpers as summary/index.ts, duplicated here on purpose so
@@ -99,13 +99,22 @@ function evalCondition(val: number | null, op: string, threshold: number): boole
 // getFieldValue/evalCondition. Two separate tagging systems both still
 // write to real trades - the flat `tags` column (still used by the
 // Backtest tab) and tag GROUPS (used by the Journal's TradeDetailPanel,
-// stored per trade in `tag_selections` keyed by group name) - so this has
-// to check both, or group-based tags (what most trades actually use) would
-// silently never match.
+// stored per trade in `tag_selections` keyed by group name) - and the same
+// option name (e.g. "EMA9") gets reused across several different groups, so
+// a condition with `group` set only checks that one group's selections;
+// with no group set it falls back to searching every source, same as
+// before `group` existed.
 function matchesCondition(trade: any, cond: Condition): boolean {
   if (cond.field === TAG_CONDITION_FIELD) {
-    const groupValues: string[] = Object.values(trade.tag_selections ?? {}).flat() as string[];
-    const has = (trade.tags ?? []).includes(String(cond.value)) || groupValues.includes(String(cond.value));
+    const tagName = String(cond.value);
+    let has: boolean;
+    if (cond.group) {
+      const values: string[] = trade.tag_selections?.[cond.group] ?? [];
+      has = values.includes(tagName);
+    } else {
+      const groupValues: string[] = Object.values(trade.tag_selections ?? {}).flat() as string[];
+      has = (trade.tags ?? []).includes(tagName) || groupValues.includes(tagName);
+    }
     return cond.op === '!has' ? !has : has;
   }
   return evalCondition(getFieldValue(trade, cond.field), cond.op, Number(cond.value));

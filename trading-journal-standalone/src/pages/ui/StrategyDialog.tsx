@@ -146,6 +146,20 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
     }
     return out;
   }, [rawTags, rawTagGroups]);
+  // Tag group option names get reused across groups constantly in practice
+  // (e.g. "EMA9" shows up under "1M_Price above", "15M Price below", "4H
+  // Price below", ... all at once), so "has EMA9" on its own is ambiguous
+  // about which one a condition actually means. Picking a specific group
+  // here narrows the value dropdown to just that group's own options and
+  // sets Condition.group, which both matching endpoints check against
+  // tag_selections[group] directly instead of searching everywhere. Leaving
+  // it on "Any tag group" keeps the old flattened behavior (checks trade.tags
+  // and every group's selections), so existing saved conditions still work.
+  const tagGroupNames = useMemo(() => (rawTagGroups ?? []).map(g => g.name), [rawTagGroups]);
+  function optionsForGroup(group: string | undefined): string[] {
+    if (!group) return allTagOptions;
+    return (rawTagGroups ?? []).find(g => g.name === group)?.options.map(o => o.name) ?? [];
+  }
 
   useEffect(() => {
     if (open) {
@@ -172,10 +186,17 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   // something you'd have to notice was missing.
   function updateConditionField(i: number, field: string) {
     if (field === TAG_CONDITION_FIELD) {
-      updateCondition(i, { field, op: 'has', value: allTagOptions[0] ?? '' });
+      updateCondition(i, { field, op: 'has', group: undefined, value: allTagOptions[0] ?? '' });
     } else {
-      updateCondition(i, { field, op: '<=', value: 0 });
+      updateCondition(i, { field, op: '<=', group: undefined, value: 0 });
     }
+  }
+  // Changing which tag group a "Has Tag" condition points at also has to
+  // reset value - whatever was picked under the old group (or the old
+  // flattened list) might not even exist as an option in the new one.
+  function updateConditionGroup(i: number, group: string) {
+    const opts = optionsForGroup(group || undefined);
+    updateCondition(i, { group: group || undefined, value: opts[0] ?? '' });
   }
   function removeCondition(i: number) {
     setForm(prev => ({ ...prev, conditions: prev.conditions.filter((_, idx) => idx !== i) }));
@@ -247,6 +268,7 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
             <div className="flex flex-col gap-3">
               {form.conditions.map((cond, i) => {
                 const isTag = cond.field === TAG_CONDITION_FIELD;
+                const tagValueOptions = isTag ? optionsForGroup(cond.group) : [];
                 return (
                   <div key={i} className="flex flex-col gap-1.5 p-2 rounded-md border border-border/60">
                     <Select value={cond.field} onChange={e => updateConditionField(i, e.target.value)} className="w-full text-xs">
@@ -254,22 +276,35 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
                       <option value={TAG_CONDITION_FIELD}>Has Tag</option>
                     </Select>
                     {isTag ? (
-                      <div className="flex items-center gap-2">
-                        <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-32 text-xs shrink-0">
-                          {TAG_OPS.map(op => <option key={op} value={op}>{op === '!has' ? "doesn't have" : 'has'}</option>)}
-                        </Select>
-                        {allTagOptions.length > 0 ? (
-                          <Select value={String(cond.value)} onChange={e => updateCondition(i, { value: e.target.value })} className="flex-1 min-w-0 text-xs">
-                            {allTagOptions.map(name => <option key={name} value={name}>{name}</option>)}
+                      <>
+                        {/* Tag group option names get reused across groups
+                            (EMA9 shows up under several timeframe/direction
+                            groups at once) - picking one here scopes the
+                            value dropdown below to just that group instead
+                            of leaving "has EMA9" ambiguous about which. */}
+                        {tagGroupNames.length > 0 && (
+                          <Select value={cond.group ?? ''} onChange={e => updateConditionGroup(i, e.target.value)} className="w-full text-xs">
+                            <option value="">Any tag group</option>
+                            {tagGroupNames.map(g => <option key={g} value={g}>{g}</option>)}
                           </Select>
-                        ) : (
-                          <Input className="flex-1 min-w-0 text-xs" value={String(cond.value)} placeholder="Tag name"
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateCondition(i, { value: e.target.value })} />
                         )}
-                        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeCondition(i)}>
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
+                        <div className="flex items-center gap-2">
+                          <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-32 text-xs shrink-0">
+                            {TAG_OPS.map(op => <option key={op} value={op}>{op === '!has' ? "doesn't have" : 'has'}</option>)}
+                          </Select>
+                          {tagValueOptions.length > 0 ? (
+                            <Select value={String(cond.value)} onChange={e => updateCondition(i, { value: e.target.value })} className="flex-1 min-w-0 text-xs">
+                              {tagValueOptions.map(name => <option key={name} value={name}>{name}</option>)}
+                            </Select>
+                          ) : (
+                            <Input className="flex-1 min-w-0 text-xs" value={String(cond.value)} placeholder="Tag name"
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateCondition(i, { value: e.target.value })} />
+                          )}
+                          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeCondition(i)}>
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </>
                     ) : (
                       <div className="flex items-center gap-2">
                         <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-16 text-xs shrink-0">
@@ -282,7 +317,7 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
                         </Button>
                       </div>
                     )}
-                    {isTag && allTagOptions.length === 0 && (
+                    {isTag && tagValueOptions.length === 0 && (
                       <p className="text-[11px] text-muted-foreground">
                         No tags created yet — type one above, or add a tag group with some options to a trade first
                         from the Journal so it's reusable here too.

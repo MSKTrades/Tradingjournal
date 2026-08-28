@@ -17,7 +17,10 @@ import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
 
 function condLabel(c: Condition): string {
   if (c.field === TAG_CONDITION_FIELD) {
-    return c.op === '!has' ? `Not tagged "${c.value}"` : `Tagged "${c.value}"`;
+    // Naming the group when the condition is scoped to one - "EMA9" alone
+    // is ambiguous once the same option name exists under several groups.
+    const suffix = c.group ? ` in "${c.group}"` : '';
+    return c.op === '!has' ? `Not tagged "${c.value}"${suffix}` : `Tagged "${c.value}"${suffix}`;
   }
   const field = FIELD_LABELS[c.field] ?? c.field;
   return `${field} ${c.op} ${c.value}`;

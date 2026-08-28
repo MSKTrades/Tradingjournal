@@ -468,6 +468,28 @@ export default function Journal() {
   const trades: Trade[] = rawTrades ?? [];
   const usedTagNames = new Set(trades.flatMap(allTagsOnTrade));
   const accountTagOptions = allTagOptions.filter(t => usedTagNames.has(t.name));
+  // Main Tag chip's own options: which tag GROUPS actually have a selection
+  // on at least one of this account's trades, each narrowed down to just
+  // the option values actually used within that group here - same "don't
+  // show what can't possibly match" reasoning as accountTagOptions above,
+  // one level deeper.
+  const accountTagGroups = useMemo(() => {
+    const usedByGroup = new Map<string, Set<string>>();
+    for (const t of trades) {
+      for (const [group, values] of Object.entries(t.tag_selections ?? {})) {
+        if (!values || values.length === 0) continue;
+        if (!usedByGroup.has(group)) usedByGroup.set(group, new Set());
+        values.forEach(v => usedByGroup.get(group)!.add(v));
+      }
+    }
+    return (rawTagGroups ?? [])
+      .filter(g => usedByGroup.has(g.name))
+      .map(g => ({
+        name: g.name,
+        options: g.options.filter(o => usedByGroup.get(g.name)!.has(o.name)).map(o => ({ name: o.name, color: o.color })),
+      }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trades, rawTagGroups]);
   const customCols: CustomColumn[] = rawCols ?? [];
   const checklists: Checklist[] = rawChecklists ?? [];
   const nextTradeNumber = trades.length === 0 ? 1 : Math.max(0, ...trades.map(t => t.trade_number ?? 0)) + 1;
@@ -638,7 +660,7 @@ export default function Journal() {
         </div>
       )}
 
-      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={accountTagOptions} />
+      <PerformanceFilterBar filters={filters} onChange={setFilters} assetOptions={assetOptions} tagOptions={accountTagOptions} tagGroupOptions={accountTagGroups} />
 
       <JournalInsights trades={filtered} allTrades={trades} account={activeAccount} />
 

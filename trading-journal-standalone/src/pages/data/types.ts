@@ -97,7 +97,17 @@ export type NoteBlock =
 // `field: 'has_tag'` (see TAG_CONDITION_FIELD below) - there, `value` holds
 // a tag NAME instead, so a strategy can require "this trade is/isn't
 // tagged X" alongside its numeric conditions.
-export type Condition = { field: string; op: string; value: number | string };
+//
+// `group` only applies to a tag condition, and is optional there too: tag
+// group option names get reused across groups all the time (e.g. "EMA9"
+// shows up under both "1M_Price above" and "15M Price below" - see the tag
+// groups note on TagGroup below), so "has EMA9" on its own is ambiguous
+// about which one you mean. Setting `group` to a tag group's name narrows
+// the check to just that group's own selections; leaving it unset checks
+// everywhere a trade can carry a tag (every group's selections, plus the
+// older flat tags list) - same as before `group` existed, so old saved
+// strategies keep working unchanged.
+export type Condition = { field: string; op: string; value: number | string; group?: string };
 
 // Reserved condition field key for "does this trade have tag X" - kept out
 // of CONDITION_FIELDS/custom columns entirely (it's not a number you're
