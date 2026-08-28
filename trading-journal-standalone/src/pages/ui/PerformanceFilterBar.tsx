@@ -354,15 +354,19 @@ export default function PerformanceFilterBar({ filters, onChange, assetOptions, 
           selected={filters.outcome}
           onToggle={(v) => toggle('outcome', v)}
         />
-        {tagGroupOptions.length > 0 && (
-          <FilterChip
-            label="Main Tag"
-            count={filters.tagGroups.length}
-            options={tagGroupOptions.map(g => ({ value: g.name, label: g.name }))}
-            selected={filters.tagGroups}
-            onToggle={toggleTagGroup}
-          />
-        )}
+        {/* Always rendered, same as every other chip (Sub Tag included) -
+            it used to hide itself entirely whenever no trade had a
+            tag-group value yet, which read as "Main Tag filtering is
+            missing" rather than "there's nothing to filter by yet." Falls
+            back to FilterChip's own built-in "No options yet." state
+            instead, matching how every other empty chip already behaves. */}
+        <FilterChip
+          label="Main Tag"
+          count={filters.tagGroups.length}
+          options={tagGroupOptions.map(g => ({ value: g.name, label: g.name }))}
+          selected={filters.tagGroups}
+          onToggle={toggleTagGroup}
+        />
         <FilterChip
           label="Sub Tag"
           count={filters.tags.length}

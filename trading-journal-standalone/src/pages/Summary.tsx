@@ -12,6 +12,7 @@ import CurrencyFlag from './ui/CurrencyFlag';
 import RiskGuardrail from './ui/RiskGuardrail';
 import PropPnlLedger from './ui/PropPnlLedger';
 import EmotionsRatingSummary from './ui/EmotionsRatingSummary';
+import ExecutionMistakeSummary from './ui/ExecutionMistakeSummary';
 import WeeklyDigest from './ui/WeeklyDigest';
 import { summarizeOutcome } from './data/risk';
 
@@ -284,7 +285,7 @@ function NewsWidget() {
           )}
 
           {!loading && !data?.eventsError && visibleEvents.length > 0 && (
-            <div className="flex flex-col divide-y divide-border max-h-[320px] overflow-y-auto">
+            <div className="flex flex-col divide-y divide-border max-h-[320px] overflow-y-auto scroll-visible-y">
               {visibleEvents.map((e, i) => (
                 <div key={i} className="flex flex-col gap-0.5 py-2 text-sm">
                   <div className="flex items-center gap-3">
@@ -329,7 +330,7 @@ function NewsWidget() {
           )}
 
           {!loading && !data?.headlinesError && headlines.length > 0 && (
-            <div className="flex flex-col divide-y divide-border max-h-[320px] overflow-y-auto">
+            <div className="flex flex-col divide-y divide-border max-h-[320px] overflow-y-auto scroll-visible-y">
               {headlines.map((h, i) => (
                 <a
                   key={i}
@@ -729,6 +730,10 @@ export default function Summary() {
         <RiskGuardrail account={activeAccount} trades={trades} />
         {activeAccount && <PropPnlLedger accountId={activeAccount.id} />}
         <EmotionsRatingSummary trades={trades} />
+      </div>
+
+      <div className="grid grid-cols-1 mb-6">
+        <ExecutionMistakeSummary trades={trades} />
       </div>
 
       <NewsWidget />

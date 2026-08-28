@@ -253,8 +253,12 @@ function useHorizontalScrollState(ref: React.RefObject<HTMLDivElement>) {
   return state;
 }
 
-function TableScrollBar({ containerRef }: { containerRef: React.RefObject<HTMLDivElement> }) {
-  const { canScroll, canLeft, canRight, thumbPct, thumbWidthPct } = useHorizontalScrollState(containerRef);
+// scrollState is lifted into the parent (one useHorizontalScrollState call
+// against tableScrollRef) so the same canRight flag can also drive the
+// right-edge fade cue over the table itself, instead of each consumer
+// running its own scroll/resize listeners against the same element.
+function TableScrollBar({ containerRef, scrollState }: { containerRef: React.RefObject<HTMLDivElement>; scrollState: ReturnType<typeof useHorizontalScrollState> }) {
+  const { canScroll, canLeft, canRight, thumbPct, thumbWidthPct } = scrollState;
   if (!canScroll) return null;
 
   const nudge = (dir: number) => containerRef.current?.scrollBy({ left: dir * 240, behavior: 'smooth' });
@@ -285,7 +289,6 @@ function TableScrollBar({ containerRef }: { containerRef: React.RefObject<HTMLDi
       >
         <ChevronRight className="w-3.5 h-3.5" />
       </button>
-      <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">scroll for more columns</span>
     </div>
   );
 }
@@ -459,6 +462,7 @@ export default function Journal() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const tableScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollState = useHorizontalScrollState(tableScrollRef);
   // 25 sits in the "20-30 per page" range asked for - large enough that
   // most accounts rarely need to page through, small enough that the
   // sticky header actually has something to stay pinned above.
@@ -664,14 +668,17 @@ export default function Journal() {
 
       <JournalInsights trades={filtered} allTrades={trades} account={activeAccount} />
 
-      <TableScrollBar containerRef={tableScrollRef} />
+      <TableScrollBar containerRef={tableScrollRef} scrollState={tableScrollState} />
 
       {/* No overflow-hidden here (even though it'd tidy the rounded corners
           against the inner scrollable table) - an overflow!=visible
           ancestor becomes the reference frame position:sticky measures
           against, and since THIS div never scrolls on its own (the window
-          does), that silently breaks the sticky column header below. */}
-      <div className="rounded-lg border border-border">
+          does), that silently breaks the sticky column header below.
+          `relative` is safe to add though (unlike overflow) - it only
+          establishes a containing block for the absolutely-positioned fade
+          cue below, it doesn't touch the sticky reference frame. */}
+      <div className="relative rounded-lg border border-border">
         <Table scrollRef={tableScrollRef} containerClassName="max-h-[65vh]">
           <TableHeader>
             <TableRow className="text-xs">
@@ -739,6 +746,21 @@ export default function Journal() {
             ))}
           </TableBody>
         </Table>
+
+        {/* Right-edge fade cue, replacing the old "scroll for more columns"
+            text hint - hints there's more off-screen without words. Sits
+            in the non-scrolling wrapper div above (not inside the scroll
+            container itself), so it stays pinned to the visible edge
+            instead of scrolling away with the table content. Tied to the
+            same canRight flag TableScrollBar's right chevron uses, so it
+            disappears once actually scrolled to the last column. */}
+        {tableScrollState.canScroll && tableScrollState.canRight && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute top-0 right-0 bottom-0 w-8 rounded-r-lg"
+            style={{ background: 'linear-gradient(to right, transparent, hsl(var(--background)) 92%)' }}
+          />
+        )}
       </div>
 
       <JournalPagination

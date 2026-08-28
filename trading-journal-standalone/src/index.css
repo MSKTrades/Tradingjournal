@@ -45,18 +45,27 @@ input[type='number'] {
 /* A wide table (Journal, with custom columns added) can scroll horizontally
    but on some platforms the native scrollbar is an invisible hover-only
    overlay, so there's no visual cue more columns exist off-screen. This
-   forces a slim, always-visible track/thumb instead. */
-.scroll-visible-x {
+   forces a slim, always-visible track/thumb instead. Same treatment for
+   vertical scroll containers (e.g. the news widget list) via
+   .scroll-visible-y — both share the themed thumb/track look, only the
+   scrollbar axis/size differs. */
+.scroll-visible-x,
+.scroll-visible-y {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--muted-foreground) / 0.5) transparent;
 }
 .scroll-visible-x::-webkit-scrollbar {
   height: 10px;
 }
-.scroll-visible-x::-webkit-scrollbar-track {
+.scroll-visible-y::-webkit-scrollbar {
+  width: 10px;
+}
+.scroll-visible-x::-webkit-scrollbar-track,
+.scroll-visible-y::-webkit-scrollbar-track {
   background: hsl(var(--muted) / 0.4);
 }
-.scroll-visible-x::-webkit-scrollbar-thumb {
+.scroll-visible-x::-webkit-scrollbar-thumb,
+.scroll-visible-y::-webkit-scrollbar-thumb {
   background-color: hsl(var(--muted-foreground) / 0.5);
   border-radius: 9999px;
   border: 2px solid transparent;

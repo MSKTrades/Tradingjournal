@@ -12,8 +12,9 @@ export type DrawdownPoint = {
   date: string;
   equity: number;
   peak: number;
-  ddDollar: number; // >= 0, distance below the running peak
-  ddPct: number;    // >= 0, same distance as a % of the peak
+  ddDollar: number;      // >= 0, distance below the running peak
+  ddPct: number;         // >= 0, same distance as a % of the peak
+  ddDurationDays: number; // >= 0, calendar days since the running peak was last set (0 when at a new peak)
 };
 
 export type DrawdownResult = {
@@ -21,13 +22,26 @@ export type DrawdownResult = {
   currentBalance: number;
   maxDDDollar: number;
   maxDDPct: number;
+  maxDDDurationDays: number;     // longest calendar-day stretch spent underwater, anywhere in the history
   currentDDDollar: number;
   currentDDPct: number;
+  currentDDDurationDays: number; // calendar days into the CURRENT drawdown (0 if sitting at a new peak right now)
 };
 
 const EMPTY_DRAWDOWN: DrawdownResult = {
-  curve: [], currentBalance: 0, maxDDDollar: 0, maxDDPct: 0, currentDDDollar: 0, currentDDPct: 0,
+  curve: [], currentBalance: 0, maxDDDollar: 0, maxDDPct: 0, maxDDDurationDays: 0,
+  currentDDDollar: 0, currentDDPct: 0, currentDDDurationDays: 0,
 };
+
+// Local-date (not UTC) day-count between two trade_placed_at DATE strings -
+// same slice(0,10) + local-midnight-parse convention used throughout this
+// file and WeeklyDigest.tsx/challengeSim.ts, so a drawdown's duration is
+// measured the same way "today" and weekly buckets already are.
+function daysBetweenISO(a: string, b: string): number {
+  const da = new Date(`${a.slice(0, 10)}T00:00:00`).getTime();
+  const db = new Date(`${b.slice(0, 10)}T00:00:00`).getTime();
+  return Math.round((db - da) / 86400000);
+}
 
 // Builds a running equity curve from a starting balance + every trade's
 // already-server-computed gain_loss, then walks it to find the running peak
@@ -58,16 +72,28 @@ export function computeDrawdown(trades: Trade[], startingBalance: number | null)
   const base = startingBalance != null ? Number(startingBalance) : Number(sorted[0]!.start_capital ?? 0);
   let equity = base;
   let peak = base;
+  // Approximation: with no explicit "challenge start date" separate from
+  // the first trade, the running peak's date starts out pinned to the
+  // first trade's date - so if that very first trade is a loss, its
+  // duration is measured from itself (0 days) rather than from some
+  // earlier, untracked start date. Every peak set AFTER that is exact.
+  let peakDate = sorted[0]!.trade_placed_at!;
   let maxDDDollar = 0;
   let maxDDPct = 0;
+  let maxDDDurationDays = 0;
 
   const curve: DrawdownPoint[] = sorted.map((t, i) => {
     equity += Number(t.gain_loss ?? 0);
-    peak = Math.max(peak, equity);
+    if (equity >= peak) {
+      peak = equity;
+      peakDate = t.trade_placed_at!;
+    }
     const ddDollar = Math.max(0, peak - equity);
     const ddPct = peak > 0 ? (ddDollar / peak) * 100 : 0;
+    const ddDurationDays = ddDollar > 0 ? daysBetweenISO(peakDate, t.trade_placed_at!) : 0;
     maxDDDollar = Math.max(maxDDDollar, ddDollar);
     maxDDPct = Math.max(maxDDPct, ddPct);
+    maxDDDurationDays = Math.max(maxDDDurationDays, ddDurationDays);
     return {
       idx: i + 1,
       date: t.trade_placed_at!,
@@ -75,6 +101,7 @@ export function computeDrawdown(trades: Trade[], startingBalance: number | null)
       peak: Math.round(peak * 100) / 100,
       ddDollar: Math.round(ddDollar * 100) / 100,
       ddPct: Math.round(ddPct * 100) / 100,
+      ddDurationDays,
     };
   });
 
@@ -84,8 +111,10 @@ export function computeDrawdown(trades: Trade[], startingBalance: number | null)
     currentBalance: last.equity,
     maxDDDollar: Math.round(maxDDDollar * 100) / 100,
     maxDDPct: Math.round(maxDDPct * 100) / 100,
+    maxDDDurationDays,
     currentDDDollar: last.ddDollar,
     currentDDPct: last.ddPct,
+    currentDDDurationDays: last.ddDurationDays,
   };
 }
 

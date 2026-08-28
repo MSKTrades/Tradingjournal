@@ -111,6 +111,14 @@ const MINDSET_STARTER_OPTIONS = ['Calm', 'Confident', 'FOMO', 'Impatient', 'Hesi
 const MINDSET_GROUP_NAME = 'Mindset';
 const MINDSET_GROUP_RE = /mindset|mood|psycholog/i;
 
+// Same starter-pack idea as Mindset above, but for process/execution
+// slip-ups (ICT/SMC intraday London-session forex is the app's domain -
+// see other context - so these lean into that: chasing entries, skipping
+// checklist rules, moving stops, missing the London open, etc).
+const EXEC_MISTAKE_STARTER_OPTIONS = ['Chased Entry', 'Skipped Rule', 'Moved SL', 'Late to London', 'FOMO Entry', 'Oversized', 'No Checklist', 'Revenge Trade'];
+const EXEC_MISTAKE_GROUP_NAME = 'Execution Mistakes';
+const EXEC_MISTAKE_GROUP_RE = /execution mistake|mistake|error/i;
+
 export default function TagGroupsPicker({ groups, selections, onChange, onCreateGroup, onCreateOption }: Props) {
   const [addingGroup, setAddingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
@@ -145,6 +153,33 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
     starterFiredOptionsRef.current = false;
     setStarterBusy(true);
     onCreateGroup(MINDSET_GROUP_NAME);
+  }
+
+  // Parallel starter-pack affordance for "Execution Mistakes", mirroring
+  // addStarterMindsetGroup/its useEffect above exactly (own busy/ref state,
+  // own effect watching `groups`) - kept as a fully separate implementation
+  // rather than generalized/shared with the Mindset one so this diff stays
+  // easy to review and low-risk.
+  const [execMistakeStarterBusy, setExecMistakeStarterBusy] = useState(false);
+  const execMistakeStarterFiredOptionsRef = useRef(false);
+  const hasExecMistakeGroup = groups.some(g => EXEC_MISTAKE_GROUP_RE.test(g.name));
+
+  useEffect(() => {
+    if (!execMistakeStarterBusy || execMistakeStarterFiredOptionsRef.current) return;
+    const group = groups.find(g => g.name === EXEC_MISTAKE_GROUP_NAME);
+    if (!group) return;
+    execMistakeStarterFiredOptionsRef.current = true;
+    for (const optionName of EXEC_MISTAKE_STARTER_OPTIONS) {
+      onCreateOption(group.id, group.name, optionName);
+    }
+    setExecMistakeStarterBusy(false);
+  }, [groups, execMistakeStarterBusy, onCreateOption]);
+
+  function addStarterExecMistakeGroup() {
+    if (execMistakeStarterBusy) return;
+    execMistakeStarterFiredOptionsRef.current = false;
+    setExecMistakeStarterBusy(true);
+    onCreateGroup(EXEC_MISTAKE_GROUP_NAME);
   }
 
   function toggleOption(group: TagGroup, optionName: string) {
@@ -244,6 +279,16 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
               className="text-xs text-muted-foreground hover:text-foreground self-start disabled:opacity-50"
             >
               {starterBusy ? 'Adding starter tags…' : '+ Add starter Mindset tags'}
+            </button>
+          )}
+          {!hasExecMistakeGroup && (
+            <button
+              type="button"
+              onClick={addStarterExecMistakeGroup}
+              disabled={execMistakeStarterBusy}
+              className="text-xs text-muted-foreground hover:text-foreground self-start disabled:opacity-50"
+            >
+              {execMistakeStarterBusy ? 'Adding starter tags…' : '+ Add starter Execution Mistake tags'}
             </button>
           )}
         </div>

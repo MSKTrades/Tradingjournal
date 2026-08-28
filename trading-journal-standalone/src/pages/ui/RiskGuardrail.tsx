@@ -102,7 +102,11 @@ export default function RiskGuardrail({ account, trades }: { account: Account | 
               usedDollar={dd.currentDDDollar}
               limitDollar={maxDDLimitDollar}
               usedPct={maxDDUsedPct}
-              sub={`${dd.currentDDPct.toFixed(1)}% below peak equity`}
+              sub={
+                dd.currentDDDollar > 0
+                  ? `${dd.currentDDPct.toFixed(1)}% below peak equity · ${dd.currentDDDurationDays} day${dd.currentDDDurationDays === 1 ? '' : 's'} underwater`
+                  : `${dd.currentDDPct.toFixed(1)}% below peak equity`
+              }
             />
           )}
           {showConsistency && (

@@ -14,6 +14,8 @@ import { useAccount } from '../lib/accounts';
 import { fmtMoney, plColor, StrategyResult, Trade, Tag, TagGroup } from './data/types';
 import { computeDrawdown } from './data/risk';
 import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters, allTagsOnTrade, TagOption } from './ui/PerformanceFilterBar';
+import RMultipleDistribution from './ui/RMultipleDistribution';
+import HourOfDayPerformance from './ui/HourOfDayPerformance';
 
 // --- TYPES ---
 type PeriodRow = {
@@ -484,13 +486,24 @@ function DrawdownSection({ trades, startingBalance }: { trades: Trade[]; startin
       <CardContent className="pt-4">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <p className="text-sm font-semibold">Drawdown</p>
-          <div className="flex gap-4 text-xs">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
             <span className="text-muted-foreground">
               Max: <span className="font-mono font-semibold text-red-500 dark:text-red-400">{fmtMoney(dd.maxDDDollar)} ({dd.maxDDPct.toFixed(1)}%)</span>
             </span>
             <span className="text-muted-foreground">
               Current: <span className="font-mono font-semibold text-red-500 dark:text-red-400">{fmtMoney(dd.currentDDDollar)} ({dd.currentDDPct.toFixed(1)}%)</span>
             </span>
+            {/* Depth alone doesn't say how long the account was stuck underwater -
+                two accounts can both bottom out at -5% and be very different
+                experiences if one recovered in 2 days and the other took 3 weeks. */}
+            <span className="text-muted-foreground">
+              Max duration: <span className="font-mono font-semibold text-orange-700 dark:text-orange-400">{dd.maxDDDurationDays}d</span>
+            </span>
+            {dd.currentDDDollar > 0 && (
+              <span className="text-muted-foreground">
+                Currently underwater: <span className="font-mono font-semibold text-orange-700 dark:text-orange-400">{dd.currentDDDurationDays}d</span>
+              </span>
+            )}
           </div>
         </div>
         {dd.curve.length < 2 ? (
@@ -689,6 +702,16 @@ export default function Performance() {
               "how far below my peak balance am I right now" is a statement
               about the real account, not about a filtered slice of it. */}
           <DrawdownSection trades={rawTradesForHourly ?? []} startingBalance={activeAccount?.starting_balance ?? null} />
+
+          {/* R-Multiple Distribution and Hour-of-Day Performance - both
+              computed from the account's full trade list (not the
+              filter-bar-narrowed set), same reasoning as Drawdown above:
+              these describe the account's actual trading history, not a
+              filtered slice of it. */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <RMultipleDistribution trades={rawTradesForHourly ?? []} />
+            <HourOfDayPerformance trades={rawTradesForHourly ?? []} />
+          </div>
 
           {/* Cumulative P/L across whatever the filter bar + strategy
               dropdown currently narrow down to - a single running total,
