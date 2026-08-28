@@ -12,6 +12,7 @@ import CurrencyFlag from './ui/CurrencyFlag';
 import RiskGuardrail from './ui/RiskGuardrail';
 import PropPnlLedger from './ui/PropPnlLedger';
 import EmotionsRatingSummary from './ui/EmotionsRatingSummary';
+import WeeklyDigest from './ui/WeeklyDigest';
 import { summarizeOutcome } from './data/risk';
 
 function fmtPF(v: number | null) {
@@ -636,6 +637,8 @@ export default function Summary() {
       </div>
 
       <SessionsWidget />
+
+      <WeeklyDigest trades={trades} checklists={checklists} />
 
       {totalTrades > 0 && (
         <div className="grid grid-cols-3 gap-4 mb-6">
