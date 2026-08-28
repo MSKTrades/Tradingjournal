@@ -87,7 +87,7 @@ export default function PropPnlLedger({ accountId }: { accountId: number }) {
   }
 
   return (
-    <Card className="mb-6">
+    <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
           <Wallet className="w-4 h-4 text-muted-foreground" />

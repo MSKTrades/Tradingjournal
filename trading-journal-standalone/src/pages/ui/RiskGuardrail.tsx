@@ -1,5 +1,5 @@
 import { ShieldAlert } from 'lucide-react';
-import { Card, CardContent } from '../../lib/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '../../lib/ui/card';
 import { Account, Trade, fmtMoney } from '../data/types';
 import { computeDrawdown, computeTodayPnL, computeConsistency } from '../data/risk';
 
@@ -68,54 +68,54 @@ export default function RiskGuardrail({ account, trades }: { account: Account | 
   const breached = (showDaily && dailyUsedPct >= 100) || (showMaxDD && maxDDUsedPct >= 100) || (showConsistency && consistencyUsedPct >= 100);
 
   return (
-    <div className="mb-6">
-      <div className="flex items-center gap-2 mb-3">
-        <ShieldAlert className="w-4 h-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">Risk Guardrail — {account.name}</h2>
-      </div>
-      <Card className={breached ? 'border-red-500/50' : undefined}>
-        <CardContent className="pt-4 pb-4">
-          {breached && (
-            <p className="text-xs font-medium text-red-500 mb-3">
-              A limit below has been reached. This is a warning only — PipEcho doesn't block trades — but check
-              your challenge/account rules before placing another one today.
-            </p>
+    <Card className={breached ? 'border-red-500/50' : undefined}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="w-4 h-4 text-muted-foreground" />
+          <CardTitle className="text-base font-bold">Risk Guardrail — {account.name}</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {breached && (
+          <p className="text-xs font-medium text-red-500 mb-3">
+            A limit below has been reached. This is a warning only — PipEcho doesn't block trades — but check
+            your challenge/account rules before placing another one today.
+          </p>
+        )}
+        <div className="flex flex-wrap gap-6">
+          {showDaily && (
+            <Gauge
+              label="Daily Loss"
+              usedDollar={dailyUsedDollar}
+              limitDollar={dailyLimitDollar}
+              usedPct={dailyUsedPct}
+              sub={todayPnL >= 0 ? `up ${fmtMoney(todayPnL)} today` : `down ${fmtMoney(Math.abs(todayPnL))} today`}
+            />
           )}
-          <div className="flex flex-wrap gap-6">
-            {showDaily && (
-              <Gauge
-                label="Daily Loss"
-                usedDollar={dailyUsedDollar}
-                limitDollar={dailyLimitDollar}
-                usedPct={dailyUsedPct}
-                sub={todayPnL >= 0 ? `up ${fmtMoney(todayPnL)} today` : `down ${fmtMoney(Math.abs(todayPnL))} today`}
-              />
-            )}
-            {showMaxDD && (
-              <Gauge
-                label="Max Drawdown"
-                usedDollar={dd.currentDDDollar}
-                limitDollar={maxDDLimitDollar}
-                usedPct={maxDDUsedPct}
-                sub={`${dd.currentDDPct.toFixed(1)}% below peak equity`}
-              />
-            )}
-            {showConsistency && (
-              <Gauge
-                label="Consistency Rule"
-                usedDollar={consistency.bestDayDollar}
-                limitDollar={consistencyLimitDollar}
-                usedPct={consistencyUsedPct}
-                sub={
-                  consistency.totalProfitDollar <= 0
-                    ? 'No profit yet to evaluate'
-                    : `${fmtMoney(consistency.bestDayDollar)} on ${consistency.bestDayDate} of ${fmtMoney(consistency.totalProfitDollar)} total profit`
-                }
-              />
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+          {showMaxDD && (
+            <Gauge
+              label="Max Drawdown"
+              usedDollar={dd.currentDDDollar}
+              limitDollar={maxDDLimitDollar}
+              usedPct={maxDDUsedPct}
+              sub={`${dd.currentDDPct.toFixed(1)}% below peak equity`}
+            />
+          )}
+          {showConsistency && (
+            <Gauge
+              label="Consistency Rule"
+              usedDollar={consistency.bestDayDollar}
+              limitDollar={consistencyLimitDollar}
+              usedPct={consistencyUsedPct}
+              sub={
+                consistency.totalProfitDollar <= 0
+                  ? 'No profit yet to evaluate'
+                  : `${fmtMoney(consistency.bestDayDollar)} on ${consistency.bestDayDate} of ${fmtMoney(consistency.totalProfitDollar)} total profit`
+              }
+            />
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

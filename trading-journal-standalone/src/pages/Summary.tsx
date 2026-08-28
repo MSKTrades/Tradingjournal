@@ -11,6 +11,8 @@ import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney } from 
 import CurrencyFlag from './ui/CurrencyFlag';
 import RiskGuardrail from './ui/RiskGuardrail';
 import PropPnlLedger from './ui/PropPnlLedger';
+import EmotionsRatingSummary from './ui/EmotionsRatingSummary';
+import { summarizeOutcome } from './data/risk';
 
 function fmtPF(v: number | null) {
   return v === null ? '∞' : v.toFixed(2);
@@ -29,26 +31,6 @@ function RBadge({ r, size = 'sm' }: { r: number; size?: 'sm' | 'lg' }) {
 // explicitly recorded a true/false for a given rule count toward that
 // rule's denominator — a rule added after a trade was graded has no
 // opinion on it, so it's excluded rather than silently counted as broken.
-// Outcome summary for one group of trades — win rate + realized P/L, using
-// the trade's own already-computed gain_loss (the real, position-sized
-// dollar result) rather than a re-derived R-multiple, so this always
-// matches what the Journal table shows for the same trades.
-function summarizeOutcome(group: Trade[]) {
-  const wins = group.filter(t => t.profit_loss === 'Profit').length;
-  const losses = group.filter(t => t.profit_loss === 'Loss').length;
-  const decided = wins + losses;
-  const winRate = decided > 0 ? Math.round((wins / decided) * 100) : null;
-  const totalGL = group.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
-  const avgGL = group.length > 0 ? totalGL / group.length : 0;
-  return {
-    count: group.length,
-    wins, losses,
-    winRate,
-    totalGL: Math.round(totalGL * 100) / 100,
-    avgGL: Math.round(avgGL * 100) / 100,
-  };
-}
-
 function useChecklistCompliance(trades: Trade[], checklists: Checklist[]) {
   return useMemo(() => {
     return checklists
@@ -740,9 +722,11 @@ export default function Summary() {
 
       <ChecklistCompliance trades={trades} checklists={checklists} />
 
-      <RiskGuardrail account={activeAccount} trades={trades} />
-
-      {activeAccount && <PropPnlLedger accountId={activeAccount.id} />}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start mb-6">
+        <RiskGuardrail account={activeAccount} trades={trades} />
+        {activeAccount && <PropPnlLedger accountId={activeAccount.id} />}
+        <EmotionsRatingSummary trades={trades} />
+      </div>
 
       <NewsWidget />
 

@@ -86,8 +86,8 @@ const INSTRUMENTS = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'GBPJPY', 'AUDUSD',
 // second, reusing the same green/amber color vocabulary RiskGuardrail.tsx's
 // statusColor already uses for "good" vs "watch out" rather than inventing
 // new colors.
-const EMOTIONS_POSITIVE = ['Calm', 'Confident', 'Disciplined', 'Patient'];
-const EMOTIONS_CAUTION = ['FOMO', 'Impatient', 'Revenge Trade', 'Tilted'];
+export const EMOTIONS_POSITIVE = ['Calm', 'Confident', 'Disciplined', 'Patient'];
+export const EMOTIONS_CAUTION = ['FOMO', 'Impatient', 'Revenge Trade', 'Tilted'];
 
 function empty(accountId: number, tradeNumber: number): TradePayload {
   return {

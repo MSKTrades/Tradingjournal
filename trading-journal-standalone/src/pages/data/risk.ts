@@ -165,6 +165,28 @@ export function computeConsistency(trades: Trade[]): ConsistencyResult {
   };
 }
 
+// --- Outcome summary ---------------------------------------------------
+
+// Outcome summary for one group of trades — win rate + realized P/L, using
+// the trade's own already-computed gain_loss (the real, position-sized
+// dollar result) rather than a re-derived R-multiple, so this always
+// matches what the Journal table shows for the same trades.
+export function summarizeOutcome(group: Trade[]) {
+  const wins = group.filter(t => t.profit_loss === 'Profit').length;
+  const losses = group.filter(t => t.profit_loss === 'Loss').length;
+  const decided = wins + losses;
+  const winRate = decided > 0 ? Math.round((wins / decided) * 100) : null;
+  const totalGL = group.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
+  const avgGL = group.length > 0 ? totalGL / group.length : 0;
+  return {
+    count: group.length,
+    wins, losses,
+    winRate,
+    totalGL: Math.round(totalGL * 100) / 100,
+    avgGL: Math.round(avgGL * 100) / 100,
+  };
+}
+
 // --- Position size calculator -----------------------------------------------
 
 export type PositionSizeResult = {
