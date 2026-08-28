@@ -19,6 +19,7 @@ import StrategyDetail from './pages/StrategyDetail';
 import Checklists from './pages/Checklists';
 import Admin from './pages/Admin';
 import Backtest from './pages/Backtest';
+import ChallengeSimulator from './pages/ChallengeSimulator';
 import SmcAnalysis from './pages/SmcAnalysis';
 import SmcComingSoon from './pages/SmcComingSoon';
 import { isAdminEmail } from './lib/admin';
@@ -135,6 +136,7 @@ export default function App() {
             <Route path="/strategies/:id" element={<Protected><AuthedShell><StrategyDetail /></AuthedShell></Protected>} />
             <Route path="/checklists" element={<Protected><AuthedShell><Checklists /></AuthedShell></Protected>} />
             <Route path="/backtest" element={<Protected><AuthedShell><Backtest /></AuthedShell></Protected>} />
+            <Route path="/challenge-simulator" element={<Protected><AuthedShell><ChallengeSimulator /></AuthedShell></Protected>} />
             <Route path="/smc-analysis" element={<Protected><AuthedShell><SmcGate /></AuthedShell></Protected>} />
             {/* No client-side email check here on purpose — the API
                 (?resource=admin_stats) is the real gate and 404s anyone but

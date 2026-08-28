@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Radar } from 'lucide-react';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Radar, Trophy } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTheme } from '../lib/theme';
 import { useAuth } from '../lib/auth';
@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   // resource=datasets/trades/fetch/drawings for where the actual (now
   // removed) admin gate used to live.
   { to: '/backtest',     label: 'Backtest',    icon: History,    disabled: false },
+  { to: '/challenge-simulator', label: 'Challenge Simulator', icon: Trophy, disabled: false },
 ];
 
 // Appended only for the admin account (see lib/admin.ts) — everyone else's
