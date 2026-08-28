@@ -5,7 +5,7 @@ import { Button } from '../lib/ui/button';
 import { Input, Label, Select } from '../lib/ui/form';
 import { useAccount } from '../lib/accounts';
 import { useFetch } from '../lib/api';
-import { Trade } from './data/types';
+import { Trade, StrategyResult } from './data/types';
 import { simulateChallenge, ChallengeRules, ChallengeResult, DrawdownType } from './data/challengeSim';
 
 // Rules-form-only persistence (never the computed results, never the account
@@ -155,7 +155,30 @@ export default function ChallengeSimulator() {
   const selectedAccount = accounts.find(a => a.id === selectedAccountId) ?? null;
 
   const { data: rawTrades, loading } = useFetch<Trade[]>(`/trades?account_id=${selectedAccountId ?? ''}`);
-  const trades = rawTrades ?? [];
+
+  // Strategies are matched to trades server-side (a strategy's `conditions`
+  // are evaluated per-trade, there's no stored trades.strategy_id) — the
+  // same /summary endpoint + trades-id-set join Performance.tsx already
+  // uses for its own strategy filter is reused here rather than inventing
+  // a second way to do the same join.
+  const { data: strategiesData } = useFetch<StrategyResult[]>(`/summary?account_id=${selectedAccountId ?? ''}`);
+  const strategies = strategiesData ?? [];
+  const [strategyId, setStrategyId] = useState<string>('RAW'); // 'RAW' = All Strategies, matching Performance.tsx's sentinel
+
+  // A strategy id selected under one account has no guaranteed meaning under
+  // a different account, so drop the filter back to "All Strategies"
+  // whenever the account changes rather than silently carrying it over.
+  useEffect(() => {
+    setStrategyId('RAW');
+  }, [selectedAccountId]);
+
+  const trades = useMemo(() => {
+    const all = rawTrades ?? [];
+    if (strategyId === 'RAW') return all;
+    const strat = strategies.find(s => String(s.id) === strategyId);
+    const idSet = new Set((strat?.trades ?? []).map(t => t.id));
+    return all.filter(t => idSet.has(t.id));
+  }, [rawTrades, strategies, strategyId]);
 
   const [form, setForm] = useState<RulesFormState>(loadRulesForm);
 
@@ -227,17 +250,33 @@ export default function ChallengeSimulator() {
             Replay this account's trade history against a set of challenge rules to see whether — and when — it would have passed or failed.
           </p>
         </div>
-        <div className="w-64">
-          <Select
-            value={selectedAccountId ?? ''}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedAccountId(Number(e.target.value))}
-            disabled={accounts.length === 0}
-          >
-            {accounts.length === 0 && <option value="">No accounts yet</option>}
-            {accounts.map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </Select>
+        <div className="flex items-end gap-2">
+          <div className="w-48">
+            <Label className="text-[11px] text-muted-foreground">Account</Label>
+            <Select
+              value={selectedAccountId ?? ''}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedAccountId(Number(e.target.value))}
+              disabled={accounts.length === 0}
+            >
+              {accounts.length === 0 && <option value="">No accounts yet</option>}
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </Select>
+          </div>
+          <div className="w-48">
+            <Label className="text-[11px] text-muted-foreground">Strategy</Label>
+            <Select
+              value={strategyId}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStrategyId(e.target.value)}
+              disabled={strategies.length === 0}
+            >
+              <option value="RAW">All Strategies</option>
+              {strategies.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -307,7 +346,9 @@ export default function ChallengeSimulator() {
 
       {noTrades ? (
         <p className="text-sm text-muted-foreground italic py-8 text-center">
-          No trades logged on this account yet — nothing to simulate.
+          {strategyId !== 'RAW'
+            ? 'No trades match this strategy on this account — try a different one, or switch back to All Strategies.'
+            : "No trades logged on this account yet — nothing to simulate."}
         </p>
       ) : !result ? (
         <p className="text-sm text-muted-foreground italic py-8 text-center">
