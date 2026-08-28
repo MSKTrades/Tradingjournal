@@ -27,6 +27,7 @@ type Trade = {
   partial_2: number | null;
   extra_data: Record<string, unknown> | null;
   tags: string[] | null;
+  tag_selections: Record<string, string[]> | null;
 };
 
 // value is a number for every ordinary field, or a tag name (string) for
@@ -273,9 +274,15 @@ function evalCondition(val: number | null, op: string, threshold: number): boole
 // tag, using the reserved field TAG_CONDITION_FIELD - `value` there is the
 // tag name itself, not a number, so it's checked separately from the
 // numeric evalCondition path above rather than trying to coerce a tag name
-// through Number(cond.value).
+// through Number(cond.value). Two separate tagging systems both still write
+// to real trades - the flat `tags` column (still used by the Backtest tab)
+// and tag GROUPS (used by the Journal's TradeDetailPanel, stored per trade
+// in `tag_selections` keyed by group name, e.g. { "1M_Price above":
+// ["EMA9"] }) - so a tag "has" match has to check both, or group-based tags
+// (what most trades actually use) would silently never match.
 function matchesTagCondition(trade: Trade, op: string, tagName: string): boolean {
-  const has = (trade.tags ?? []).includes(tagName);
+  const groupValues = Object.values(trade.tag_selections ?? {}).flat();
+  const has = (trade.tags ?? []).includes(tagName) || groupValues.includes(tagName);
   return op === '!has' ? !has : has;
 }
 
@@ -349,7 +356,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
                inverse_candle_size, distance_from_asia,
                reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, profit_loss,
                rr, entry_price, tp_price, sl_price, gain_loss, gain_loss_pct,
-               position_size, partial_1, partial_2, extra_data, tags
+               position_size, partial_1, partial_2, extra_data, tags, tag_selections
         FROM trades
         WHERE account_id = $1
       `, [accountId]),

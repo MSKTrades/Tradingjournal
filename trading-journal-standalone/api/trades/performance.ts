@@ -95,11 +95,17 @@ function evalCondition(val: number | null, op: string, threshold: number): boole
 
 // Same reasoning as summary/index.ts's matchesTagCondition - a condition on
 // TAG_CONDITION_FIELD carries a tag name in `value`, not a number, so it's
-// checked against trade.tags directly instead of going through
-// getFieldValue/evalCondition.
+// checked against a trade's tags directly instead of going through
+// getFieldValue/evalCondition. Two separate tagging systems both still
+// write to real trades - the flat `tags` column (still used by the
+// Backtest tab) and tag GROUPS (used by the Journal's TradeDetailPanel,
+// stored per trade in `tag_selections` keyed by group name) - so this has
+// to check both, or group-based tags (what most trades actually use) would
+// silently never match.
 function matchesCondition(trade: any, cond: Condition): boolean {
   if (cond.field === TAG_CONDITION_FIELD) {
-    const has = (trade.tags ?? []).includes(String(cond.value));
+    const groupValues: string[] = Object.values(trade.tag_selections ?? {}).flat() as string[];
+    const has = (trade.tags ?? []).includes(String(cond.value)) || groupValues.includes(String(cond.value));
     return cond.op === '!has' ? !has : has;
   }
   return evalCondition(getFieldValue(trade, cond.field), cond.op, Number(cond.value));
@@ -203,7 +209,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
             start_capital, end_capital, cisd_break, inverse_candle_size, distance_from_asia,
             reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr, rr, session_in,
             entry_price, tp_price, sl_price, position_size, partial_1, partial_2,
-            extra_data, tags
+            extra_data, tags, tag_selections
      FROM trades
      WHERE trade_placed_at IS NOT NULL AND account_id = $1
      ORDER BY trade_placed_at ASC, COALESCE(trade_number, 999999) ASC, created_at ASC`,

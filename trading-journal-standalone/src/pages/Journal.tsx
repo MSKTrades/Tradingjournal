@@ -8,9 +8,9 @@ import { useAccount } from '../lib/accounts';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
 import ManageColumnsDialog from './ui/ManageColumnsDialog';
 import ImportTradesDialog, { ImportedTrade } from './ui/ImportTradesDialog';
-import { Trade, CustomColumn, Checklist, Tag, Account, fmtMoney, fmtPct, fmtNum, plColor } from './data/types';
+import { Trade, CustomColumn, Checklist, Tag, TagGroup, Account, fmtMoney, fmtPct, fmtNum, plColor } from './data/types';
 import { cn } from '../lib/utils';
-import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters } from './ui/PerformanceFilterBar';
+import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters, allTagsOnTrade, TagOption } from './ui/PerformanceFilterBar';
 import { computeDrawdown } from './data/risk';
 
 const DEFAULT_COLS = [
@@ -395,7 +395,7 @@ function exportTradesToCsv(trades: Trade[], cols: { key: string; label: string }
     const cells = [
       ...cols.map(c => csvCellValue(t, c.key, customColKeys)),
       ...customCols.map(c => csvCellValue(t, c.col_key, customColKeys)),
-      (t.tags ?? []).join('; '),
+      allTagsOnTrade(t).join('; '),
     ];
     return cells.map(escapeCsvField).join(',');
   });
@@ -420,18 +420,35 @@ export default function Journal() {
   const { data: rawCols, refetch: refetchCols } = useFetch<CustomColumn[]>(`/columns?account_id=${activeAccountId ?? ''}`);
   const { data: rawChecklists } = useFetch<Checklist[]>(`/checklist?account_id=${activeAccountId ?? ''}`);
   const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
-  const allTags: Tag[] = rawTags ?? [];
+  const { data: rawTagGroups } = useFetch<TagGroup[]>('/columns?resource=tag_groups');
+  // Tags themselves aren't scoped to one account - the same tag pool (both
+  // the flat tags table and every tag group's options - see allTagsOnTrade)
+  // is meant to be reusable everywhere you apply one to a trade. But the
+  // Tags FILTER here is different: showing every tag you've ever created
+  // across every account - most of which can't possibly match a single
+  // trade in whichever account is currently active - just reads as broken
+  // ("why is Asia in here, I don't use that tag on this account").
+  // Narrowing the filter's own option list to tags actually present on at
+  // least one trade in this account fixes that without touching how tags
+  // themselves work.
+  const allTagOptions: TagOption[] = useMemo(() => {
+    const seen = new Set<string>();
+    const out: TagOption[] = [];
+    for (const t of rawTags ?? []) {
+      if (seen.has(t.name)) continue;
+      seen.add(t.name);
+      out.push({ name: t.name, color: t.color });
+    }
+    for (const g of rawTagGroups ?? []) {
+      for (const o of g.options) {
+        if (seen.has(o.name)) continue;
+        seen.add(o.name);
+        out.push({ name: o.name, color: o.color });
+      }
+    }
+    return out;
+  }, [rawTags, rawTagGroups]);
   const [filters, setFilters] = useState<PerfFilters>(emptyFilters);
-  // Tags themselves aren't scoped to one account - the same tag pool is
-  // meant to be reusable everywhere you apply one to a trade (see the
-  // Tags picker inside TradeDetailPanel, which does use the full allTags
-  // list for exactly that reason). But the Tags FILTER here is different:
-  // showing every tag you've ever created across every account - most of
-  // which can't possibly match a single trade in whichever account is
-  // currently active - just reads as broken ("why is Asia in here, I don't
-  // use that tag on this account"). Narrowing the filter's own option list
-  // to tags actually present on at least one trade in this account fixes
-  // that without touching how tags themselves work.
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [colDialogOpen, setColDialogOpen] = useState(false);
@@ -449,8 +466,8 @@ export default function Journal() {
   const [pageSize, setPageSize] = useState(25);
 
   const trades: Trade[] = rawTrades ?? [];
-  const usedTagNames = new Set(trades.flatMap(t => t.tags ?? []));
-  const accountTagOptions = allTags.filter(t => usedTagNames.has(t.name));
+  const usedTagNames = new Set(trades.flatMap(allTagsOnTrade));
+  const accountTagOptions = allTagOptions.filter(t => usedTagNames.has(t.name));
   const customCols: CustomColumn[] = rawCols ?? [];
   const checklists: Checklist[] = rawChecklists ?? [];
   const nextTradeNumber = trades.length === 0 ? 1 : Math.max(0, ...trades.map(t => t.trade_number ?? 0)) + 1;

@@ -11,9 +11,9 @@ import {
 } from 'recharts';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { fmtMoney, plColor, StrategyResult, Trade, Tag } from './data/types';
+import { fmtMoney, plColor, StrategyResult, Trade, Tag, TagGroup } from './data/types';
 import { computeDrawdown } from './data/risk';
-import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters } from './ui/PerformanceFilterBar';
+import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters, allTagsOnTrade, TagOption } from './ui/PerformanceFilterBar';
 
 // --- TYPES ---
 type PeriodRow = {
@@ -546,16 +546,34 @@ export default function Performance() {
   // api/*.ts file.
   const { data: rawTradesForHourly } = useFetch<Trade[]>(`/trades?account_id=${activeAccountId ?? ''}`);
   const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
-  const allTags: Tag[] = rawTags ?? [];
+  const { data: rawTagGroups } = useFetch<TagGroup[]>('/columns?resource=tag_groups');
   // Same reasoning as Journal.tsx's accountTagOptions: tags are a shared,
-  // reusable pool across every account, but the Tags FILTER should only
-  // offer tags that could actually match a trade in the account you're
-  // currently looking at - otherwise it lists tags from other accounts
-  // that will never produce a result here.
+  // reusable pool across every account (both the flat tags table and every
+  // tag group's options - see allTagsOnTrade for why both matter), but the
+  // Tags FILTER should only offer tags that could actually match a trade in
+  // the account you're currently looking at - otherwise it lists tags from
+  // other accounts that will never produce a result here.
+  const allTagOptions: TagOption[] = useMemo(() => {
+    const seen = new Set<string>();
+    const out: TagOption[] = [];
+    for (const t of rawTags ?? []) {
+      if (seen.has(t.name)) continue;
+      seen.add(t.name);
+      out.push({ name: t.name, color: t.color });
+    }
+    for (const g of rawTagGroups ?? []) {
+      for (const o of g.options) {
+        if (seen.has(o.name)) continue;
+        seen.add(o.name);
+        out.push({ name: o.name, color: o.color });
+      }
+    }
+    return out;
+  }, [rawTags, rawTagGroups]);
   const accountTagOptions = useMemo(() => {
-    const used = new Set((rawTradesForHourly ?? []).flatMap(t => t.tags ?? []));
-    return allTags.filter(t => used.has(t.name));
-  }, [rawTradesForHourly, allTags]);
+    const used = new Set((rawTradesForHourly ?? []).flatMap(allTagsOnTrade));
+    return allTagOptions.filter(t => used.has(t.name));
+  }, [rawTradesForHourly, allTagOptions]);
 
   const [filters, setFilters] = useState<PerfFilters>(emptyFilters);
 

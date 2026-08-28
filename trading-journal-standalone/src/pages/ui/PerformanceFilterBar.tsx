@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Calendar as CalendarIcon, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { WEEKDAYS, Tag, Trade } from '../data/types';
+import { WEEKDAYS, Trade } from '../data/types';
+
+// A flattened, source-agnostic tag option for the Tags filter chip - the
+// caller merges both the flat tags pool and every tag group's options into
+// this shape (see allTagsOnTrade above for why both sources matter).
+export type TagOption = { name: string; color: string };
 
 export type PerfFilters = {
   assets: string[];
@@ -22,6 +27,19 @@ export function isFiltersEmpty(f: PerfFilters): boolean {
     && f.tags.length === 0 && f.days.length === 0 && !f.dateFrom && !f.dateTo;
 }
 
+// A trade can be tagged through either of two systems that both still
+// write to real trades: the flat, ungrouped `tags` list (still used by the
+// Backtest tab's tag picker) and FX Replay-style tag GROUPS (used by the
+// Journal's TradeDetailPanel - each group like "1M_Price above" has its own
+// options like "EMA9"/"EMA21", stored per trade as tag_selections keyed by
+// group name). Anywhere "does this trade have tag X" matters has to check
+// both, or group-based tags (which is what most trades actually use today)
+// silently never match - exported so Journal/Performance can use the same
+// union when building the Tags filter's own option list, not just here.
+export function allTagsOnTrade(t: Trade): string[] {
+  return [...(t.tags ?? []), ...Object.values(t.tag_selections ?? {}).flat()];
+}
+
 // Shared filter predicate - used by both Performance's client-side views
 // (By Hour, Cumulative P/L) and the Journal table's filter bar, so the two
 // pages can never silently drift apart on what e.g. "Side: Short" means.
@@ -29,7 +47,7 @@ export function matchesFilters(t: Trade, filters: PerfFilters): boolean {
   if (filters.assets.length > 0 && !filters.assets.includes((t.coin_token ?? '').trim().toUpperCase())) return false;
   if (filters.side.length > 0 && !filters.side.includes(t.direction)) return false;
   if (filters.outcome.length > 0 && !filters.outcome.includes(t.profit_loss ?? '')) return false;
-  if (filters.tags.length > 0 && !(t.tags ?? []).some(tag => filters.tags.includes(tag))) return false;
+  if (filters.tags.length > 0 && !allTagsOnTrade(t).some(tag => filters.tags.includes(tag))) return false;
   if (filters.days.length > 0) {
     if (!t.trade_placed_at) return false;
     const d = new Date(t.trade_placed_at);
@@ -212,7 +230,7 @@ type Props = {
   filters: PerfFilters;
   onChange: (f: PerfFilters) => void;
   assetOptions: string[];
-  tagOptions: Tag[];
+  tagOptions: TagOption[];
 };
 
 // FX Replay-style filter bar: a row of dropdown chips plus a row of

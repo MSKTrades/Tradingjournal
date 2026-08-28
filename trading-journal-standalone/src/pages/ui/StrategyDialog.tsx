@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Button } from '../../lib/ui/button';
 import { Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trash2, Plus } from 'lucide-react';
-import { Strategy, Condition, CustomColumn, Tag, CONDITION_FIELDS, OPS, WEEKDAYS, TAG_CONDITION_FIELD, TAG_OPS } from '../data/types';
+import { Strategy, Condition, CustomColumn, Tag, TagGroup, CONDITION_FIELDS, OPS, WEEKDAYS, TAG_CONDITION_FIELD, TAG_OPS } from '../data/types';
 import { useFetch } from '../../lib/api';
 import { useAccount } from '../../lib/accounts';
 
@@ -112,11 +112,40 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   // is "does/doesn't this trade have tag X" (see TAG_CONDITION_FIELD) - so
   // they're offered as one extra option in the same field dropdown, and
   // picking it swaps the rest of that condition row's UI (op + value) from
-  // the numeric one to a has/doesn't-have + tag picker below. Tags aren't
-  // account-scoped (same pool everywhere, like the tag picker on a trade
+  // the numeric one to a has/doesn't-have + tag picker below.
+  //
+  // Two separate tagging systems both still write to real trades, so both
+  // feed this dropdown: the flat, ungrouped tags table (still used by the
+  // Backtest tab's tag picker) and FX Replay-style tag GROUPS (used by the
+  // Journal's TradeDetailPanel, where each group like "1M_Price above" has
+  // its own set of options like "EMA9"/"EMA21", stored per trade as
+  // tag_selections keyed by group name). Sourcing this dropdown from only
+  // the flat table missed every group-based tag entirely, which is exactly
+  // the "why does it only show Asia" bug - merging both here matches what a
+  // condition actually checks server-side (trade.tags OR any group's
+  // selections contain this name - see matchesTagCondition in
+  // summary/index.ts and trades/performance.ts). Neither pool is
+  // account-scoped (same tags everywhere, like the pickers on a trade
   // itself), so this isn't filtered by account the way custom fields are.
   const { data: rawTags } = useFetch<Tag[]>('/columns?resource=tags');
-  const allTags: Tag[] = rawTags ?? [];
+  const { data: rawTagGroups } = useFetch<TagGroup[]>('/columns?resource=tag_groups');
+  const allTagOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const t of rawTags ?? []) {
+      if (seen.has(t.name)) continue;
+      seen.add(t.name);
+      out.push(t.name);
+    }
+    for (const g of rawTagGroups ?? []) {
+      for (const o of g.options) {
+        if (seen.has(o.name)) continue;
+        seen.add(o.name);
+        out.push(o.name);
+      }
+    }
+    return out;
+  }, [rawTags, rawTagGroups]);
 
   useEffect(() => {
     if (open) {
@@ -143,7 +172,7 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   // something you'd have to notice was missing.
   function updateConditionField(i: number, field: string) {
     if (field === TAG_CONDITION_FIELD) {
-      updateCondition(i, { field, op: 'has', value: allTags[0]?.name ?? '' });
+      updateCondition(i, { field, op: 'has', value: allTagOptions[0] ?? '' });
     } else {
       updateCondition(i, { field, op: '<=', value: 0 });
     }
@@ -229,9 +258,9 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
                         <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-32 text-xs shrink-0">
                           {TAG_OPS.map(op => <option key={op} value={op}>{op === '!has' ? "doesn't have" : 'has'}</option>)}
                         </Select>
-                        {allTags.length > 0 ? (
+                        {allTagOptions.length > 0 ? (
                           <Select value={String(cond.value)} onChange={e => updateCondition(i, { value: e.target.value })} className="flex-1 min-w-0 text-xs">
-                            {allTags.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                            {allTagOptions.map(name => <option key={name} value={name}>{name}</option>)}
                           </Select>
                         ) : (
                           <Input className="flex-1 min-w-0 text-xs" value={String(cond.value)} placeholder="Tag name"
@@ -253,10 +282,10 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
                         </Button>
                       </div>
                     )}
-                    {isTag && allTags.length === 0 && (
+                    {isTag && allTagOptions.length === 0 && (
                       <p className="text-[11px] text-muted-foreground">
-                        No tags created yet — type one above, or add it to a trade first from the Journal so it's
-                        reusable here too.
+                        No tags created yet — type one above, or add a tag group with some options to a trade first
+                        from the Journal so it's reusable here too.
                       </p>
                     )}
                   </div>
