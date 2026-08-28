@@ -25,6 +25,14 @@ CREATE TABLE IF NOT EXISTS accounts (
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS daily_loss_limit_pct NUMERIC;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS max_drawdown_limit_pct NUMERIC;
 
+-- Optional prop-firm "consistency rule" (e.g. FTMO/funded-challenge terms
+-- capping how much of total profit can come from a single day - commonly
+-- 20-30%). Expressed as a percent, same as the two limits above, and just
+-- as optional (NULL = not tracked) - powers a third, purely informational
+-- gauge on the Risk Guardrail widget. Nothing in this app blocks a trade
+-- from being logged if this is exceeded, same as the other two.
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS consistency_rule_pct NUMERIC;
+
 CREATE TABLE IF NOT EXISTS trades (
   id                     SERIAL PRIMARY KEY,
   account_id             INTEGER NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
@@ -1032,3 +1040,27 @@ CREATE TABLE IF NOT EXISTS smc_chart_markups (
 );
 
 CREATE INDEX IF NOT EXISTS idx_smc_chart_markups_pair_tf ON smc_chart_markups (pair, timeframe);
+
+-- Prop P&L Ledger: account-level cash movements to/from the prop firm
+-- (challenge fees paid, payouts received) - entirely separate from
+-- per-trade P&L. Deliberately does NOT feed recalcAccountCapital(),
+-- trades.gain_loss, or the drawdown/equity-curve math in risk.ts - those
+-- stay trading-only; this is purely a running ledger + summary shown by
+-- PropPnlLedger.tsx. Ownership follows the same convention as trades
+-- (which has no user_id column of its own): access is checked via
+-- account_id -> accounts.user_id (see ownsAccount in api/_auth.js), not a
+-- per-row user_id independently. user_id is still recorded here (nullable,
+-- informational only - who logged the entry) for the same reason
+-- mt_connections carries one alongside its account_id.
+CREATE TABLE IF NOT EXISTS ledger_entries (
+  id SERIAL PRIMARY KEY,
+  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id),
+  entry_type TEXT NOT NULL CHECK (entry_type IN ('fee', 'payout')),
+  amount NUMERIC NOT NULL,
+  entry_date DATE NOT NULL,
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_entries_account ON ledger_entries (account_id);

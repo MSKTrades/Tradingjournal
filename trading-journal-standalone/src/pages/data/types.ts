@@ -10,7 +10,18 @@ export type Account = {
   // NULL = not tracked for this account. See schema.sql for the full note.
   daily_loss_limit_pct: number | null;
   max_drawdown_limit_pct: number | null;
+  // Optional prop-firm "consistency rule" - caps how much of total profit
+  // can come from a single day, e.g. no single day may exceed 20% of total
+  // profit. NULL = not tracked. Purely informational, same as the two
+  // above - see schema.sql.
+  consistency_rule_pct: number | null;
 };
+
+// One cash movement to/from the prop firm for an account - a challenge fee
+// paid, or a payout received. Entirely separate from per-trade P&L (see
+// ledger_entries in schema.sql) - tracked by PropPnlLedger.tsx, never fed
+// into trades.gain_loss or the drawdown/equity-curve math.
+export type LedgerEntry = { id: number; account_id: number; entry_type: 'fee' | 'payout'; amount: number; entry_date: string; note: string | null; created_at: string };
 
 export type Trade = {
   id: number;

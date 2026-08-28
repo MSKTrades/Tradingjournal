@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Input } from '../../lib/ui/form';
 import { TagGroup } from '../data/types';
@@ -103,9 +103,49 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
 // every group and option here is something you create yourself via
 // "+ Add tag group" / "+ Add tag", since which categories matter (setup
 // confidence, SL reason, timeframe, ...) is entirely trader-specific.
+// Curated starter set for a trading-psychology tag group - high-value
+// enough (mindset is one of the biggest predictors of trade quality) that
+// it shouldn't require typing 8 options in by hand one at a time via
+// GroupOptionPicker above.
+const MINDSET_STARTER_OPTIONS = ['Calm', 'Confident', 'FOMO', 'Impatient', 'Hesitant', 'Overconfident', 'Revenge Trade', 'Tilted'];
+const MINDSET_GROUP_NAME = 'Mindset';
+const MINDSET_GROUP_RE = /mindset|mood|psycholog/i;
+
 export default function TagGroupsPicker({ groups, selections, onChange, onCreateGroup, onCreateOption }: Props) {
   const [addingGroup, setAddingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
+
+  // onCreateGroup/onCreateOption are both fire-and-forget (they return void,
+  // not a promise or the created row - see handleCreateTagGroup/
+  // handleCreateTagGroupOption in TradeDetailPanel) and the ONLY way this
+  // component ever learns a new group's real id is the same way the
+  // ordinary "+ Add tag group" flow does: the parent's onCreateGroup POSTs,
+  // refetches, and the newly created group shows up in the `groups` prop on
+  // the next render, found by name. So the starter-pack button below
+  // follows that exact same approach - fire onCreateGroup(MINDSET_GROUP_NAME),
+  // then watch `groups` for that name to appear before firing the 8
+  // onCreateOption calls (which need a real group.id).
+  const [starterBusy, setStarterBusy] = useState(false);
+  const starterFiredOptionsRef = useRef(false);
+  const hasMindsetGroup = groups.some(g => MINDSET_GROUP_RE.test(g.name));
+
+  useEffect(() => {
+    if (!starterBusy || starterFiredOptionsRef.current) return;
+    const group = groups.find(g => g.name === MINDSET_GROUP_NAME);
+    if (!group) return;
+    starterFiredOptionsRef.current = true;
+    for (const optionName of MINDSET_STARTER_OPTIONS) {
+      onCreateOption(group.id, group.name, optionName);
+    }
+    setStarterBusy(false);
+  }, [groups, starterBusy, onCreateOption]);
+
+  function addStarterMindsetGroup() {
+    if (starterBusy) return;
+    starterFiredOptionsRef.current = false;
+    setStarterBusy(true);
+    onCreateGroup(MINDSET_GROUP_NAME);
+  }
 
   function toggleOption(group: TagGroup, optionName: string) {
     const current = selections[group.name] ?? [];
@@ -188,13 +228,25 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => setAddingGroup(true)}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground self-start"
-        >
-          <Plus className="w-3.5 h-3.5" /> Add tag group
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setAddingGroup(true)}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground self-start"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add tag group
+          </button>
+          {!hasMindsetGroup && (
+            <button
+              type="button"
+              onClick={addStarterMindsetGroup}
+              disabled={starterBusy}
+              className="text-xs text-muted-foreground hover:text-foreground self-start disabled:opacity-50"
+            >
+              {starterBusy ? 'Adding starter tags…' : '+ Add starter Mindset tags'}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

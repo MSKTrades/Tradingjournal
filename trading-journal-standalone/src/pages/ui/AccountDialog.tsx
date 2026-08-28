@@ -22,10 +22,11 @@ type FormState = {
   active: boolean;
   daily_loss_limit_pct: string;
   max_drawdown_limit_pct: string;
+  consistency_rule_pct: string;
 };
 
 function emptyForm(): FormState {
-  return { name: '', type: '', starting_balance: '', active: true, daily_loss_limit_pct: '', max_drawdown_limit_pct: '' };
+  return { name: '', type: '', starting_balance: '', active: true, daily_loss_limit_pct: '', max_drawdown_limit_pct: '', consistency_rule_pct: '' };
 }
 
 function fromAccount(a: Account): FormState {
@@ -36,6 +37,7 @@ function fromAccount(a: Account): FormState {
     active: a.active,
     daily_loss_limit_pct: a.daily_loss_limit_pct != null ? String(a.daily_loss_limit_pct) : '',
     max_drawdown_limit_pct: a.max_drawdown_limit_pct != null ? String(a.max_drawdown_limit_pct) : '',
+    consistency_rule_pct: a.consistency_rule_pct != null ? String(a.consistency_rule_pct) : '',
   };
 }
 
@@ -70,6 +72,7 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
         sort_order: account?.sort_order ?? 0,
         daily_loss_limit_pct: form.daily_loss_limit_pct.trim() === '' ? null : Number(form.daily_loss_limit_pct),
         max_drawdown_limit_pct: form.max_drawdown_limit_pct.trim() === '' ? null : Number(form.max_drawdown_limit_pct),
+        consistency_rule_pct: form.consistency_rule_pct.trim() === '' ? null : Number(form.consistency_rule_pct),
       };
       await onSave(payload);
       onClose();
@@ -158,9 +161,18 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
               />
             </div>
           </div>
+          <div className="flex flex-col gap-1">
+            <Label>Consistency Rule % (optional)</Label>
+            <Input
+              type="number" step={0.1} min={0} placeholder="e.g. 20"
+              value={form.consistency_rule_pct}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('consistency_rule_pct', e.target.value)}
+            />
+          </div>
           <p className="text-xs text-muted-foreground -mt-2">
-            If this account is a prop-firm challenge, set these to match its rules (e.g. FTMO-style 5% daily / 10% max)
-            to get a live guardrail on the Summary page showing how close you are to either limit. Leave blank to skip.
+            If this account is a prop-firm challenge, set these to match its rules (e.g. FTMO-style 5% daily / 10% max /
+            20% consistency) to get a live guardrail on the Summary page showing how close you are to each limit.
+            Leave blank to skip.
           </p>
 
           {account && (

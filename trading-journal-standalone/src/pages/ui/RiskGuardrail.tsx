@@ -1,7 +1,7 @@
 import { ShieldAlert } from 'lucide-react';
 import { Card, CardContent } from '../../lib/ui/card';
 import { Account, Trade, fmtMoney } from '../data/types';
-import { computeDrawdown, computeTodayPnL } from '../data/risk';
+import { computeDrawdown, computeTodayPnL, computeConsistency } from '../data/risk';
 
 type GaugeProps = {
   label: string;
@@ -39,14 +39,16 @@ function Gauge({ label, usedDollar, limitDollar, usedPct, sub }: GaugeProps) {
 
 export default function RiskGuardrail({ account, trades }: { account: Account | null; trades: Trade[] }) {
   if (!account) return null;
-  if (account.daily_loss_limit_pct == null && account.max_drawdown_limit_pct == null) return null;
+  if (account.daily_loss_limit_pct == null && account.max_drawdown_limit_pct == null && account.consistency_rule_pct == null) return null;
 
   const startingBalance = account.starting_balance ?? 0;
   const todayPnL = computeTodayPnL(trades);
   const dd = computeDrawdown(trades, account.starting_balance);
+  const consistency = computeConsistency(trades);
 
   const showDaily = account.daily_loss_limit_pct != null;
   const showMaxDD = account.max_drawdown_limit_pct != null;
+  const showConsistency = account.consistency_rule_pct != null;
 
   const dailyLimitDollar = showDaily ? startingBalance * (account.daily_loss_limit_pct! / 100) : 0;
   const dailyUsedDollar = Math.max(0, -todayPnL); // only a loss counts against the limit
@@ -55,7 +57,15 @@ export default function RiskGuardrail({ account, trades }: { account: Account | 
   const maxDDLimitDollar = showMaxDD ? startingBalance * (account.max_drawdown_limit_pct! / 100) : 0;
   const maxDDUsedPct = maxDDLimitDollar > 0 ? (dd.currentDDDollar / maxDDLimitDollar) * 100 : 0;
 
-  const breached = (showDaily && dailyUsedPct >= 100) || (showMaxDD && maxDDUsedPct >= 100);
+  // Dollar amount a single day is allowed to be, per the account's
+  // consistency_rule_pct - e.g. 20% of total profit so far. usedPct is
+  // bestDayDollar relative to THAT limit (not relative to total profit,
+  // which is what computeConsistency's own usedPct is) - same
+  // used-of-limit percentage the other two gauges show.
+  const consistencyLimitDollar = showConsistency ? consistency.totalProfitDollar * (account.consistency_rule_pct! / 100) : 0;
+  const consistencyUsedPct = consistencyLimitDollar > 0 ? (consistency.bestDayDollar / consistencyLimitDollar) * 100 : 0;
+
+  const breached = (showDaily && dailyUsedPct >= 100) || (showMaxDD && maxDDUsedPct >= 100) || (showConsistency && consistencyUsedPct >= 100);
 
   return (
     <div className="mb-6">
@@ -88,6 +98,19 @@ export default function RiskGuardrail({ account, trades }: { account: Account | 
                 limitDollar={maxDDLimitDollar}
                 usedPct={maxDDUsedPct}
                 sub={`${dd.currentDDPct.toFixed(1)}% below peak equity`}
+              />
+            )}
+            {showConsistency && (
+              <Gauge
+                label="Consistency Rule"
+                usedDollar={consistency.bestDayDollar}
+                limitDollar={consistencyLimitDollar}
+                usedPct={consistencyUsedPct}
+                sub={
+                  consistency.totalProfitDollar <= 0
+                    ? 'No profit yet to evaluate'
+                    : `${fmtMoney(consistency.bestDayDollar)} on ${consistency.bestDayDate} of ${fmtMoney(consistency.totalProfitDollar)} total profit`
+                }
               />
             )}
           </div>

@@ -110,6 +110,61 @@ export function computeTodayPnL(trades: Trade[]): number {
   return Math.round(total * 100) / 100;
 }
 
+// --- Consistency rule --------------------------------------------------
+
+export type ConsistencyResult = {
+  totalProfitDollar: number;
+  bestDayDollar: number;
+  bestDayDate: string | null;
+  usedPct: number;
+};
+
+const EMPTY_CONSISTENCY: ConsistencyResult = {
+  totalProfitDollar: 0, bestDayDollar: 0, bestDayDate: null, usedPct: 0,
+};
+
+// Prop-firm "consistency rule" math: no single day should account for more
+// than some % of total profit (commonly 20-30% on FTMO-style challenges).
+// Groups trades by local calendar date of trade_placed_at (same
+// slice(0, 10) string-bucketing computeTodayPnL above uses - trade_placed_at
+// is a plain DATE with no time/timezone attached, so this is already a
+// local-calendar-date comparison, not a UTC one) and sums gain_loss per
+// day. bestDayDollar only considers days with a positive sum - a big losing
+// day doesn't count against you here, this rule is about profit
+// concentration, not losses. usedPct is bestDayDollar as a % of
+// totalProfitDollar (0 when there's no profit yet to evaluate).
+export function computeConsistency(trades: Trade[]): ConsistencyResult {
+  const dated = trades.filter(t => t.trade_placed_at);
+  if (dated.length === 0) return EMPTY_CONSISTENCY;
+
+  const byDay = new Map<string, number>();
+  let totalProfitDollar = 0;
+  for (const t of dated) {
+    const day = t.trade_placed_at!.slice(0, 10);
+    const gl = Number(t.gain_loss ?? 0);
+    totalProfitDollar += gl;
+    byDay.set(day, (byDay.get(day) ?? 0) + gl);
+  }
+
+  let bestDayDollar = 0;
+  let bestDayDate: string | null = null;
+  for (const [day, sum] of byDay) {
+    if (sum > bestDayDollar) {
+      bestDayDollar = sum;
+      bestDayDate = day;
+    }
+  }
+
+  const usedPct = totalProfitDollar > 0 ? (bestDayDollar / totalProfitDollar) * 100 : 0;
+
+  return {
+    totalProfitDollar: Math.round(totalProfitDollar * 100) / 100,
+    bestDayDollar: Math.round(bestDayDollar * 100) / 100,
+    bestDayDate,
+    usedPct: Math.round(usedPct * 100) / 100,
+  };
+}
+
 // --- Position size calculator -----------------------------------------------
 
 export type PositionSizeResult = {

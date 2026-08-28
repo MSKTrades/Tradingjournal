@@ -148,8 +148,8 @@ async function createAccount(sql: ReturnType<typeof db>, userId: number, p: any)
   const name = String(p?.name ?? '').trim();
   if (!name) throw new Error('Account name is required');
   const rows = await sql.unsafe(
-    `INSERT INTO accounts (name, type, starting_balance, active, sort_order, daily_loss_limit_pct, max_drawdown_limit_pct, user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO accounts (name, type, starting_balance, active, sort_order, daily_loss_limit_pct, max_drawdown_limit_pct, consistency_rule_pct, user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING *`,
     [
       name,
@@ -159,10 +159,61 @@ async function createAccount(sql: ReturnType<typeof db>, userId: number, p: any)
       p.sort_order ?? 0,
       p.daily_loss_limit_pct ?? null,
       p.max_drawdown_limit_pct ?? null,
+      p.consistency_rule_pct ?? null,
       userId,
     ]
   );
   return rows[0];
+}
+
+// --- Prop P&L Ledger (fees paid / payouts received) --------------------
+//
+// Lives here as resource= branches, same reasoning as mt_connect/etc above
+// - account-level cash movements to/from the prop firm, entirely separate
+// from per-trade P&L (never feeds recalcAccountCapital, gain_loss, or the
+// drawdown/equity-curve math). See ledger_entries in schema.sql.
+
+async function listLedgerEntries(sql: ReturnType<typeof db>, userId: number, accountId: number) {
+  if (!(await ownsAccount(sql, accountId, userId))) throw new Error('Account not found');
+  return await sql.unsafe(
+    `SELECT * FROM ledger_entries WHERE account_id = $1 ORDER BY entry_date DESC, id DESC`,
+    [accountId]
+  );
+}
+
+async function createLedgerEntry(sql: ReturnType<typeof db>, userId: number, p: any) {
+  const accountId = Number(p?.account_id);
+  if (!accountId || !(await ownsAccount(sql, accountId, userId))) throw new Error('Account not found');
+  const entryType = p?.entry_type;
+  if (entryType !== 'fee' && entryType !== 'payout') throw new Error("entry_type must be 'fee' or 'payout'");
+  const amount = Number(p?.amount);
+  if (!isFinite(amount)) throw new Error('amount is required');
+  const entryDate = String(p?.entry_date ?? '').trim();
+  if (!entryDate) throw new Error('entry_date is required');
+
+  const rows = await sql.unsafe(
+    `INSERT INTO ledger_entries (account_id, user_id, entry_type, amount, entry_date, note)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [accountId, userId, entryType, amount, entryDate, p?.note ?? null]
+  );
+  return rows[0];
+}
+
+async function deleteLedgerEntry(sql: ReturnType<typeof db>, userId: number, id: number) {
+  if (!id || isNaN(id)) throw new Error('id is required');
+  // Verify the entry's account belongs to the requesting user before
+  // deleting - mirrors the account-ownership check every other branch here
+  // does, just joined through ledger_entries.account_id instead of taking
+  // an account_id directly.
+  const rows = await sql.unsafe(
+    `DELETE FROM ledger_entries USING accounts
+     WHERE ledger_entries.id = $1 AND accounts.id = ledger_entries.account_id AND accounts.user_id = $2
+     RETURNING ledger_entries.id`,
+    [id, userId]
+  );
+  if (!rows[0]) throw new Error('Ledger entry not found');
+  return { deleted: 1 };
 }
 
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
@@ -191,6 +242,18 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       }
       if (resource === 'mt_disconnect' && req.method === 'POST') {
         res.status(200).json(await handleMtDisconnect(sql, userId, Number(req.body?.account_id)));
+        return;
+      }
+      if (resource === 'ledger' && req.method === 'GET') {
+        res.status(200).json(await listLedgerEntries(sql, userId, Number(req.query.account_id)));
+        return;
+      }
+      if (resource === 'ledger' && req.method === 'POST') {
+        res.status(200).json(await createLedgerEntry(sql, userId, req.body));
+        return;
+      }
+      if (resource === 'ledger' && req.method === 'DELETE') {
+        res.status(200).json(await deleteLedgerEntry(sql, userId, Number(req.query.id)));
         return;
       }
       res.status(404).json({ error: 'Not found' });
@@ -227,12 +290,12 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     const rows = await sql.unsafe(
       `UPDATE accounts SET
         name = $1, type = $2, starting_balance = $3, active = $4, sort_order = $5,
-        daily_loss_limit_pct = $6, max_drawdown_limit_pct = $7
-       WHERE id = $8 AND user_id = $9
+        daily_loss_limit_pct = $6, max_drawdown_limit_pct = $7, consistency_rule_pct = $8
+       WHERE id = $9 AND user_id = $10
        RETURNING *`,
       [
         name, p.type ?? null, p.starting_balance ?? null, p.active ?? true, p.sort_order ?? 0,
-        p.daily_loss_limit_pct ?? null, p.max_drawdown_limit_pct ?? null, id, userId,
+        p.daily_loss_limit_pct ?? null, p.max_drawdown_limit_pct ?? null, p.consistency_rule_pct ?? null, id, userId,
       ]
     );
 

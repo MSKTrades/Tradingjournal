@@ -10,6 +10,7 @@ import { useAccount } from '../lib/accounts';
 import { StrategyResult, Trade, Checklist, NewsEvent, Headline, fmtMoney } from './data/types';
 import CurrencyFlag from './ui/CurrencyFlag';
 import RiskGuardrail from './ui/RiskGuardrail';
+import PropPnlLedger from './ui/PropPnlLedger';
 
 function fmtPF(v: number | null) {
   return v === null ? '∞' : v.toFixed(2);
@@ -738,6 +739,8 @@ export default function Summary() {
       )}
 
       <RiskGuardrail account={activeAccount} trades={trades} />
+
+      {activeAccount && <PropPnlLedger accountId={activeAccount.id} />}
 
       <ChecklistCompliance trades={trades} checklists={checklists} />
 
