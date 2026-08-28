@@ -145,7 +145,17 @@ function computeEmotionStats(weekTrades: Trade[]): EmotionStat[] {
   return rows;
 }
 
-function StatBlock({ label, value, accent = 'none' }: { label: string; value: string; accent?: 'green' | 'red' | 'none' }) {
+// Same green/amber badge convention EmotionsRatingSummary.tsx's
+// GROUP_BADGE_CLASS uses for these two groups - duplicated here (rather than
+// imported) since EmotionsRatingSummary.tsx doesn't export it; keep these
+// two class strings in sync with that file if the badge styling ever
+// changes.
+const GROUP_BADGE_CLASS: Record<'positive' | 'caution', string> = {
+  positive: 'border-green-500 bg-green-500/15 text-green-700 dark:text-green-300',
+  caution: 'border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-400',
+};
+
+function StatBlock({ label, value, accent = 'none', sub }: { label: string; value: string; accent?: 'green' | 'red' | 'none'; sub?: string }) {
   const color = accent === 'green' ? 'text-green-600 dark:text-green-400'
     : accent === 'red' ? 'text-red-500 dark:text-red-400'
     : '';
@@ -153,6 +163,7 @@ function StatBlock({ label, value, accent = 'none' }: { label: string; value: st
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={`text-xl font-bold ${color}`}>{value}</p>
+      {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -182,6 +193,16 @@ export default function WeeklyDigest({ trades, checklists }: { trades: Trade[]; 
   }, [trades, checklists, weekOffset]);
 
   const emotionStats = useMemo(() => computeEmotionStats(selected.weekTrades), [selected.weekTrades]);
+
+  // Average self-rated trade rating (1-5) for the selected week - only
+  // trades with a non-null trade_rating count, same "nothing to show" bar
+  // as the other stat blocks (compliancePct, winRate) already follow.
+  const ratingStats = useMemo(() => {
+    const rated = selected.weekTrades.filter(t => t.trade_rating != null);
+    if (rated.length === 0) return { avg: null as number | null, count: 0 };
+    const sum = rated.reduce((acc, t) => acc + Number(t.trade_rating), 0);
+    return { avg: Math.round((sum / rated.length) * 10) / 10, count: rated.length };
+  }, [selected.weekTrades]);
 
   // Zero trades anywhere in the account - stay out of the way entirely,
   // same convention RiskGuardrail/EmotionsRatingSummary already follow.
@@ -263,8 +284,28 @@ export default function WeeklyDigest({ trades, checklists }: { trades: Trade[]; 
     }
   }
 
+  // Most-used emotion first for the pill row.
+  const sortedEmotionStats = [...emotionStats].sort((a, b) => b.count - a.count);
+
   return (
-    <Card className="mb-6">
+    <Card className="mb-6 relative overflow-hidden">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 overflow-hidden opacity-[0.16] dark:opacity-[0.12]">
+        <svg viewBox="0 0 1200 120" preserveAspectRatio="none" className="w-full h-full">
+          <defs>
+            <linearGradient id="weeklyDigestWaveA" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#f59e0b" />
+              <stop offset="100%" stopColor="#fb923c" />
+            </linearGradient>
+            <linearGradient id="weeklyDigestWaveB" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#fbbf24" />
+              <stop offset="100%" stopColor="#f97316" />
+            </linearGradient>
+          </defs>
+          <path d="M0,60 C200,110 400,10 600,55 C800,100 1000,20 1200,60 L1200,120 L0,120 Z" fill="url(#weeklyDigestWaveA)" />
+          <path d="M0,80 C250,40 450,120 700,70 C900,30 1050,90 1200,70 L1200,120 L0,120 Z" fill="url(#weeklyDigestWaveB)" opacity="0.6" />
+        </svg>
+      </div>
+      <div className="relative z-10">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
@@ -298,7 +339,7 @@ export default function WeeklyDigest({ trades, checklists }: { trades: Trade[]; 
           <p className="text-sm text-muted-foreground italic">No trades logged this week.</p>
         ) : (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
               <StatBlock label="Trades" value={String(selected.outcome.count)} />
               <StatBlock
                 label="Win Rate"
@@ -312,8 +353,29 @@ export default function WeeklyDigest({ trades, checklists }: { trades: Trade[]; 
               <StatBlock
                 label="Checklist Compliance"
                 value={selected.compliancePct === null ? '—' : `${selected.compliancePct}%`}
+                sub={selected.gradedCount > 0 ? `${selected.compliantCount} of ${selected.gradedCount} trades` : undefined}
+              />
+              <StatBlock
+                label="Avg Rating"
+                value={ratingStats.avg === null ? '—' : `${ratingStats.avg}★`}
+                sub={ratingStats.count > 0 ? `${ratingStats.count} rated` : undefined}
               />
             </div>
+            {sortedEmotionStats.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-1.5">Emotions This Week</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {sortedEmotionStats.map(e => (
+                    <span
+                      key={e.name}
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-medium border ${GROUP_BADGE_CLASS[e.group]}`}
+                    >
+                      {e.name} {e.count}x{e.winRate !== null ? ` · ${e.winRate}%` : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             {narrative.length > 0 && (
               <ul className="flex flex-col gap-1.5 text-sm text-foreground/90">
                 {narrative.map((line, i) => (
@@ -327,6 +389,7 @@ export default function WeeklyDigest({ trades, checklists }: { trades: Trade[]; 
           </>
         )}
       </CardContent>
+      </div>
     </Card>
   );
 }
