@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Trash2 } from 'lucide-react';
 import { Input } from '../../lib/ui/form';
 import { TagGroup } from '../data/types';
 
@@ -10,6 +10,13 @@ type Props = {
   onChange: (next: Record<string, string[]>) => void;
   onCreateGroup: (name: string) => void;
   onCreateOption: (groupId: number, groupName: string, optionName: string) => void;
+  // Both optional so this component doesn't break for any other caller that
+  // hasn't wired deletion up yet. Deleting a group or option is account-wide
+  // (same as creating one) - api/columns.ts owns the confirm-and-cascade
+  // behavior on the backend; this component just needs somewhere to put the
+  // trigger for it.
+  onDeleteGroup?: (groupId: number, groupName: string) => void;
+  onDeleteOption?: (optionId: number, groupName: string, optionName: string) => void;
 };
 
 const FALLBACK_COLOR = '#f59e0b';
@@ -87,11 +94,12 @@ function useSmartPopoverPosition(open: boolean, triggerRef: React.RefObject<HTML
 // this group on/off, or type a new one and create it on the fly. Options
 // are multi-select (like the flat Tags picker) since a trade can
 // legitimately match more than one value in some categories.
-function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
+function GroupOptionPicker({ group, selected, onToggle, onCreate, onDelete }: {
   group: TagGroup;
   selected: string[];
   onToggle: (name: string) => void;
   onCreate: (name: string) => void;
+  onDelete?: (optionId: number, optionName: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
@@ -125,9 +133,22 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
       </button>
       {open && createPortal(
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          {/* Root cause of "can't close without picking something": this
+              overlay used to sit at z-40, but the trade detail drawer that
+              hosts this component (TradeDetailPanel.tsx) renders its own
+              backdrop + panel at z-50 (`fixed inset-0 z-50`). Both this
+              overlay and that drawer are viewport-fixed elements compared
+              directly by z-index in the same top-level stacking context, so
+              the drawer's z-50 painted entirely above our z-40 overlay for
+              every pixel - any click on the drawer body (or its own
+              backdrop) was won by the drawer, and our overlay's onClick
+              never fired. Bumped clear of the drawer's z-50 (with a gap
+              between overlay and content so there's no reliance on DOM
+              order to keep the popover's own buttons on top) so an outside
+              click actually reaches this overlay now. */}
+          <div className="fixed inset-0 z-[55]" onClick={() => setOpen(false)} />
           <div
-            className="fixed z-50 w-52 rounded-md border border-border bg-popover text-popover-foreground shadow-lg p-2"
+            className="fixed z-[60] w-52 rounded-md border border-border bg-popover text-popover-foreground shadow-lg p-2"
             style={popoverStyle ?? undefined}
           >
             <Input
@@ -142,23 +163,43 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate }: {
             />
             <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5">
               {filtered.map(o => (
-                <button
+                // Not a single <button> anymore - the option row now holds
+                // two independent actions (toggle vs. delete), and a button
+                // can't nest inside another button. The toggle target is
+                // still the whole row minus the trash icon, so clicking
+                // anywhere on the label works exactly as before.
+                <div
                   key={o.id}
-                  type="button"
-                  // Deliberately does NOT close the popover - picking several
-                  // options for one trade (e.g. every EMA it's above) used to
-                  // mean reopening this exact popover once per option, which
-                  // is the opposite of what a multi-select picker should feel
-                  // like. It now stays open so you can click through several
-                  // in a row; the overlay below (or clicking elsewhere) is
-                  // still how you close it when you're done.
-                  onClick={() => onToggle(o.name)}
-                  className="flex items-center gap-2 w-full px-1.5 py-1 rounded text-xs text-left hover:bg-accent"
+                  className="flex items-center gap-2 w-full px-1.5 py-1 rounded text-xs hover:bg-accent"
                 >
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: o.color }} />
-                  {o.name}
-                  {selected.includes(o.name) && <span className="ml-auto text-primary">✓</span>}
-                </button>
+                  <button
+                    type="button"
+                    // Deliberately does NOT close the popover - picking
+                    // several options for one trade (e.g. every EMA it's
+                    // above) used to mean reopening this exact popover once
+                    // per option, which is the opposite of what a
+                    // multi-select picker should feel like. It now stays
+                    // open so you can click through several in a row; the
+                    // overlay (or clicking elsewhere) is still how you close
+                    // it when you're done.
+                    onClick={() => onToggle(o.name)}
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: o.color }} />
+                    <span className="truncate">{o.name}</span>
+                  </button>
+                  {selected.includes(o.name) && <span className="text-primary shrink-0">✓</span>}
+                  {onDelete && (
+                    <button
+                      type="button"
+                      onClick={() => onDelete(o.id, o.name)}
+                      title={`Delete "${o.name}"`}
+                      className="shrink-0 text-muted-foreground hover:text-destructive opacity-60 hover:opacity-100"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               ))}
               {filtered.length === 0 && <p className="text-[11px] text-muted-foreground px-1.5 py-1">No matches.</p>}
               {input.trim() !== '' && !exactExists && (
@@ -202,7 +243,7 @@ const EXEC_MISTAKE_STARTER_OPTIONS = ['Chased Entry', 'Skipped Rule', 'Moved SL'
 const EXEC_MISTAKE_GROUP_NAME = 'Execution Mistakes';
 const EXEC_MISTAKE_GROUP_RE = /execution mistake|mistake|error/i;
 
-export default function TagGroupsPicker({ groups, selections, onChange, onCreateGroup, onCreateOption }: Props) {
+export default function TagGroupsPicker({ groups, selections, onChange, onCreateGroup, onCreateOption, onDeleteGroup, onDeleteOption }: Props) {
   const [addingGroup, setAddingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
 
@@ -273,7 +314,19 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
         const selected = selections[group.name] ?? [];
         return (
           <div key={group.id} className="flex items-start justify-between gap-3 py-1 border-b border-border/50 last:border-0">
-            <span className="text-xs font-bold text-foreground w-32 shrink-0 pt-0.5 truncate" title={group.name}>{group.name}</span>
+            <span className="flex items-center gap-1 w-32 shrink-0 pt-0.5">
+              <span className="text-xs font-bold text-foreground truncate" title={group.name}>{group.name}</span>
+              {onDeleteGroup && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteGroup(group.id, group.name)}
+                  title={`Delete "${group.name}" group`}
+                  className="shrink-0 text-muted-foreground hover:text-destructive opacity-60 hover:opacity-100"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              )}
+            </span>
             <div className="flex-1 flex flex-wrap items-center gap-1.5">
               {selected.map(name => {
                 const color = colorFor(group, name);
@@ -295,6 +348,7 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
                 selected={selected}
                 onToggle={(name) => toggleOption(group, name)}
                 onCreate={(name) => createOption(group, name)}
+                onDelete={onDeleteOption ? (optionId, optionName) => onDeleteOption(optionId, group.name, optionName) : undefined}
               />
             </div>
           </div>

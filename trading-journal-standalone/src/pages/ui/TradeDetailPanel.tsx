@@ -456,6 +456,40 @@ export default function TradeDetailPanel({
   function handleCreateTagGroupOption(groupId: number, groupName: string, optionName: string) {
     api.post('/columns', { resource: 'tag_group_options', group_id: groupId, name: optionName }).then(() => refetchTagGroups()).catch(() => {});
   }
+  // Deleting a whole group is account-wide (it's a shared reusable
+  // category, same as create) - api/columns.ts cascades the DELETE down to
+  // every option under it in one query. This trade's own in-progress
+  // selections still hold that group's name as a key in tag_selections
+  // until refetchTagGroups() completes and the group disappears from
+  // `groups`, so strip it locally right away too - otherwise the panel
+  // would briefly still show the deleted group's chips for the trade
+  // that's open right now. Trades that already had this group's tags
+  // saved keep those values sitting in their own tag_selections (deleting
+  // the group definition doesn't retroactively rewrite past trades) - they
+  // just become inert, unmatched keys with nothing left to render them.
+  function handleDeleteTagGroup(groupId: number, groupName: string) {
+    if (!confirm(`Delete the "${groupName}" tag group? This removes it and all its tags for every trade - trades that already used it keep that history, but you won't be able to pick this group again.`)) return;
+    api.del(`/columns?resource=tag_groups&id=${groupId}`).then(() => {
+      refetchTagGroups();
+      setForm(f => {
+        if (!(groupName in f.tag_selections)) return f;
+        const next = { ...f.tag_selections };
+        delete next[groupName];
+        return { ...f, tag_selections: next };
+      });
+    }).catch(() => {});
+  }
+  function handleDeleteTagGroupOption(optionId: number, groupName: string, optionName: string) {
+    if (!confirm(`Delete the "${optionName}" tag from "${groupName}"?`)) return;
+    api.del(`/columns?resource=tag_group_options&id=${optionId}`).then(() => {
+      refetchTagGroups();
+      setForm(f => {
+        const current = f.tag_selections[groupName];
+        if (!current || !current.includes(optionName)) return f;
+        return { ...f, tag_selections: { ...f.tag_selections, [groupName]: current.filter(v => v !== optionName) } };
+      });
+    }).catch(() => {});
+  }
 
   async function handleAddField() {
     const trimmed = newFieldName.trim();
@@ -664,7 +698,7 @@ export default function TradeDetailPanel({
                   'h-9 flex items-center px-3 rounded-md border border-border bg-muted/30 text-sm font-mono',
                   form.net_profit == null
                     ? 'text-muted-foreground'
-                    : cn('font-bold', form.net_profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-400 dark:text-red-300')
+                    : cn('font-bold', form.net_profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')
                 )}>
                   {form.net_profit != null ? fmtMoney(form.net_profit) : 'Enter Gross Profit/Loss above'}
                 </div>
@@ -720,7 +754,7 @@ export default function TradeDetailPanel({
                   </div>
                   <div className={cn('rounded-lg border p-2 text-center', (trade.gain_loss ?? 0) >= 0 ? 'border-green-500/30 bg-green-500/10' : 'border-red-500/30 bg-red-500/10')}>
                     <p className="text-[10px] text-muted-foreground">Gain / Loss</p>
-                    <p className={cn('text-sm font-bold', (trade.gain_loss ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-400 dark:text-red-300')}>
+                    <p className={cn('text-sm font-bold', (trade.gain_loss ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')}>
                       {fmtMoney(trade.gain_loss)}
                     </p>
                   </div>
@@ -914,6 +948,8 @@ export default function TradeDetailPanel({
                 onChange={(next) => set('tag_selections', next)}
                 onCreateGroup={handleCreateTagGroup}
                 onCreateOption={handleCreateTagGroupOption}
+                onDeleteGroup={handleDeleteTagGroup}
+                onDeleteOption={handleDeleteTagGroupOption}
               />
             </Section>
           </div>

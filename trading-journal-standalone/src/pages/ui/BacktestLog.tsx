@@ -194,7 +194,7 @@ export default function BacktestLog({ trades, allTags, onCloseTrade, onDeleteTra
         </CardContent></Card>
         <Card><CardContent className="pt-3 pb-2.5">
           <p className="text-xs text-muted-foreground">Max Drawdown</p>
-          <p className="text-xl font-bold text-red-400 dark:text-red-300">{stats.closed > 0 ? `-${stats.maxDrawdown}R` : '—'}</p>
+          <p className="text-xl font-bold text-red-500 dark:text-red-400">{stats.closed > 0 ? `-${stats.maxDrawdown}R` : '—'}</p>
         </CardContent></Card>
         <Card><CardContent className="pt-3 pb-2.5">
           <p className="text-xs text-muted-foreground">Long</p>

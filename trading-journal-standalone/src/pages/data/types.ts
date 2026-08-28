@@ -394,12 +394,13 @@ export function fmtPct(v: number | null | undefined): string {
 
 export function plColor(v: number | null | undefined): string {
   if (v == null) return 'text-muted-foreground';
-  // Softened one step lighter on the loss side (red-500/red-400 -> red-400/
-  // red-300) - a wall of alarm-red P/L numbers reads badly for trading
-  // psychology, so losses still read clearly as losses without being the
-  // loudest thing on the screen. Wins are left as-is; this is specifically
-  // about dialing back red, not re-balancing the whole win/loss contrast.
-  return Number(v) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-400 dark:text-red-300';
+  // Went one step lighter on the loss side (red-500/red-400 -> red-400/
+  // red-300) at one point for trading-psychology reasons, then back here:
+  // that landed too soft/dull and made losses harder to read at a glance.
+  // Back to red-500/red-400 - still one notch calmer than the harshest
+  // Tailwind red (600/700), but clearly legible as "this is a loss" without
+  // the extra step of softening. Wins are left as-is throughout.
+  return Number(v) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
 }
 
 // --- Chart Replay / Backtesting -------------------------------------------

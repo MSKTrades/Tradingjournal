@@ -144,7 +144,7 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
                         <TableRow key={r.item.id}>
                           <TableCell className="text-sm">{r.item.text}</TableCell>
                           <TableCell className="text-center text-green-600 dark:text-green-400">{r.followed}</TableCell>
-                          <TableCell className="text-center text-red-400 dark:text-red-300">{r.broken}</TableCell>
+                          <TableCell className="text-center text-red-500 dark:text-red-400">{r.broken}</TableCell>
                           <TableCell className="text-center">{r.pct === null ? '—' : `${r.pct}%`}</TableCell>
                         </TableRow>
                       ))}
@@ -706,9 +706,9 @@ export default function Summary() {
                   <TableCell className="font-medium text-primary hover:underline">{r.name}</TableCell>
                   <TableCell className="text-center">{r.total_trades}</TableCell>
                   <TableCell className="text-center text-green-600 dark:text-green-400">{r.wins}</TableCell>
-                  <TableCell className="text-center text-red-400 dark:text-red-300">{r.losses}</TableCell>
+                  <TableCell className="text-center text-red-500 dark:text-red-400">{r.losses}</TableCell>
                   <TableCell className="text-center">{r.win_rate}%</TableCell>
-                  <TableCell className={`text-center font-mono ${r.profit_factor !== null && r.profit_factor < 1 ? 'text-red-400 dark:text-red-300' : 'text-green-600 dark:text-green-400'}`}>
+                  <TableCell className={`text-center font-mono ${r.profit_factor !== null && r.profit_factor < 1 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
                     {fmtPF(r.profit_factor)}
                   </TableCell>
                   <TableCell className="text-center"><RBadge r={r.total_r} /></TableCell>

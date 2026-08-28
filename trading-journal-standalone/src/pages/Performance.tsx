@@ -184,7 +184,7 @@ function SummaryCards({ rows }: { rows: PeriodRow[] }) {
             <c.icon className={`w-8 h-8 opacity-60 ${c.pos ? 'text-green-500' : 'text-red-400'}`} />
             <div className="min-w-0">
               <p className="text-xs text-muted-foreground truncate">{c.label}</p>
-              <p className={`text-lg font-bold ${c.pos ? 'text-green-600 dark:text-green-400' : 'text-red-400 dark:text-red-300'}`}>{c.value}</p>
+              <p className={`text-lg font-bold ${c.pos ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{c.value}</p>
               <p className="text-xs text-muted-foreground truncate">{c.sub}</p>
             </div>
           </CardContent>
@@ -488,10 +488,10 @@ function DrawdownSection({ trades, startingBalance }: { trades: Trade[]; startin
           <p className="text-sm font-semibold">Drawdown</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
             <span className="text-muted-foreground">
-              Max: <span className="font-mono font-semibold text-red-400 dark:text-red-300">{fmtMoney(dd.maxDDDollar)} ({dd.maxDDPct.toFixed(1)}%)</span>
+              Max: <span className="font-mono font-semibold text-red-500 dark:text-red-400">{fmtMoney(dd.maxDDDollar)} ({dd.maxDDPct.toFixed(1)}%)</span>
             </span>
             <span className="text-muted-foreground">
-              Current: <span className="font-mono font-semibold text-red-400 dark:text-red-300">{fmtMoney(dd.currentDDDollar)} ({dd.currentDDPct.toFixed(1)}%)</span>
+              Current: <span className="font-mono font-semibold text-red-500 dark:text-red-400">{fmtMoney(dd.currentDDDollar)} ({dd.currentDDPct.toFixed(1)}%)</span>
             </span>
             {/* Depth alone doesn't say how long the account was stuck underwater -
                 two accounts can both bottom out at -5% and be very different
@@ -883,7 +883,7 @@ export default function Performance() {
                           <TableCell className="font-semibold">{r.period}</TableCell>
                           <TableCell className="text-center">{r.total_trades}</TableCell>
                           <TableCell className="text-center text-green-600 dark:text-green-400">{r.wins}</TableCell>
-                          <TableCell className="text-center text-red-400 dark:text-red-300">{r.losses}</TableCell>
+                          <TableCell className="text-center text-red-500 dark:text-red-400">{r.losses}</TableCell>
                           <TableCell className="text-center">{r.win_rate}%</TableCell>
                           <TableCell className={`text-center font-mono ${plColor(r.pct_return)}`}>
                             {r.pct_return > 0 ? '+' : ''}{r.pct_return}%

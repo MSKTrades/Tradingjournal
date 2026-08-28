@@ -73,7 +73,7 @@ function renderCell(trade: Trade, key: string): React.ReactNode {
   if (key === 'profit_loss') {
     if (v === 'Breakeven') return <span className="font-semibold text-xs text-muted-foreground">➖ Breakeven</span>;
     const isProfit = v === 'Profit';
-    return <span className={`font-semibold text-xs ${isProfit ? 'text-green-600 dark:text-green-400' : 'text-red-400 dark:text-red-300'}`}>{isProfit ? '✅ Profit' : '❌ Loss'}</span>;
+    return <span className={`font-semibold text-xs ${isProfit ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{isProfit ? '✅ Profit' : '❌ Loss'}</span>;
   }
   if (key === 'gain_loss' || key === 'overall_gain') return <span className={plColor(v as number | null)}>{fmtMoney(v as number | null)}</span>;
   if (key === 'gain_loss_pct' || key === 'overall_pct') return <span className={plColor(v as number | null)}>{fmtPct(v as number | null)}</span>;
@@ -160,7 +160,7 @@ function JournalInsights({ trades, allTrades, account }: JournalInsightsProps) {
       </div>
       <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[100px]">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Losses</p>
-        <p className="text-xl font-bold text-red-400 dark:text-red-300">{stats.losses}</p>
+        <p className="text-xl font-bold text-red-500 dark:text-red-400">{stats.losses}</p>
       </div>
       <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 min-w-[110px]">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Break Even</p>
