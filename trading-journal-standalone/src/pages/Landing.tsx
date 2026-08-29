@@ -8,6 +8,7 @@ import { Badge } from '../lib/ui/form';
 import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
 import { BLOG_POSTS } from './data/blogPosts';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
+import RuleToggleDemo from './ui/RuleToggleDemo';
 
 // Decorative ascending-bar heights behind the hero headline — hand-picked
 // (not random) so the pattern is stable across renders and reads as a
@@ -178,8 +179,25 @@ export default function Landing() {
             <Link to="/signup">
               <Button size="default" className="h-11 px-6 text-base">Get started free</Button>
             </Link>
-            <Link to="/login">
-              <Button variant="outline" size="default" className="h-11 px-6 text-base">Log in</Button>
+            <Link to="/demo">
+              <Button variant="outline" size="default" className="h-11 px-6 text-base">Try the live demo</Button>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-6 pb-20">
+        <div className="max-w-3xl mx-auto">
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-semibold tracking-tight">Watch a rule change the numbers</h2>
+            <p className="text-muted-foreground mt-2">
+              A real sample journal, filtering itself — this is the same journal you'd try in the live demo.
+            </p>
+          </div>
+          <RuleToggleDemo autoplay compact />
+          <div className="text-center mt-6">
+            <Link to="/demo" className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+              Try it yourself, no signup needed <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
         </div>

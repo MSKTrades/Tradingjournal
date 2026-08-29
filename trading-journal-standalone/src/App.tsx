@@ -6,6 +6,8 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { useEffect } from 'react';
 import { capturePageview } from './lib/analytics';
 import Landing from './pages/Landing';
+import Demo from './pages/Demo';
+import SessionClockTool from './pages/SessionClockTool';
 import Pricing from './pages/Pricing';
 import Blog from './pages/Blog';
 import BlogPost from './pages/BlogPost';
@@ -126,6 +128,13 @@ export default function App() {
           <Routes>
             <Route path="/" element={<RootRoute />} />
             <Route path="/pricing" element={<Pricing />} />
+            {/* Public, no-login growth pages — same "no Protected/
+                AuthedShell" shape as Landing/Pricing/Blog. /demo is the
+                interactive sample-journal demo linked from the Landing
+                hero; /tools/session-clock is a free lead-magnet tool
+                (email capture, see SessionClockTool.tsx). */}
+            <Route path="/demo" element={<Demo />} />
+            <Route path="/tools/session-clock" element={<SessionClockTool />} />
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<BlogPost />} />
             {/* Public, unauthenticated read-only view of an account's

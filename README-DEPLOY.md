@@ -1,49 +1,122 @@
-# PipEcho — multi-tenancy / data-isolation fix (apply before any real signups)
+# PipEcho — the 3 growth recommendations, all built
 
-## What this fixes
-Every signed-up user was reading and writing the exact same shared data. `accounts`, `trades`, `strategies`, `tags`, `tag_groups`, `custom_columns`, `checklists`, and `daily_routine_notes` had no owner column at all, and no API handler checked who was logged in before touching them. `GET /api/accounts` was a plain `SELECT * FROM accounts` — no `WHERE`, no auth check. This wasn't a subtle edge case: it meant the very first Discord signup would land in the same account/trade data as every other user, including yours, and could edit or delete it.
+1 new database table (`leads`), no new serverless functions (still 12/12
+on Vercel Hobby — the one new backend need went into a `resource=lead`
+branch on the existing `api/columns.ts`). 4 new files, 8 edited.
 
-This is now fixed. Every table that holds personal data has a real owner, every API handler checks the logged-in session and rejects (401) or filters (404 on a foreign id) anything that isn't the caller's own, and I verified it end-to-end against a real second account, not just by reading the code — see "Verified" below.
+## 1. Interactive "Try Demo" on the landing page
+
+New `/demo` page — a real sample account (64 trades, styled as a "London
+Reversal _ GU" GBPUSD playbook) where toggling a rule (CISD confirmed,
+Asia session swept, skip Mondays, London session only) instantly
+recalculates trade count, win rate, total R, profit factor, and the equity
+curve. Entirely client-side — no login, no backend call, so it works for a
+completely cold visitor. Linked from the hero ("Try the live demo") and the
+nav bar/footer ("Live Demo").
+
+The sample data isn't random noise — CISD confirmation, an Asia sweep, and
+the London session all genuinely raise the odds of a winner in the
+generated dataset, and Monday genuinely hurts, so toggling rules tells an
+honest, coherent story (e.g. turning on "CISD confirmed" alone takes win
+rate from 52% to 68% in testing) instead of numbers jumping around
+meaninglessly.
+
+## 2. Landing page micro-demo (in place of a recorded video/GIF)
+
+Rather than a screen-recorded video (nothing to record against yet, and a
+recording goes stale the moment the UI changes), I built the same demo
+component with an `autoplay` mode: embedded directly on the landing page,
+it cycles through CISD → +Asia swept → +all four rules → back to raw, one
+step every ~3 seconds, so a visitor sees the recalculation happen without
+touching anything. Both the landing embed and the full /demo page share
+one component (`RuleToggleDemo.tsx`) and one dataset, so they can never
+tell two different stories.
+
+## 3. Lead-magnet tool: free Forex Session Clock
+
+New `/tools/session-clock` page — the same live "Trading Sessions" clock
+that's always been on the authenticated Summary page (which session is
+open, London/NY overlap, weekend close countdown), given away for free
+behind a one-field email form. I extracted that widget out of `Summary.tsx`
+into its own file (`SessionClockWidget.tsx`) so the public page doesn't
+have to import anything from the authenticated app to use it — Summary.tsx
+now just imports the same shared component, so the two can never drift
+out of sync with each other.
+
+Email capture posts to a new `resource=lead` branch on `api/columns.ts`
+(same public-before-login shape as the existing Contact form), stored in a
+new `leads` table with a `source` column so future lead magnets can reuse
+this same endpoint. **Never blocks the tool** if the request fails — same
+best-effort philosophy as the Contact form elsewhere in this app; the
+point is to try to capture an email, not to hold a free tool hostage to a
+flaky network call.
+
+## Also fixed along the way
+
+- **Backtesting was never actually "coming soon."** While wiring routes I
+  found `src/pages/Backtest.tsx` is a full, live, 400+ line Chart Replay &
+  Backtesting workspace, open to every signed-in user today — the
+  `BacktestComingSoon.tsx` file I'd been trusting as the source of truth
+  for an earlier delivery is an orphaned leftover, not wired into any
+  route in `App.tsx`. That means the "(coming soon)" I added to both
+  Pricing plans' backtest lines two deliveries ago was wrong — removed it
+  from both. The Free-vs-Pro **history length** split (6 months vs.
+  unlimited) still isn't enforced in `Backtest.tsx` itself — same "pricing
+  describes the plan, nothing gates it in code yet" state as the rest of
+  this page — so that's copy only for now, not a new bug I introduced.
+- **Sitemap** now includes `/demo` and `/tools/session-clock` — worth it
+  for a lead-magnet page especially, since organic search traffic finding
+  it is half the point of building one.
+
+## Not touched (flagging, not fixing, since it's outside what was asked)
+
+Two of your blog posts have a code comment explaining they intentionally
+link to "Strategy Playbooks" instead of "Chart Replay & Backtesting" as
+their related feature, because "Backtesting isn't live yet." That's the
+same stale assumption as above — worth a look next time you're touching
+blog content, but I didn't change blog copy in this delivery since it
+wasn't part of what you asked for and touches editorial content rather
+than app code.
 
 ## How to apply
 
-**1. Run the schema migration FIRST**, against your production Neon database, before deploying the new code. Open Neon's SQL console (or `psql`) and run the entirety of `schema.sql` — it's the same idempotent full-schema file you've always run, just with a new migration block appended at the end. It's safe to run against your existing database: it adds `user_id` columns, backfills every existing row to your account (the oldest registered user), and only locks columns as `NOT NULL` once every row has a value. Read the comment block at the top of that new section in the file — it explains the backfill assumption explicitly. **If more than one real user has already signed up in production, stop and tell me before running this** — the backfill assigns every existing row to a single account, which is only correct if that account is still the only one with real data in it.
+1. **Run the migration first** — `migration-leads-table.sql` (in this same
+   folder, not inside the zip) in Neon's SQL editor. Do this before
+   deploying the code below, or `resource=lead` submissions will 500 until
+   it's run.
+2. `MSKTrades/Tradingjournal` → `trading-journal-standalone/` on GitHub.
+3. Add these 4 new files:
+   - `src/pages/ui/RuleToggleDemo.tsx`
+   - `src/pages/ui/SessionClockWidget.tsx`
+   - `src/pages/Demo.tsx`
+   - `src/pages/SessionClockTool.tsx`
+4. Replace these 8 existing files:
+   - `src/App.tsx`
+   - `src/pages/Landing.tsx`
+   - `src/pages/Summary.tsx`
+   - `src/pages/Pricing.tsx`
+   - `src/pages/ui/MarketingChrome.tsx`
+   - `src/lib/proFeatures.ts`
+   - `api/columns.ts`
+   - `scripts/generate-sitemap.mjs`
+5. Commit to `main` — Vercel auto-deploys.
+6. Hard-refresh after it deploys.
 
-**2. Then upload the code files** via GitHub "Add files via upload," preserving folder structure:
+## Verified before packaging
 
-- `api/_auth.js` (new — shared session/ownership helpers)
-- `api/_db.js` (overwrite — one change: generic error messages instead of leaking raw DB errors to the client)
-- `api/accounts.ts`, `api/columns.ts`, `api/strategies.ts`, `api/checklist.ts` (overwrite)
-- `api/trades/index.ts`, `api/trades/[id].ts`, `api/trades/bulk-add.ts`, `api/trades/bulk-delete.ts`, `api/trades/performance.ts` (overwrite)
-- `api/summary/index.ts` (overwrite)
-
-Commit, redeploy. No new serverless functions added (`_auth.js` is a shared module, not a route) — still exactly 12.
-
-## What actually changed
-
-**Every account, strategy, checklist, tag, tag group, and daily-routine note now belongs to exactly one user** (`user_id` column, backfilled and enforced `NOT NULL`). Trades, custom fields, checklist items, and tag-group options don't get their own `user_id` — they're owned transitively through the account/checklist/tag-group they belong to, checked via a join at read/write time.
-
-**Every API endpoint now requires a valid session before doing anything**, via a new shared `requireUserId()` helper — a request with no cookie, or an expired one, gets a flat 401. Beyond that, every endpoint that receives an id from the client (an account_id, a trade id, a checklist_id, a strategy id) verifies that id actually belongs to the logged-in user before reading or writing it. An id that belongs to someone else behaves exactly like an id that doesn't exist — a 404, not a 403 — so there's no way to even confirm another user's data exists by probing ids.
-
-**New signups get their own starter "Default" account automatically** (both password signup and first-time Google sign-in) — this used to happen once, globally, for the single pre-existing install; now every new user needs their own.
-
-**Tag names and daily-routine note dates were globally unique** (one "A+ Setup" tag for the whole app, one note per calendar date, for everyone) — now they're unique per-user, so two different traders can each have their own "A+ Setup" tag without colliding.
-
-**Error responses no longer leak internals.** A failed request used to return the raw database error message (`err.message`) straight to the client — could include table/column names or query fragments. Now the client gets a generic message and the real error is still logged server-side for you to debug from Vercel's logs.
-
-## Verified before sending — not just read, actually run
-I stood up a local copy of the schema and API, ran the migration against it, then drove the real HTTP endpoints with two separate logged-in users (one your existing `bugtest@example.com` account with real trade/strategy/checklist data, one a brand-new signup) and confirmed:
-
-- The new signup landed with only their own starter account — none of the existing account's trades, strategies, or tags were visible to them.
-- The new user's attempt to `PUT` (rename) and `DELETE` the existing user's account by id both returned 404, and the existing account's data was confirmed untouched afterward.
-- A request with no session cookie at all got 401 on `/api/accounts`.
-- Both users creating a tag with the identical name ("A+ Setup") succeeded independently — confirms the per-user uniqueness fix works, not just the isolation.
-- Custom fields, checklists, and daily-routine notes all round-tripped correctly for the existing account after the migration — same data, same behavior, no regression.
-- Full app smoke test (logged in as your existing account, dark mode, Summary/Journal/Strategies pages) — real trade data, real strategies, all rendering exactly as before. `tsc --noEmit` and `npm run build` both clean.
-
-## What this does NOT cover (deliberately, not silently)
-`api/backtest.ts` and the `chart_datasets`/`backtest_trades` tables were left untouched — Chart Replay & Backtesting is already disabled in the UI (the nav tab and route both show "Coming soon"), so there's no live user-facing surface pointing at it. It'll need the same ownership treatment before it ships, whenever that is — flagging it now so it doesn't get missed later, not because it's fine to skip.
-
-The wildcard CORS header (`Access-Control-Allow-Origin: *`) is still there. It's lower-risk now than before this fix, since every data endpoint requires a valid session and browsers already block credentialed cross-origin requests against a wildcard origin — but tightening it to your real domain is still worth doing as a later polish pass.
-
-A 401 from an expired session currently just surfaces as an error message in the UI rather than redirecting to `/login` automatically — minor UX gap, not a security one, worth a follow-up.
+- `tsc --noEmit` clean and `npm run build` succeeds (sitemap now reports 9
+  URLs, up from 7).
+- Ran a local static preview and screenshotted `/`, `/demo`, and
+  `/tools/session-clock` with a real headless browser — all three render
+  correctly with no console errors beyond an expected 500 from an API call
+  that only exists once this is actually deployed (there's no live backend
+  in a static local preview).
+- Confirmed the autoplay demo actually advances and recalculates on a
+  timer (screenshotted mid-cycle: toggling "CISD confirmed" alone took the
+  sample account from 52% → 68% win rate, 64 → 34 trades, exactly the kind
+  of number movement the demo is supposed to sell).
+- `api/columns.ts`'s new branch isn't covered by local `tsc` (only `src/`
+  is in this project's tsconfig — the `api/` folder has never been
+  type-checked locally, same as every other file in it), so I hand-checked
+  it follows the exact same shape as the neighboring `contact` branch it
+  sits next to.

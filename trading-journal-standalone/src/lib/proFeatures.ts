@@ -63,10 +63,16 @@ export const PRO_FEATURES: Record<ProFeatureKey, { message: string }> = {
   backtest: {
     // Backtesting itself is NOT Pro-only — Free gets it too, capped at 6
     // months of history. Only unlimited history is the Pro line, matching
-    // the Free/Pro feature lists on the Pricing page. Once the real
-    // Backtest workspace ships (still a placeholder as of this delivery —
-    // see BacktestComingSoon.tsx), badge only the "unlimited history"
-    // affordance with this key, not the feature as a whole.
+    // the Free/Pro feature lists on the Pricing page. Chart Replay &
+    // Backtesting is already live and open to every signed-in user
+    // (src/pages/Backtest.tsx, routed in App.tsx) — the 6-month-vs-
+    // unlimited split described here isn't enforced in that page yet
+    // (same "pricing describes the plan, nothing gates it yet" state as
+    // the rest of proFeatures.ts/Pricing.tsx), so don't badge Backtest.tsx
+    // with this key until that history cap actually exists to badge.
+    // (BacktestComingSoon.tsx / SmcComingSoon-style placeholder pattern is
+    // an orphaned leftover, not the current /backtest route — don't use it
+    // as a reference for this feature's live status.)
     message: 'Backtesting is free for everyone with up to 6 months of history — unlimited history is a Pro feature.',
   },
   checklist_compliance: {
