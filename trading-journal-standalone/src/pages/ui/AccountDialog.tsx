@@ -7,6 +7,8 @@ import { Account } from '../data/types';
 import { AccountPatch, NewAccountPayload } from '../../lib/accounts';
 import { api } from '../../lib/api';
 import BrokerConnect from './BrokerConnect';
+import ProBadge from '../../components/ProBadge';
+import ProNotice from '../../components/ProNotice';
 
 type Props = {
   open: boolean;
@@ -14,6 +16,11 @@ type Props = {
   onSave: (payload: NewAccountPayload | AccountPatch) => Promise<void>;
   onDelete?: (id: number) => Promise<void>;
   onClose: () => void;
+  /** How many accounts already exist — used only to decide whether to show
+   * the Pro notice below (Free plan's line is 1 account). Optional and
+   * defaults to 0 so existing callers that don't pass it just never show
+   * the notice, rather than crashing. */
+  existingAccountCount?: number;
 };
 
 type FormState = {
@@ -54,7 +61,7 @@ function fromAccount(a: Account): FormState {
 
 const TYPE_SUGGESTIONS = ['Live', 'Paper', 'Backtest', 'Demo', 'Prop Firm'];
 
-export default function AccountDialog({ open, account, onSave, onDelete, onClose }: Props) {
+export default function AccountDialog({ open, account, onSave, onDelete, onClose, existingAccountCount = 0 }: Props) {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -172,6 +179,11 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
         </DialogHeader>
 
         <div className="flex flex-col gap-4 py-2">
+          {/* Only a 2nd+ account is normally Pro — the very first account
+              someone creates is on the Free plan, so this notice is
+              deliberately scoped to existingAccountCount >= 1. */}
+          {!account && existingAccountCount >= 1 && <ProNotice feature="multi_account" />}
+
           <div className="flex flex-col gap-1">
             <Label>Account Name</Label>
             <Input
@@ -265,7 +277,10 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
             <div className="flex flex-col gap-3 rounded-md border border-border p-3">
               <div className="flex items-center gap-3">
                 <Switch checked={form.public_share_enabled} onCheckedChange={(v) => set('public_share_enabled', v)} />
-                <Label>Enable public track record page</Label>
+                <Label className="flex items-center gap-1.5">
+                  Enable public track record page
+                  <ProBadge feature="public_track_record" />
+                </Label>
               </div>
 
               {form.public_share_enabled && (

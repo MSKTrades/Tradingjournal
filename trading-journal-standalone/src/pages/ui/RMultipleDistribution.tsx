@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '../../lib/ui/card';
 import { Trade } from '../data/types';
+import ProBadge from '../../components/ProBadge';
 
 // Fixed R-multiple buckets, left-inclusive/right-exclusive except the two
 // open-ended tails. `test` is evaluated in order, first match wins, so the
@@ -59,7 +60,10 @@ export default function RMultipleDistribution({ trades }: { trades: Trade[] }) {
   return (
     <Card className="mb-6">
       <CardHeader>
-        <CardTitle>R-Multiple Distribution</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle>R-Multiple Distribution</CardTitle>
+          <ProBadge feature="r_multiple_distribution" />
+        </div>
       </CardHeader>
       <CardContent>
         {total === 0 ? (

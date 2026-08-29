@@ -7,6 +7,8 @@ import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import StrategyDialog, { StrategyPayload } from './ui/StrategyDialog';
 import { Strategy, Condition, FIELD_LABELS, WEEKDAYS, TAG_CONDITION_FIELD } from './data/types';
+import ProBadge from '../components/ProBadge';
+import ProNotice from '../components/ProNotice';
 
 function condLabel(c: Condition): string {
   if (c.field === TAG_CONDITION_FIELD) {
@@ -96,8 +98,14 @@ const allStrategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
         </div>
         <Button size="sm" onClick={() => { setEditStrat(null); setDialogOpen(true); }}>
           <Plus className="w-4 h-4 mr-1" /> Add Strategy
+          {/* The first strategy playbook is Free — only a 2nd+ one is
+              normally Pro, so the badge only shows once you already have
+              one. */}
+          {allStrategies.length >= 1 && <ProBadge feature="multi_strategy" className="ml-1.5" />}
         </Button>
       </div>
+
+      {allStrategies.length >= 1 && <ProNotice feature="multi_strategy" className="mb-4" />}
 
       {loading && <div className="text-center py-16 text-muted-foreground">Loading…</div>}
 

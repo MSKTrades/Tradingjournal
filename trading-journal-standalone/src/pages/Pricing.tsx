@@ -16,6 +16,12 @@ import { PROMO_END_LABEL } from '../lib/promo';
 // PROMO_END_LABEL (see src/lib/promo.ts — that's also what drives the
 // in-app reminder popups as the date approaches). Nothing here is enforced
 // in the backend, so this is purely the messaging layer.
+//
+// The Pro feature list below is the source of truth this page pitches —
+// it should stay in sync with src/lib/proFeatures.ts, which is what
+// actually badges these same features inside the app itself (Summary,
+// Performance, Strategies, Account settings). If a feature gets added or
+// removed from one, update the other.
 const PLANS = [
   {
     name: 'Free',
@@ -27,7 +33,7 @@ const PLANS = [
       '1 trading account',
       '1 strategy playbook',
       'Unlimited trade logging',
-      'Core performance analytics',
+      'Core performance charts (P/L, drawdown, account balance)',
       'Risk Guardrail (daily/weekly loss limits)',
       'Custom fields & tags',
       'Pre-trade checklists',
@@ -45,6 +51,12 @@ const PLANS = [
       'Everything in Free',
       'Unlimited trading accounts',
       'Unlimited strategy playbooks',
+      'Public Track Record (shareable results page)',
+      'Weekly Digest',
+      'Checklist Compliance analysis',
+      'Execution Mistakes analysis',
+      'HTF Bias Alignment',
+      'R-Multiple Distribution',
       'Chart Replay & Backtesting (coming soon)',
       'Priority support',
     ],

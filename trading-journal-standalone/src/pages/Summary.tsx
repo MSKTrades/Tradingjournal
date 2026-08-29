@@ -16,6 +16,7 @@ import ExecutionMistakeSummary from './ui/ExecutionMistakeSummary';
 import HtfBiasAlignment from './ui/HtfBiasAlignment';
 import WeeklyDigest from './ui/WeeklyDigest';
 import { summarizeOutcome } from './data/risk';
+import ProBadge from '../components/ProBadge';
 
 function fmtPF(v: number | null) {
   return v === null ? '∞' : v.toFixed(2);
@@ -104,6 +105,7 @@ function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklis
       <div className="flex items-center gap-2">
         <ListChecks className="w-4 h-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">Checklist Compliance</h2>
+        <ProBadge feature="checklist_compliance" />
       </div>
       {stats.map(({ checklist, enabledCount, ruleStats, overallPct, fullCompliance, notFullCompliance }) => {
         const sorted = [...ruleStats].sort((a, b) => b.broken - a.broken);

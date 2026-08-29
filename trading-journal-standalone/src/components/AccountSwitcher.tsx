@@ -4,6 +4,7 @@ import { cn } from '../lib/utils';
 import { useAccount } from '../lib/accounts';
 import { Account } from '../pages/data/types';
 import AccountDialog from '../pages/ui/AccountDialog';
+import ProBadge from './ProBadge';
 
 export default function AccountSwitcher({ collapsed }: { collapsed: boolean }) {
   const { accounts, loading, activeAccount, activeAccountId, setActiveAccountId, createAccount, updateAccount, deleteAccount } = useAccount();
@@ -100,6 +101,9 @@ export default function AccountSwitcher({ collapsed }: { collapsed: boolean }) {
                 className="flex items-center gap-2 w-full px-3 py-2 text-sm text-sidebar-muted hover:text-sidebar-foreground hover:bg-white/5"
               >
                 <Plus className="w-3.5 h-3.5" /> New Account
+                {/* The first account is Free — only a 2nd+ one is normally
+                    Pro, so the badge only shows once you already have one. */}
+                {accounts.length >= 1 && <ProBadge feature="multi_account" className="ml-auto" />}
               </button>
             </div>
           </div>
@@ -109,6 +113,7 @@ export default function AccountSwitcher({ collapsed }: { collapsed: boolean }) {
       <AccountDialog
         open={dialogOpen}
         account={editingAccount}
+        existingAccountCount={accounts.length}
         onClose={() => setDialogOpen(false)}
         onSave={async (payload) => {
           if (editingAccount) await updateAccount(editingAccount.id, payload as any);

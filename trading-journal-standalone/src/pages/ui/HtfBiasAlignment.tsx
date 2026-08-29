@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../lib/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../lib/ui/table';
 import { Trade, fmtMoney, plColor } from '../data/types';
 import { summarizeOutcome } from '../data/risk';
+import ProBadge from '../../components/ProBadge';
 
 // The tag group name the starter preset (TagGroupsPicker.tsx) creates -
 // same exact-match convention as ExecutionMistakeSummary.tsx: tag_selections
@@ -82,6 +83,7 @@ export default function HtfBiasAlignment({ trades }: { trades: Trade[] }) {
         <div className="flex items-center gap-2">
           <Compass className="w-4 h-4 text-muted-foreground" />
           <CardTitle className="text-base font-bold">HTF Bias Alignment</CardTitle>
+          <ProBadge feature="htf_bias_alignment" />
         </div>
         <p className="text-xs text-muted-foreground mt-0.5">
           {alignmentPct === null

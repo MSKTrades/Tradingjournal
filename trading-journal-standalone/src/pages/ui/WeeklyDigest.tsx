@@ -5,6 +5,7 @@ import { Button } from '../../lib/ui/button';
 import { Trade, Checklist, fmtMoney } from '../data/types';
 import { summarizeOutcome } from '../data/risk';
 import { EMOTIONS_POSITIVE, EMOTIONS_CAUTION } from './TradeDetailPanel';
+import ProBadge from '../../components/ProBadge';
 
 // Local-date (not UTC) "today" - trade_placed_at is a plain DATE string with
 // no time/timezone attached, so every date computed in this file stays in
@@ -311,6 +312,7 @@ export default function WeeklyDigest({ trades, checklists }: { trades: Trade[]; 
           <div className="flex items-center gap-2">
             <CalendarDays className="w-4 h-4 text-muted-foreground" />
             <CardTitle className="text-base font-bold">Weekly Digest</CardTitle>
+            <ProBadge feature="weekly_digest" />
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground font-medium mr-1">
