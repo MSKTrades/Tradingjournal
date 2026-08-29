@@ -426,7 +426,13 @@ export default function Summary() {
     <div>
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-xl font-bold">Welcome, Manjyot</h1>
+          {/* Hardcoded to the real product owner's own name for the real,
+              logged-in app (there's only ever one real account) - but that
+              same name would otherwise show up for every anonymous visitor
+              to the public /demo/app sandbox too, since it's the exact same
+              component. isDemoMode() swaps in a generic greeting there
+              instead of a real person's name. */}
+          <h1 className="text-xl font-bold">{isDemoMode() ? 'Dear User' : 'Welcome, Manjyot'}</h1>
           <div className="mt-3 mb-1 inline-block rounded-md border border-border bg-card px-3 py-1.5">
             <p className="text-sm text-foreground/90 italic">&ldquo;{quoteOfDay()}&rdquo;</p>
           </div>
