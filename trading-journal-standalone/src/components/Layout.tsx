@@ -95,7 +95,24 @@ export default function Layout({ children, demoMode = false }: { children: React
         )}
       >
         <div className={cn('h-16 flex items-center border-b border-sidebar-border', collapsed ? 'justify-center px-0' : 'px-5')}>
-          <Logo collapsed={collapsed} size={30} />
+          {demoMode ? (
+            // The real, logged-in app has nowhere more "home" than Summary
+            // (which "/" already resolves to for a signed-in user - see
+            // App.tsx's RootRoute), so the logo stays a plain, unclickable
+            // mark there, same as before. In the demo sandbox there IS a
+            // real homepage one level up (the marketing site) and, before
+            // this, the only way back to it was "Exit demo" at the very
+            // bottom of the sidebar, past the theme toggle/feedback/contact/
+            // collapse buttons - easy to miss, and its wording reads more
+            // like "log out" than "go to the homepage". Making the logo
+            // itself a link to "/" covers the far more common instinct of
+            // clicking the brand mark to go home.
+            <Link to="/" title="Back to pipecho.com" aria-label="Back to pipecho.com" className="hover:opacity-80 transition-opacity">
+              <Logo collapsed={collapsed} size={30} />
+            </Link>
+          ) : (
+            <Logo collapsed={collapsed} size={30} />
+          )}
         </div>
 
         <AccountSwitcher collapsed={collapsed} />

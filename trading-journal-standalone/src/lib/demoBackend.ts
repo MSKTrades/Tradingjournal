@@ -763,11 +763,26 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
   const resource = params.get('resource') ?? b.resource;
   const accountId = store.account.id;
 
-  // --- /columns?resource=auth (synthetic "always logged in as the demo
-  // user" - see App.tsx's DemoShell for why the real AuthProvider's user
-  // object doesn't matter inside the demo shell) ------------------------
+  // --- /columns?resource=auth --------------------------------------------
+  // Always answers "not logged in", on purpose - this is the ONE call that
+  // must NEVER be answered by the demo backend as if it were a real
+  // session. AuthProvider (lib/auth.tsx) is mounted once, above <Routes>,
+  // for the entire app, and calls this exactly once on first mount; if that
+  // first mount happens to occur while sitting on a /demo/app/* URL (a
+  // direct/bookmarked link, a page reload while in the demo, or a search
+  // result landing straight on it - all real entry points now that /demo/app
+  // is in the sitemap), a fake truthy user here would make AuthProvider
+  // believe there's a real logged-in session for the REST OF THE TAB, not
+  // just inside the demo. Every future navigation - including "Exit demo"
+  // and the sidebar logo - would then see a non-null `user` and route into
+  // the real authenticated app shell instead of back to the marketing
+  // Landing page, hitting real API endpoints with no real session behind
+  // them. None of the demo pages need `user` to be truthy - they're
+  // deliberately not wrapped in Protected (see App.tsx's DemoShell) and
+  // don't call useAuth() at all - so there's nothing to lose by always
+  // answering honestly here.
   if (path === '/columns' && resource === 'auth') {
-    return { user: { id: 1, email: 'demo@pipecho.com', name: 'Demo Trader', created_at: store.account.created_at } };
+    return { user: null };
   }
   if (path === '/columns' && resource === 'contact') return { ok: true };
   if (path === '/columns' && resource === 'feedback') return { ok: true };
