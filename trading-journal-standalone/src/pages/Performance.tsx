@@ -17,6 +17,24 @@ import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters, allTag
 import RMultipleDistribution from './ui/RMultipleDistribution';
 import HourOfDayPerformance from './ui/HourOfDayPerformance';
 
+// Y-axis domain for the P/L bar charts below (Monthly/Yearly/Weekday/
+// Session/Hour) - always anchored at $0 (see the earlier fix: without this,
+// a single data point zooms the axis in tight around just that value with
+// no sense of where zero is), PLUS a 25% padding margin beyond whichever
+// side actually has data. That padding is the part that was still missing:
+// zero-anchoring alone means a chart with only one bar has a domain that
+// exactly matches that bar's own value, so the single bar still fills the
+// entire plot top-to-bottom - technically correct, but reads as "still
+// huge" exactly like the bug this was meant to fix. The padding leaves
+// visible headroom above/below even a single bar, so it reads as a
+// normal-sized bar in a chart rather than a bar that's maxed out the axis.
+function zeroAnchoredMin(dataMin: number): number {
+  return dataMin < 0 ? dataMin * 1.25 : 0;
+}
+function zeroAnchoredMax(dataMax: number): number {
+  return dataMax > 0 ? dataMax * 1.25 : 0;
+}
+
 // --- TYPES ---
 type PeriodRow = {
   period: string;
@@ -847,7 +865,7 @@ export default function Performance() {
                           tick={{ fontSize: 10 }}
                           tickFormatter={(v) => `$${Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
                           width={55}
-                          domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                          domain={[(min: number) => zeroAnchoredMin(min), (max: number) => zeroAnchoredMax(max)]}
                         />
                         <Tooltip
                           contentStyle={{ fontSize: 11 }}
@@ -905,7 +923,7 @@ export default function Performance() {
                         <YAxis
                           tick={{ fontSize: 10 }}
                           width={55}
-                          domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                          domain={[(min: number) => zeroAnchoredMin(min), (max: number) => zeroAnchoredMax(max)]}
                         />
                         <Tooltip contentStyle={{ fontSize: 11 }} cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }} />
                         <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
@@ -954,7 +972,7 @@ export default function Performance() {
                         <YAxis
                           tick={{ fontSize: 10 }}
                           width={55}
-                          domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                          domain={[(min: number) => zeroAnchoredMin(min), (max: number) => zeroAnchoredMax(max)]}
                         />
                         <Tooltip contentStyle={{ fontSize: 11 }} cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }} />
                         <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
@@ -1013,7 +1031,7 @@ export default function Performance() {
                             <YAxis
                               tick={{ fontSize: 10 }}
                               width={55}
-                              domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                              domain={[(min: number) => zeroAnchoredMin(min), (max: number) => zeroAnchoredMax(max)]}
                             />
                             <Tooltip contentStyle={{ fontSize: 11 }} cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }} />
                             <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
@@ -1082,7 +1100,7 @@ export default function Performance() {
                             <YAxis
                               tick={{ fontSize: 10 }}
                               width={55}
-                              domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                              domain={[(min: number) => zeroAnchoredMin(min), (max: number) => zeroAnchoredMax(max)]}
                             />
                             <Tooltip contentStyle={{ fontSize: 11 }} cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }} />
                             <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
