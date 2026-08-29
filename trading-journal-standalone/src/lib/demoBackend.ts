@@ -148,7 +148,7 @@ function buildSeed(): Store {
     starting_balance: startingBalance,
     active: true,
     sort_order: 0,
-    created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+    created_at: new Date(Date.now() - 95 * 86400000).toISOString(),
     daily_loss_limit_pct: 5,
     max_drawdown_limit_pct: 10,
     consistency_rule_pct: null,
@@ -189,9 +189,41 @@ function buildSeed(): Store {
   };
   // time_end covers every hour the seed generator below can produce
   // (7am-2pm) - narrower and the "Best Strategy" stat on Summary reads as
-  // if some sample trades don't even qualify for the one demo strategy,
-  // which is a confusing story to tell a first-time visitor.
+  // if some sample trades don't even qualify for a demo strategy, which is
+  // a confusing story to tell a first-time visitor. All three strategies
+  // below share this same window.
   strategy.time_end = '15:00';
+
+  // Two single-target variants of the same setup, evaluated at a different
+  // take-profit distance than the two-target "London Reversal" above - same
+  // qualifying trades (identical conditions/day/time), but buildSummary's
+  // calcR() reads a different reached_1rX flag per target (reached_1r2 vs
+  // reached_1r3), so their win rate and total R genuinely differ instead of
+  // repeating the same numbers under a new name. Lets a demo visitor compare
+  // "what if I banked profit at 1:2 instead of 1:3" the way the real
+  // Strategies page is meant to be used for.
+  const strategyTp2: Strategy = {
+    ...strategy,
+    id: nextId(),
+    name: 'London Reversal TP 1:2',
+    conditions: [...strategy.conditions],
+    account_ids: [...strategy.account_ids],
+    tp1_rr: 2,
+    tp2_rr: null,
+    split_percent: null,
+    sort_order: 1,
+  };
+  const strategyTp3: Strategy = {
+    ...strategy,
+    id: nextId(),
+    name: 'London Reversal TP 1:3',
+    conditions: [...strategy.conditions],
+    account_ids: [...strategy.account_ids],
+    tp1_rr: 3,
+    tp2_rr: null,
+    split_percent: null,
+    sort_order: 2,
+  };
 
   const htfGroupId = nextId();
   const execGroupId = nextId();
@@ -232,13 +264,23 @@ function buildSeed(): Store {
   const emotionsPool = ['Confident', 'Anxious', 'Patient', 'FOMO', 'Calm'];
   const sessions: Trade['session_in'][] = ['London', 'New York', 'Asia', 'London/NY Overlap'] as any;
   const rawTrades: any[] = [];
-  let cursor = new Date('2026-06-01T00:00:00Z');
+  // Always runs from ~13 weeks ago through TODAY - not a fixed calendar
+  // range - so the demo never goes stale. This matters specifically for
+  // Summary's Weekly Digest (WeeklyDigest.tsx): it only ever looks at the
+  // CURRENT Mon-Sun week by default and renders nothing when that week has
+  // no trades. A hardcoded past range (the old '2026-06-01' start, stopped
+  // once 24 trades existed) drifted out of "this week" within a couple of
+  // months and left the digest looking broken to anyone visiting later.
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  let cursor = new Date(today);
+  cursor.setUTCDate(cursor.getUTCDate() - 13 * 7);
   let tradeNumber = 1;
-  while (rawTrades.length < 24) {
+  while (cursor.getTime() <= today.getTime()) {
     const weekday = cursor.getUTCDay();
     if (weekday !== 0 && weekday !== 6) {
       const tradesToday = rand() < 0.65 ? 1 : (rand() < 0.5 ? 0 : 2);
-      for (let i = 0; i < tradesToday && rawTrades.length < 24; i++) {
+      for (let i = 0; i < tradesToday; i++) {
         const bos = rand() < 0.55;
         const asiaSwept = rand() < 0.45;
         const session = sessions[Math.floor(rand() * sessions.length)];
@@ -326,16 +368,39 @@ function buildSeed(): Store {
   }
   recalcCapital(rawTrades, startingBalance);
 
+  // A few Prop Firm Ledger entries (Summary's PropPnlLedger.tsx widget) -
+  // a challenge fee near the start of the trading history, then two payouts
+  // as it progressed, so "Ready to try the ledger in the demo" (the
+  // Prop Firm Ledger & Challenge Simulator feature page) actually shows
+  // something on arrival instead of an empty list.
+  const ledger: LedgerEntry[] = [
+    {
+      id: nextId(), account_id: accountId, entry_type: 'fee', amount: 99,
+      entry_date: todayISO(-90), note: 'Phase 1 challenge fee',
+      created_at: new Date(Date.now() - 90 * 86400000).toISOString(),
+    },
+    {
+      id: nextId(), account_id: accountId, entry_type: 'payout', amount: 850,
+      entry_date: todayISO(-30), note: 'First profit split',
+      created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+    },
+    {
+      id: nextId(), account_id: accountId, entry_type: 'payout', amount: 620,
+      entry_date: todayISO(-8), note: 'Second profit split',
+      created_at: new Date(Date.now() - 8 * 86400000).toISOString(),
+    },
+  ];
+
   return {
     account,
     trades: rawTrades as Trade[],
-    strategies: [strategy],
+    strategies: [strategy, strategyTp2, strategyTp3],
     checklists: [checklist],
     dailyRoutine: [],
     customColumns: [],
     tags,
     tagGroups,
-    ledger: [],
+    ledger,
     added: {},
   };
 }
