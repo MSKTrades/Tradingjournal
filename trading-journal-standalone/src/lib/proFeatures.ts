@@ -61,7 +61,13 @@ export const PRO_FEATURES: Record<ProFeatureKey, { message: string }> = {
     message: 'Free plan includes 1 strategy playbook — additional playbooks are a Pro feature.',
   },
   backtest: {
-    message: 'Chart Replay & Backtesting is a Pro feature.',
+    // Backtesting itself is NOT Pro-only — Free gets it too, capped at 6
+    // months of history. Only unlimited history is the Pro line, matching
+    // the Free/Pro feature lists on the Pricing page. Once the real
+    // Backtest workspace ships (still a placeholder as of this delivery —
+    // see BacktestComingSoon.tsx), badge only the "unlimited history"
+    // affordance with this key, not the feature as a whole.
+    message: 'Backtesting is free for everyone with up to 6 months of history — unlimited history is a Pro feature.',
   },
   checklist_compliance: {
     message: 'Checklist Compliance analysis is a Pro feature.',

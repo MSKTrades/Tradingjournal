@@ -38,6 +38,7 @@ const PLANS = [
       'Custom fields & tags',
       'Pre-trade checklists',
       'Excel import',
+      'Chart Replay & Backtesting — up to 6 months of history (coming soon)',
     ],
   },
   {
@@ -57,7 +58,7 @@ const PLANS = [
       'Execution Mistakes analysis',
       'HTF Bias Alignment',
       'R-Multiple Distribution',
-      'Chart Replay & Backtesting (coming soon)',
+      'Chart Replay & Backtesting — unlimited history (coming soon)',
       'Priority support',
     ],
   },
