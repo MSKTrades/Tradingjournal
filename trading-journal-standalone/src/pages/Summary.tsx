@@ -13,6 +13,7 @@ import RiskGuardrail from './ui/RiskGuardrail';
 import PropPnlLedger from './ui/PropPnlLedger';
 import EmotionsRatingSummary from './ui/EmotionsRatingSummary';
 import ExecutionMistakeSummary from './ui/ExecutionMistakeSummary';
+import HtfBiasAlignment from './ui/HtfBiasAlignment';
 import WeeklyDigest from './ui/WeeklyDigest';
 import { summarizeOutcome } from './data/risk';
 
@@ -732,7 +733,8 @@ export default function Summary() {
         <EmotionsRatingSummary trades={trades} />
       </div>
 
-      <div className="grid grid-cols-1 mb-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-6">
+        <HtfBiasAlignment trades={trades} />
         <ExecutionMistakeSummary trades={trades} />
       </div>
 

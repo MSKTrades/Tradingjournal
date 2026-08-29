@@ -243,6 +243,19 @@ const EXEC_MISTAKE_STARTER_OPTIONS = ['Chased Entry', 'Skipped Rule', 'Moved SL'
 const EXEC_MISTAKE_GROUP_NAME = 'Execution Mistakes';
 const EXEC_MISTAKE_GROUP_RE = /execution mistake|mistake|error/i;
 
+// Starter set for the HTF (higher-timeframe) bias a trade was taken
+// against - the raw material for the "HTF Bias Alignment" summary card
+// (HtfBiasAlignment.tsx) on the Summary page, which cross-references
+// whichever of these you pick against the trade's own Long/Short direction
+// to see whether you actually do better trading with your own HTF read or
+// against it. "Neutral / Ranging" is deliberately included even though it
+// has no directional alignment of its own - tagging "there wasn't a clear
+// HTF bias here" is itself useful signal (e.g. "I keep losing on trades I
+// took when I already knew HTF was ranging").
+const HTF_BIAS_STARTER_OPTIONS = ['Bullish', 'Bearish', 'Neutral / Ranging'];
+const HTF_BIAS_GROUP_NAME = 'HTF Bias';
+const HTF_BIAS_GROUP_RE = /htf.*bias|bias/i;
+
 export default function TagGroupsPicker({ groups, selections, onChange, onCreateGroup, onCreateOption, onDeleteGroup, onDeleteOption }: Props) {
   const [addingGroup, setAddingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
@@ -272,11 +285,35 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
     setExecMistakeStarterBusy(false);
   }, [groups, execMistakeStarterBusy, onCreateOption]);
 
+  // Same fire-and-create-group-then-watch-for-its-id pattern as Execution
+  // Mistakes above, for the HTF Bias starter.
+  const [htfBiasStarterBusy, setHtfBiasStarterBusy] = useState(false);
+  const htfBiasStarterFiredOptionsRef = useRef(false);
+  const hasHtfBiasGroup = groups.some(g => HTF_BIAS_GROUP_RE.test(g.name));
+
+  useEffect(() => {
+    if (!htfBiasStarterBusy || htfBiasStarterFiredOptionsRef.current) return;
+    const group = groups.find(g => g.name === HTF_BIAS_GROUP_NAME);
+    if (!group) return;
+    htfBiasStarterFiredOptionsRef.current = true;
+    for (const optionName of HTF_BIAS_STARTER_OPTIONS) {
+      onCreateOption(group.id, group.name, optionName);
+    }
+    setHtfBiasStarterBusy(false);
+  }, [groups, htfBiasStarterBusy, onCreateOption]);
+
   function addStarterExecMistakeGroup() {
     if (execMistakeStarterBusy) return;
     execMistakeStarterFiredOptionsRef.current = false;
     setExecMistakeStarterBusy(true);
     onCreateGroup(EXEC_MISTAKE_GROUP_NAME);
+  }
+
+  function addStarterHtfBiasGroup() {
+    if (htfBiasStarterBusy) return;
+    htfBiasStarterFiredOptionsRef.current = false;
+    setHtfBiasStarterBusy(true);
+    onCreateGroup(HTF_BIAS_GROUP_NAME);
   }
 
   function toggleOption(group: TagGroup, optionName: string) {
@@ -389,6 +426,16 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
               className="text-xs text-muted-foreground hover:text-foreground self-start disabled:opacity-50"
             >
               {execMistakeStarterBusy ? 'Adding starter tags…' : '+ Add starter Execution Mistake tags'}
+            </button>
+          )}
+          {!hasHtfBiasGroup && (
+            <button
+              type="button"
+              onClick={addStarterHtfBiasGroup}
+              disabled={htfBiasStarterBusy}
+              className="text-xs text-muted-foreground hover:text-foreground self-start disabled:opacity-50"
+            >
+              {htfBiasStarterBusy ? 'Adding starter tags…' : '+ Add starter HTF Bias tags'}
             </button>
           )}
         </div>
