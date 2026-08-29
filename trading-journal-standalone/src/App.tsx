@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { useEffect } from 'react';
 import { capturePageview } from './lib/analytics';
 import Landing from './pages/Landing';
+import FeatureDetail from './pages/FeatureDetail';
 import Demo from './pages/Demo';
 import SessionClockTool from './pages/SessionClockTool';
 import Pricing from './pages/Pricing';
@@ -149,6 +150,11 @@ export default function App() {
           <Routes>
             <Route path="/" element={<RootRoute />} />
             <Route path="/pricing" element={<Pricing />} />
+            {/* Each FEATURES entry (src/pages/data/features.ts) gets its own
+                detail page here — reached from the Landing grid and the
+                header's Features mega-menu. Public, no-login, same shape as
+                Landing/Pricing/Blog. */}
+            <Route path="/features/:slug" element={<FeatureDetail />} />
             {/* Public, no-login growth pages — same "no Protected/
                 AuthedShell" shape as Landing/Pricing/Blog. /demo is the
                 interactive sample-journal demo linked from the Landing

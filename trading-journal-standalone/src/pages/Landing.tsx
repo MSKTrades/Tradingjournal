@@ -1,18 +1,13 @@
-import { useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import {
-  BarChart2, BookOpen, History, ListChecks, TrendingUp, Settings2,
-  AlertTriangle, Layers, Check, X, Clock3, ArrowRight, RefreshCw, Landmark,
-  Mail, Compass, Globe,
-} from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { BarChart2, Check, X, Clock3, ArrowRight } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { Badge } from '../lib/ui/form';
 import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
 import { BLOG_POSTS } from './data/blogPosts';
+import { FEATURES } from './data/features';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
 import RuleToggleDemo from './ui/RuleToggleDemo';
 import ProBadge from '../components/ProBadge';
-import { ProFeatureKey } from '../lib/proFeatures';
 import { featureSlug } from '../lib/featureSlug';
 
 // Decorative ascending-bar heights behind the hero headline — hand-picked
@@ -72,79 +67,6 @@ function HeroBackground() {
   );
 }
 
-// Kept in sync by hand with what's actually shipped (see App.tsx's routes
-// and src/pages/ui/*) rather than what the page looked like when it first
-// launched — this list drifted behind several real features (broker sync,
-// the prop-firm ledger, the Pro analytics widgets) before this pass. SMC
-// Analysis is deliberately left off: it's restricted to a single internal
-// account and was never meant to be marketed publicly (see the SmcGate
-// note in App.tsx).
-const FEATURES: { icon: typeof BookOpen; title: string; desc: string; pro?: ProFeatureKey }[] = [
-  {
-    icon: BookOpen,
-    title: 'Trade Journal',
-    desc: 'Log every trade with full context — entry/exit, R:R, screenshots, and notes — and let PipEcho compute your running equity curve automatically.',
-  },
-  {
-    icon: History,
-    title: 'Chart Replay & Backtesting',
-    desc: 'Pull real historical candle data and step through it bar-by-bar to rehearse a strategy before risking live capital.',
-  },
-  {
-    icon: TrendingUp,
-    title: 'Performance Analytics',
-    desc: 'Win rate, average R, profit factor, and breakdowns by session, day, and setup — see what\'s actually working.',
-  },
-  {
-    icon: Settings2,
-    title: 'Strategy Playbooks',
-    desc: 'Define your setups once, then track how each one performs over time so you know which edges to keep and which to drop.',
-  },
-  {
-    icon: ListChecks,
-    title: 'Pre-Trade Checklists',
-    desc: 'Enforce your own rules before every entry — a simple guardrail against revenge trading and FOMO.',
-  },
-  {
-    icon: AlertTriangle,
-    title: 'Risk Guardrail',
-    desc: 'A live warning the moment a daily or weekly loss limit is breached — visible on your dashboard, not just in your head.',
-  },
-  {
-    icon: RefreshCw,
-    title: 'MT4/MT5 Auto-Sync',
-    desc: 'Connect a real broker or prop-firm account with your read-only investor login and let closed trades import themselves — nothing typed by hand.',
-  },
-  {
-    icon: Landmark,
-    title: 'Prop Firm Ledger & Challenge Simulator',
-    desc: 'Track challenge fees and payouts separately from trade P/L, and stress-test a rule set against your own history before you pay for an evaluation.',
-  },
-  {
-    icon: Mail,
-    title: 'Weekly Digest',
-    desc: 'A standing recap of the week\'s trading — win rate, R, and what changed — without having to go dig for it yourself.',
-    pro: 'weekly_digest',
-  },
-  {
-    icon: Compass,
-    title: 'HTF Bias Alignment',
-    desc: 'See how often your entries actually agreed with the higher-timeframe bias, so you catch a fade-the-trend habit before it costs another month.',
-    pro: 'htf_bias_alignment',
-  },
-  {
-    icon: Globe,
-    title: 'Public Track Record',
-    desc: 'A shareable, read-only results page for a prop firm or investor — no login required, and you control whether dollar amounts are shown.',
-    pro: 'public_track_record',
-  },
-  {
-    icon: Layers,
-    title: 'Custom Fields & Tags',
-    desc: 'Track the specific things your strategy cares about — confirmation candles, liquidity swept, session structure — without fighting a rigid template.',
-  },
-];
-
 type ComparisonValue = boolean | 'manual';
 const COMPARISON: { label: string; spreadsheet: ComparisonValue; notes: ComparisonValue; pipecho: ComparisonValue }[] = [
   { label: 'Automatic equity curve & running balance', spreadsheet: false, notes: false, pipecho: true },
@@ -187,22 +109,6 @@ export default function Landing() {
       url: 'https://pipecho.com/',
     },
   });
-  // Lets the header's Features mega-menu (MarketingChrome.tsx) deep-link
-  // straight to a specific feature card - e.g. Link to="/#trade-journal" -
-  // instead of just dumping a visitor at the top of the page. Plain browser
-  // anchor scrolling doesn't fire here: react-router's Link intercepts the
-  // click and pushes history state rather than doing a real navigation, so
-  // nothing scrolls on its own, and a click from another page (Pricing,
-  // Blog) mounts Landing fresh with the hash already set. Keying this off
-  // location.hash (rather than a plain window.onload check) covers both
-  // cases: a fresh mount with a hash already in the URL, and a same-page
-  // hash change while already sitting on "/".
-  const location = useLocation();
-  useEffect(() => {
-    if (!location.hash) return;
-    const el = document.querySelector(location.hash);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [location.hash]);
   return (
     <div className="min-h-screen bg-background text-foreground">
       <MarketingHeader />
@@ -277,7 +183,11 @@ export default function Landing() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {FEATURES.map(({ icon: Icon, title, desc, pro }) => (
-              <div key={title} id={featureSlug(title)} className="rounded-lg border border-border bg-card p-6 scroll-mt-24">
+              <Link
+                key={title}
+                to={`/features/${featureSlug(title)}`}
+                className="group rounded-lg border border-border bg-card p-6 hover:border-primary/50 hover:shadow-sm transition-all"
+              >
                 <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center mb-4">
                   <Icon className="w-5 h-5 text-primary" />
                 </div>
@@ -286,7 +196,10 @@ export default function Landing() {
                   {pro && <ProBadge feature={pro} />}
                 </div>
                 <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
-              </div>
+                <span className="inline-flex items-center gap-1 text-sm font-medium text-primary mt-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                  Learn more <ArrowRight className="w-3.5 h-3.5" />
+                </span>
+              </Link>
             ))}
           </div>
         </div>

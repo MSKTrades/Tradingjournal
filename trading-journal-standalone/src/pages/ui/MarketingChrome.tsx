@@ -22,13 +22,12 @@ const NAV_LINKS = [
 
 // The header's "Features" mega-menu (FX Replay-style: two labeled columns,
 // each entry an icon + title + one-line description). Deliberately a
-// hand-picked subset of Landing.tsx's full FEATURES list rather than every
-// entry - a dropdown people skim from the header should read in a few
-// seconds, not repeat the whole marketing page. Each href deep-links to that
-// feature's own card on the landing page (see featureSlug/#id in
-// Landing.tsx) so clicking one doesn't just dump a visitor at the top of "/"
-// - if you add or rename a feature card there, keep this list's titles in
-// sync so the anchors keep resolving.
+// hand-picked subset of the full FEATURES list (src/pages/data/features.ts)
+// rather than every entry - a dropdown people skim from the header should
+// read in a few seconds, not repeat the whole marketing page. Each href
+// goes to that feature's own detail page (/features/:slug, see
+// FeatureDetail.tsx) - if you add or rename a feature there, keep this
+// list's titles in sync so featureSlug() below still resolves to a real page.
 const FEATURE_MENU: {
   column: string;
   items: { icon: typeof BookOpen; title: string; desc: string }[];
@@ -104,7 +103,7 @@ function FeaturesMenu() {
                   {col.items.map(item => (
                     <li key={item.title}>
                       <Link
-                        to={`/#${featureSlug(item.title)}`}
+                        to={`/features/${featureSlug(item.title)}`}
                         onClick={() => setOpen(false)}
                         className="flex items-start gap-3 rounded-md p-1.5 -m-1.5 hover:bg-accent transition-colors"
                       >
