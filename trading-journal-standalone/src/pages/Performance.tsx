@@ -479,13 +479,64 @@ function CalendarView({ daily = [] }: { daily?: PeriodRow[] }) {
 // --- MAIN EXPORT ---
 
 function DrawdownSection({ trades, startingBalance }: { trades: Trade[]; startingBalance: number | null }) {
+  // One computeDrawdown() call feeds both cards below - its `curve` already
+  // carries the running dollar `equity` at every trade (not just the %
+  // drawdown this was originally built for), so "how has my balance grown"
+  // needs no separate calculation, no new fetch, and can't ever disagree
+  // with the Drawdown card sitting right under it since they're reading the
+  // same walked series.
   const dd = useMemo(() => computeDrawdown(trades, startingBalance), [trades, startingBalance]);
 
   return (
-    <Card className="mb-6">
-      <CardContent className="pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <p className="text-sm font-semibold">Drawdown</p>
+    <>
+      <Card className="mb-6">
+        <CardContent className="pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <p className="text-sm font-semibold">Account Balance</p>
+            <span className="text-xs text-muted-foreground">
+              Current: <span className="font-mono font-semibold text-foreground">{fmtMoney(dd.currentBalance)}</span>
+            </span>
+          </div>
+          {dd.curve.length < 2 ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">Not enough trades yet to plot a balance curve.</div>
+          ) : (
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={dd.curve} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="accountBalanceFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="hsl(var(--chart-3))" stopOpacity={0.32} />
+                      <stop offset="100%" stopColor="hsl(var(--chart-3))" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="idx" tick={{ fontSize: 10 }} />
+                  <YAxis
+                    tick={{ fontSize: 10 }}
+                    width={55}
+                    domain={['dataMin', 'dataMax']}
+                    tickFormatter={(v) => `$${Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
+                  />
+                  <Tooltip
+                    contentStyle={{ fontSize: 11 }}
+                    labelFormatter={(v) => `Trade #${v}`}
+                    formatter={(v: number) => [fmtMoney(v), 'Balance']}
+                  />
+                  {startingBalance != null && (
+                    <ReferenceLine y={startingBalance} stroke="hsl(var(--border))" strokeWidth={1.5} strokeDasharray="4 3" />
+                  )}
+                  <Area type="monotone" dataKey="equity" stroke="hsl(var(--chart-3))" fill="url(#accountBalanceFill)" strokeWidth={2} dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardContent className="pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <p className="text-sm font-semibold">Drawdown</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
             <span className="text-muted-foreground">
               Max: <span className="font-mono font-semibold text-red-500 dark:text-red-400">{fmtMoney(dd.maxDDDollar)} ({dd.maxDDPct.toFixed(1)}%)</span>
@@ -526,8 +577,9 @@ function DrawdownSection({ trades, startingBalance }: { trades: Trade[]; startin
             </ResponsiveContainer>
           </div>
         )}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
@@ -550,6 +602,31 @@ export default function Performance() {
   const daily: PeriodRow[] = data?.daily ?? [];
   const session: PeriodRow[] = data?.session ?? [];
   const stats = data?.stats;
+
+  // Yearly Chart, padded with 2 blank years on either side of your real
+  // trading history - `yearly` on its own only ever has as many bars as
+  // you have years of data (often just one), which reads as a single block
+  // with no sense of "what year is this relative to." The Yearly table
+  // below keeps using the real, unpadded `yearly` array - only the chart's
+  // x-axis needs the extra context, and a synthetic zero-trade year would
+  // be a misleading row to show in the table itself.
+  const yearlyChartData: PeriodRow[] = useMemo(() => {
+    if (yearly.length === 0) return yearly;
+    const years = yearly.map(r => Number(r.period)).filter(n => !isNaN(n));
+    const minYr = Math.min(...years);
+    const maxYr = Math.max(...years);
+    const byYear = new Map(yearly.map(r => [r.period, r]));
+    const blank = (yr: number): PeriodRow => ({
+      period: String(yr), total_trades: 0, wins: 0, losses: 0, win_rate: 0,
+      total_gain: 0, pct_return: 0, start_capital: 0, end_capital: 0,
+      profit_factor: null, avg_rr: null,
+    });
+    const out: PeriodRow[] = [];
+    for (let yr = minYr - 2; yr <= maxYr + 2; yr++) {
+      out.push(byYear.get(String(yr)) ?? blank(yr));
+    }
+    return out;
+  }, [yearly]);
 
   // By-Hour (and the cumulative P/L line chart below) are computed
   // client-side from the raw trade list rather than a new backend endpoint
@@ -761,15 +838,20 @@ export default function Performance() {
             <TabsContent value="monthly">
               <Card>
                 <CardContent className="pt-4">
-                  <div className="h-64 mb-4">
+                  <div className="h-44 mb-4">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={monthly} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                         <XAxis dataKey="period" tickFormatter={(v) => fmtPeriod(v, true)} tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`} width={55} />
+                        <YAxis
+                          tick={{ fontSize: 10 }}
+                          tickFormatter={(v) => `$${Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
+                          width={55}
+                          domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                        />
                         <Tooltip contentStyle={{ fontSize: 11 }} labelFormatter={(v) => fmtPeriod(v as string, true)} />
                         <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
-                        <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
+                        <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
                           {monthly.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
                         </Bar>
                       </BarChart>
@@ -806,16 +888,25 @@ export default function Performance() {
             <TabsContent value="yearly">
               <Card>
                 <CardContent className="pt-4">
-                  <div className="h-64 mb-4">
+                  <div className="h-44 mb-4">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={yearly} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                      {/* yearlyChartData, not yearly - padded with a couple of
+                          blank years on either side so a single real year of
+                          history doesn't render as one lone block with no
+                          sense of "which year is this." The table below still
+                          reads from the real `yearly` array. */}
+                      <BarChart data={yearlyChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                         <XAxis dataKey="period" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} width={55} />
+                        <YAxis
+                          tick={{ fontSize: 10 }}
+                          width={55}
+                          domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                        />
                         <Tooltip contentStyle={{ fontSize: 11 }} />
                         <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
-                        <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
-                          {yearly.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
+                        <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
+                          {yearlyChartData.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
@@ -851,15 +942,19 @@ export default function Performance() {
             <TabsContent value="weekday">
                <Card>
                 <CardContent className="pt-4">
-                  <div className="h-64 mb-4">
+                  <div className="h-44 mb-4">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={weekday} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                         <XAxis dataKey="period" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} width={55} />
+                        <YAxis
+                          tick={{ fontSize: 10 }}
+                          width={55}
+                          domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                        />
                         <Tooltip contentStyle={{ fontSize: 11 }} />
                         <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
-                        <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
+                        <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
                           {weekday.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
                         </Bar>
                       </BarChart>
@@ -906,15 +1001,19 @@ export default function Performance() {
                     </div>
                   ) : (
                     <>
-                      <div className="h-64 mb-4">
+                      <div className="h-44 mb-4">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={session} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                             <XAxis dataKey="period" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" height={40} />
-                            <YAxis tick={{ fontSize: 10 }} width={55} />
+                            <YAxis
+                              tick={{ fontSize: 10 }}
+                              width={55}
+                              domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                            />
                             <Tooltip contentStyle={{ fontSize: 11 }} />
                             <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
-                            <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
+                            <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
                               {session.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
                             </Bar>
                           </BarChart>
@@ -971,15 +1070,19 @@ export default function Performance() {
                     </div>
                   ) : (
                     <>
-                      <div className="h-64 mb-4">
+                      <div className="h-44 mb-4">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={hourly} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                             <XAxis dataKey="period" tick={{ fontSize: 9 }} interval={1} angle={-40} textAnchor="end" height={50} />
-                            <YAxis tick={{ fontSize: 10 }} width={55} />
+                            <YAxis
+                              tick={{ fontSize: 10 }}
+                              width={55}
+                              domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                            />
                             <Tooltip contentStyle={{ fontSize: 11 }} />
                             <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
-                            <Bar dataKey="total_gain" radius={[3, 3, 0, 0]}>
+                            <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
                               {hourly.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
                             </Bar>
                           </BarChart>
