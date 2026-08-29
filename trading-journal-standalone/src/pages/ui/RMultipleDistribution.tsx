@@ -19,12 +19,21 @@ const BUCKETS: { label: string; test: (r: number) => boolean }[] = [
   { label: '5R+', test: (r) => r >= 5 },
 ];
 
-// Losing buckets get a red shade, winning buckets a green shade - a simple
-// two-tone split (rather than a full magnitude gradient) since this is a
-// small summary card, not a data-viz showcase. Index lines up 1:1 with
-// BUCKETS above. Red end kept soft on purpose - a wall of dark red for a
-// bucket of losing trades reads as punitive, not informative.
-const BUCKET_COLORS = ['#ef4444', '#f87171', '#4ade80', '#22c55e', '#16a34a', '#15803d', '#166534'];
+// Losing buckets get a red shade, winning buckets a green shade, intensity
+// increasing the further a bucket sits from 0 - the bucket right next to 0
+// on each side (the ordinary, unremarkable case) is pinned to the exact
+// same red/green Hour-of-Day Performance and the Monthly/Yearly/By-Day/By-
+// Session/By-Hour bar charts already use for "loss"/"win" (#ef4444 /
+// #16a34a) - previously this chart used its OWN slightly different gradient
+// with a lighter #f87171 for "-1R to 0R", which put two different-looking
+// reds for "a loss happened" side by side whenever this card and
+// Hour-of-Day Performance render next to each other, and read as a color
+// bug even though each individual chart's own logic was fine. Anchoring
+// both charts' near-zero buckets to the same hex values fixes that, while
+// still letting more extreme buckets (a bigger loss, a bigger win) read as
+// visually more intense than the everyday case. Index lines up 1:1 with
+// BUCKETS above.
+const BUCKET_COLORS = ['#b91c1c', '#ef4444', '#16a34a', '#15803d', '#166534', '#14532d', '#052e16'];
 
 type BucketDatum = { label: string; count: number };
 
