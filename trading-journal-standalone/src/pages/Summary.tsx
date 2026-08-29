@@ -18,6 +18,7 @@ import WeeklyDigest from './ui/WeeklyDigest';
 import { summarizeOutcome } from './data/risk';
 import ProBadge from '../components/ProBadge';
 import SessionClockWidget from './ui/SessionClockWidget';
+import { isDemoMode, DEMO_BASE } from '../lib/demoMode';
 
 function fmtPF(v: number | null) {
   return v === null ? '∞' : v.toFixed(2);
@@ -499,7 +500,7 @@ export default function Summary() {
                 <TableRow
                   key={r.id}
                   className="cursor-pointer"
-                  onClick={() => navigate(`/strategies/${r.id}`)}
+                  onClick={() => navigate(`${isDemoMode() ? DEMO_BASE : ''}/strategies/${r.id}`)}
                 >
                   <TableCell className="font-medium text-primary hover:underline">{r.name}</TableCell>
                   <TableCell className="text-center">{r.total_trades}</TableCell>

@@ -1,7 +1,9 @@
-import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
-  BarChart2, BookOpen, History, ListChecks, TrendingUp, Settings2, ShieldCheck,
-  AlertTriangle, FileSpreadsheet, Layers, Check, X, Clock3, ArrowRight,
+  BarChart2, BookOpen, History, ListChecks, TrendingUp, Settings2,
+  AlertTriangle, Layers, Check, X, Clock3, ArrowRight, RefreshCw, Landmark,
+  Mail, Compass, Globe,
 } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { Badge } from '../lib/ui/form';
@@ -9,6 +11,9 @@ import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
 import { BLOG_POSTS } from './data/blogPosts';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
 import RuleToggleDemo from './ui/RuleToggleDemo';
+import ProBadge from '../components/ProBadge';
+import { ProFeatureKey } from '../lib/proFeatures';
+import { featureSlug } from '../lib/featureSlug';
 
 // Decorative ascending-bar heights behind the hero headline — hand-picked
 // (not random) so the pattern is stable across renders and reads as a
@@ -67,7 +72,14 @@ function HeroBackground() {
   );
 }
 
-const FEATURES = [
+// Kept in sync by hand with what's actually shipped (see App.tsx's routes
+// and src/pages/ui/*) rather than what the page looked like when it first
+// launched — this list drifted behind several real features (broker sync,
+// the prop-firm ledger, the Pro analytics widgets) before this pass. SMC
+// Analysis is deliberately left off: it's restricted to a single internal
+// account and was never meant to be marketed publicly (see the SmcGate
+// note in App.tsx).
+const FEATURES: { icon: typeof BookOpen; title: string; desc: string; pro?: ProFeatureKey }[] = [
   {
     icon: BookOpen,
     title: 'Trade Journal',
@@ -99,19 +111,37 @@ const FEATURES = [
     desc: 'A live warning the moment a daily or weekly loss limit is breached — visible on your dashboard, not just in your head.',
   },
   {
+    icon: RefreshCw,
+    title: 'MT4/MT5 Auto-Sync',
+    desc: 'Connect a real broker or prop-firm account with your read-only investor login and let closed trades import themselves — nothing typed by hand.',
+  },
+  {
+    icon: Landmark,
+    title: 'Prop Firm Ledger & Challenge Simulator',
+    desc: 'Track challenge fees and payouts separately from trade P/L, and stress-test a rule set against your own history before you pay for an evaluation.',
+  },
+  {
+    icon: Mail,
+    title: 'Weekly Digest',
+    desc: 'A standing recap of the week\'s trading — win rate, R, and what changed — without having to go dig for it yourself.',
+    pro: 'weekly_digest',
+  },
+  {
+    icon: Compass,
+    title: 'HTF Bias Alignment',
+    desc: 'See how often your entries actually agreed with the higher-timeframe bias, so you catch a fade-the-trend habit before it costs another month.',
+    pro: 'htf_bias_alignment',
+  },
+  {
+    icon: Globe,
+    title: 'Public Track Record',
+    desc: 'A shareable, read-only results page for a prop firm or investor — no login required, and you control whether dollar amounts are shown.',
+    pro: 'public_track_record',
+  },
+  {
     icon: Layers,
     title: 'Custom Fields & Tags',
     desc: 'Track the specific things your strategy cares about — confirmation candles, liquidity swept, session structure — without fighting a rigid template.',
-  },
-  {
-    icon: FileSpreadsheet,
-    title: 'Excel Import',
-    desc: 'Already tracking trades in a spreadsheet? Import your history in one pass instead of re-typing months of trades by hand.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Your Data, Your Rules',
-    desc: 'Multiple accounts, custom columns, and tags — built to match how you actually trade, not a rigid template.',
   },
 ];
 
@@ -157,6 +187,22 @@ export default function Landing() {
       url: 'https://pipecho.com/',
     },
   });
+  // Lets the header's Features mega-menu (MarketingChrome.tsx) deep-link
+  // straight to a specific feature card - e.g. Link to="/#trade-journal" -
+  // instead of just dumping a visitor at the top of the page. Plain browser
+  // anchor scrolling doesn't fire here: react-router's Link intercepts the
+  // click and pushes history state rather than doing a real navigation, so
+  // nothing scrolls on its own, and a click from another page (Pricing,
+  // Blog) mounts Landing fresh with the hash already set. Keying this off
+  // location.hash (rather than a plain window.onload check) covers both
+  // cases: a fresh mount with a hash already in the URL, and a same-page
+  // hash change while already sitting on "/".
+  const location = useLocation();
+  useEffect(() => {
+    if (!location.hash) return;
+    const el = document.querySelector(location.hash);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [location.hash]);
   return (
     <div className="min-h-screen bg-background text-foreground">
       <MarketingHeader />
@@ -203,26 +249,6 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="border-y border-border bg-card/50">
-        <div className="max-w-6xl mx-auto px-6 py-16">
-          <div className="text-center mb-12">
-            <h2 className="text-2xl font-semibold tracking-tight">Everything your trading log should do</h2>
-            <p className="text-muted-foreground mt-2">One workspace for journaling, backtesting, and performance review.</p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {FEATURES.map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="rounded-lg border border-border bg-card p-6">
-                <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center mb-4">
-                  <Icon className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="font-semibold mb-1.5">{title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       <section className="px-6 py-20">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
@@ -237,6 +263,29 @@ export default function Landing() {
                   <h3 className="font-semibold mb-1">{s.title}</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">{s.desc}</p>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-y border-border bg-card/50">
+        <div className="max-w-6xl mx-auto px-6 py-16">
+          <div className="text-center mb-12">
+            <h2 className="text-2xl font-semibold tracking-tight">Everything your trading log should do</h2>
+            <p className="text-muted-foreground mt-2">One workspace for journaling, backtesting, and performance review.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {FEATURES.map(({ icon: Icon, title, desc, pro }) => (
+              <div key={title} id={featureSlug(title)} className="rounded-lg border border-border bg-card p-6 scroll-mt-24">
+                <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center mb-4">
+                  <Icon className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <h3 className="font-semibold">{title}</h3>
+                  {pro && <ProBadge feature={pro} />}
+                </div>
+                <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
               </div>
             ))}
           </div>

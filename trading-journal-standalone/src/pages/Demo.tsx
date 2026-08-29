@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, MousePointerClick } from 'lucide-react';
+import { ArrowRight, MousePointerClick, LayoutDashboard } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
@@ -41,7 +41,22 @@ export default function Demo() {
         <div className="max-w-3xl mx-auto">
           <RuleToggleDemo showTable />
 
-          <div className="rounded-xl border border-primary/30 bg-primary/5 px-6 py-6 mt-8 text-center">
+          <div className="rounded-xl border border-border bg-card px-6 py-6 mt-8 text-center">
+            <LayoutDashboard className="w-6 h-6 text-primary mx-auto mb-2" />
+            <h2 className="font-semibold">Want to poke around the whole app?</h2>
+            <p className="text-sm text-muted-foreground mt-1.5 max-w-md mx-auto">
+              This page only shows the rule-toggle trick. The full sandbox has the real Journal,
+              Performance, Strategies, and Checklists tabs — sample data, no signup, and you can
+              add a trade or strategy of your own to see how it feels.
+            </p>
+            <Link to="/demo/app" className="inline-block mt-5">
+              <Button variant="outline" size="default" className="h-11 px-6 text-base">
+                Explore the full demo <ArrowRight className="w-4 h-4 ml-1.5" />
+              </Button>
+            </Link>
+          </div>
+
+          <div className="rounded-xl border border-primary/30 bg-primary/5 px-6 py-6 mt-6 text-center">
             <h2 className="font-semibold">This is exactly what your own journal does</h2>
             <p className="text-sm text-muted-foreground mt-1.5 max-w-md mx-auto">
               No more "7 different Excel tabs" for every rule variation you want to test — log a

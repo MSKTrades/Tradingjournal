@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Button } from '../../lib/ui/button';
 import { Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trash2, Plus } from 'lucide-react';
-import { Strategy, Condition, CustomColumn, Tag, TagGroup, CONDITION_FIELDS, OPS, WEEKDAYS, TAG_CONDITION_FIELD, TAG_OPS } from '../data/types';
+import { Strategy, Condition, CustomColumn, Tag, TagGroup, CONDITION_FIELDS, OPS, WEEKDAYS, TAG_CONDITION_FIELD, TAG_OPS, FIELD_LABELS } from '../data/types';
 import { useFetch } from '../../lib/api';
 import { useAccount } from '../../lib/accounts';
 
@@ -269,9 +269,31 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
               {form.conditions.map((cond, i) => {
                 const isTag = cond.field === TAG_CONDITION_FIELD;
                 const tagValueOptions = isTag ? optionsForGroup(cond.group) : [];
+                // A condition saved before the "SMC fields became custom
+                // columns" migration (see the note on allFields above) can
+                // carry a legacy field key that's no longer in allFields for
+                // this account/user - e.g. the old `inverse_candles` /
+                // `gap_from_asia_h` names api/summary/index.ts and
+                // api/trades/performance.ts still alias to their current
+                // column names for backward-compat matching. A native
+                // <select> with no matching <option> silently falls back to
+                // displaying whichever option is listed FIRST
+                // (CONDITION_FIELDS[0], "Risk:Reward (R)") even though
+                // cond.field itself is untouched and still matches correctly
+                // server-side - that's the "Risk:Reward keeps popping up in
+                // edit mode" bug. Injecting a synthetic option for exactly
+                // that field (labeled from FIELD_LABELS, which still has the
+                // legacy keys) guarantees the <select> always has a matching
+                // option to actually display, without changing what gets
+                // saved if the condition is left untouched.
+                const knownKeys = new Set(allFields.map(f => f.key));
+                const needsFallbackOption = !isTag && cond.field !== TAG_CONDITION_FIELD && !knownKeys.has(cond.field);
                 return (
                   <div key={i} className="flex flex-col gap-1.5 p-2 rounded-md border border-border/60">
                     <Select value={cond.field} onChange={e => updateConditionField(i, e.target.value)} className="w-full text-xs">
+                      {needsFallbackOption && (
+                        <option value={cond.field}>{FIELD_LABELS[cond.field] ?? cond.field}</option>
+                      )}
                       {allFields.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
                       <option value={TAG_CONDITION_FIELD}>Has Tag</option>
                     </Select>

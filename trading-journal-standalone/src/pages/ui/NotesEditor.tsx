@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
 import { Loader2, Trash2, X, ZoomIn } from 'lucide-react';
 import { NoteBlock } from '../data/types';
+import { isDemoMode } from '../../lib/demoMode';
 
 type Props = {
   blocks: NoteBlock[];
@@ -79,6 +80,17 @@ export default function NotesEditor({ blocks, onChange }: Props) {
 
   async function insertImageAfter(i: number, file: File) {
     if (uploading) return;
+    // The demo's fake backend (demoBackend.ts) intercepts api.ts's
+    // request() - but this upload goes straight through @vercel/blob's own
+    // client, bypassing that entirely and hitting the REAL /api/upload
+    // function even inside the demo sandbox. There's no fake blob store to
+    // redirect it to, so screenshots are simply not offered in the demo
+    // rather than either uploading real files from an anonymous visitor or
+    // silently failing with a confusing Blob-storage error message.
+    if (isDemoMode()) {
+      setUploadError("Screenshots aren't available in the demo — sign up free to attach chart screenshots to your trades.");
+      return;
+    }
     setUploadError(null);
     setUploading(true);
 

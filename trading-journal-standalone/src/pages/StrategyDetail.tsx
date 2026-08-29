@@ -14,6 +14,7 @@ import {
   StrategyResult, Trade, CustomColumn, Checklist, Condition, FIELD_LABELS, WEEKDAYS, TAG_CONDITION_FIELD, fmtMoney, plColor,
 } from './data/types';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
+import { isDemoMode, DEMO_BASE } from '../lib/demoMode';
 
 function condLabel(c: Condition): string {
   if (c.field === TAG_CONDITION_FIELD) {
@@ -130,7 +131,7 @@ export default function StrategyDetail() {
   if (!strategy) {
     return (
       <div>
-        <Button variant="outline" size="sm" onClick={() => navigate('/')}>
+        <Button variant="outline" size="sm" onClick={() => navigate(isDemoMode() ? DEMO_BASE : '/')}>
           <ArrowLeft className="w-4 h-4 mr-1" /> Back to Summary
         </Button>
         <div className="text-center py-20 text-muted-foreground">
@@ -142,7 +143,7 @@ export default function StrategyDetail() {
 
   return (
     <div>
-      <Button variant="outline" size="sm" className="mb-4" onClick={() => navigate('/')}>
+      <Button variant="outline" size="sm" className="mb-4" onClick={() => navigate(isDemoMode() ? DEMO_BASE : '/')}>
         <ArrowLeft className="w-4 h-4 mr-1" /> Back to Summary
       </Button>
 

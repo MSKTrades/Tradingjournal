@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
+import { isDemoMode } from './demoMode';
+import { handleDemoRequest } from './demoBackend';
 
 const BASE = '/api';
 
 async function request(method: string, url: string, body?: unknown) {
+  // The public, no-signup full demo (/demo/app/*) runs every real page
+  // completely unmodified against an in-memory fake backend instead of the
+  // real API - this is the one place that swap happens. See
+  // src/lib/demoMode.ts and src/lib/demoBackend.ts for why and how.
+  if (isDemoMode()) {
+    return handleDemoRequest(method, url, body);
+  }
   const res = await fetch(BASE + url, {
     method,
     headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,

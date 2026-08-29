@@ -107,6 +107,27 @@ function AuthedShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** The public, no-signup "full demo" at /demo/app/* - the exact same
+ * Summary/Journal/Performance/Strategies/Checklists page components as the
+ * real, logged-in app, unmodified, wired to an in-memory fake backend
+ * instead of the real API (see src/lib/demoMode.ts + demoBackend.ts, and
+ * api.ts's request() for the one interception point that makes this work).
+ * AccountProvider is the real one - its GET /accounts call gets routed to
+ * the fake backend automatically, same as every other call any of these
+ * pages make - so there's no separate "demo account context" to keep in
+ * sync with the real one. Layout's demoMode prop swaps in the sandbox nav
+ * (no Backtest/Challenge Simulator - the fake backend doesn't cover those)
+ * and the "you're in a demo" banner + Exit Demo button in place of Log out.
+ * Deliberately NOT wrapped in Protected - like Landing/Pricing/Blog, this
+ * needs no login at all. */
+function DemoShell({ children }: { children: React.ReactNode }) {
+  return (
+    <AccountProvider>
+      <Layout demoMode>{children}</Layout>
+    </AccountProvider>
+  );
+}
+
 /** Gate for the Smart Money Concepts Analysis page - restricted to just the
  * admin account per an explicit, repeated instruction ("keep it to my
  * account, don't release to anyone else"). Unlike Backtest (which now has
@@ -135,6 +156,15 @@ export default function App() {
                 (email capture, see SessionClockTool.tsx). */}
             <Route path="/demo" element={<Demo />} />
             <Route path="/tools/session-clock" element={<SessionClockTool />} />
+            {/* The full multi-tab sandbox - see DemoShell above. Every one
+                of these renders the real authenticated page component, just
+                inside DemoShell instead of AuthedShell+Protected. */}
+            <Route path="/demo/app" element={<DemoShell><Summary /></DemoShell>} />
+            <Route path="/demo/app/journal" element={<DemoShell><Journal /></DemoShell>} />
+            <Route path="/demo/app/performance" element={<DemoShell><Performance /></DemoShell>} />
+            <Route path="/demo/app/strategies" element={<DemoShell><Strategies /></DemoShell>} />
+            <Route path="/demo/app/strategies/:id" element={<DemoShell><StrategyDetail /></DemoShell>} />
+            <Route path="/demo/app/checklists" element={<DemoShell><Checklists /></DemoShell>} />
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<BlogPost />} />
             {/* Public, unauthenticated read-only view of an account's

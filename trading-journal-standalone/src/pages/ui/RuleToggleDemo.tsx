@@ -29,7 +29,7 @@ type DemoTrade = {
   date: string; // ISO date
   weekday: number; // 0=Sun..6=Sat
   session: 'London' | 'New York' | 'Asia' | 'London/NY Overlap';
-  cisd: boolean; // CISD confirmed before entry
+  bos: boolean; // Break of structure confirmed before entry
   asiaSwept: boolean; // Asia session liquidity swept before the move
   rr: number; // realized result in R (positive = win, negative = loss)
 };
@@ -50,11 +50,11 @@ function mulberry32(seed: number) {
 const SESSION_OPTIONS: DemoTrade['session'][] = ['London', 'New York', 'Asia', 'London/NY Overlap'];
 
 // Trades are generated with real (if simplified) correlations baked in -
-// CISD confirmation, an Asia sweep, and the London session each genuinely
-// raise the odds of a winner here, and Monday genuinely hurts - so toggling
-// the rules on the page tells an honest, coherent story instead of moving
-// randomly. This is a sample account, not real trading advice or a
-// promised result.
+// a confirmed break of structure (BOS), an Asia sweep, and the London
+// session each genuinely raise the odds of a winner here, and Monday
+// genuinely hurts - so toggling the rules on the page tells an honest,
+// coherent story instead of moving randomly. This is a sample account, not
+// real trading advice or a promised result.
 function generateDemoTrades(): DemoTrade[] {
   const rand = mulberry32(20260214);
   const trades: DemoTrade[] = [];
@@ -67,11 +67,11 @@ function generateDemoTrades(): DemoTrade[] {
       // 1-2 trades most weekdays, occasionally none.
       const tradesToday = rand() < 0.7 ? 1 : (rand() < 0.5 ? 0 : 2);
       for (let i = 0; i < tradesToday && trades.length < 64; i++) {
-        const cisd = rand() < 0.55;
+        const bos = rand() < 0.55;
         const asiaSwept = rand() < 0.45;
         const session = SESSION_OPTIONS[Math.floor(rand() * SESSION_OPTIONS.length)];
         let winProb = 0.40;
-        if (cisd) winProb += 0.18;
+        if (bos) winProb += 0.18;
         if (asiaSwept) winProb += 0.10;
         if (session === 'London') winProb += 0.08;
         if (weekday === 1) winProb -= 0.16; // Monday chop
@@ -83,7 +83,7 @@ function generateDemoTrades(): DemoTrade[] {
           date: cursor.toISOString().slice(0, 10),
           weekday,
           session,
-          cisd,
+          bos,
           asiaSwept,
           rr,
         });
@@ -94,31 +94,31 @@ function generateDemoTrades(): DemoTrade[] {
   return trades;
 }
 
-type RuleKey = 'cisd' | 'asiaSwept' | 'noMonday' | 'londonOnly';
+type RuleKey = 'bos' | 'asiaSwept' | 'noMonday' | 'londonOnly';
 
 const RULES: { key: RuleKey; label: string; shortLabel: string }[] = [
-  { key: 'cisd', label: 'CISD confirmed before entry', shortLabel: 'CISD confirmed' },
+  { key: 'bos', label: 'BOS confirmed before entry', shortLabel: 'BOS confirmed' },
   { key: 'asiaSwept', label: 'Asia session liquidity swept', shortLabel: 'Asia swept' },
   { key: 'noMonday', label: 'Skip Mondays', shortLabel: 'No Monday' },
   { key: 'londonOnly', label: 'London session only', shortLabel: 'London only' },
 ];
 
-const NO_RULES: Record<RuleKey, boolean> = { cisd: false, asiaSwept: false, noMonday: false, londonOnly: false };
+const NO_RULES: Record<RuleKey, boolean> = { bos: false, asiaSwept: false, noMonday: false, londonOnly: false };
 
 // The sequence an autoplaying demo steps through - each one strictly adds a
 // rule on top of the last, so the numbers visibly climb as more of the
 // playbook's real rules get applied, ending on "every rule at once" before
 // looping back to the raw, unfiltered baseline.
 const AUTOPLAY_STEPS: Record<RuleKey, boolean>[] = [
-  { cisd: false, asiaSwept: false, noMonday: false, londonOnly: false },
-  { cisd: true, asiaSwept: false, noMonday: false, londonOnly: false },
-  { cisd: true, asiaSwept: true, noMonday: false, londonOnly: false },
-  { cisd: true, asiaSwept: true, noMonday: true, londonOnly: true },
+  { bos: false, asiaSwept: false, noMonday: false, londonOnly: false },
+  { bos: true, asiaSwept: false, noMonday: false, londonOnly: false },
+  { bos: true, asiaSwept: true, noMonday: false, londonOnly: false },
+  { bos: true, asiaSwept: true, noMonday: true, londonOnly: true },
 ];
 
 function applyRules(trades: DemoTrade[], active: Record<RuleKey, boolean>): DemoTrade[] {
   return trades.filter(t => {
-    if (active.cisd && !t.cisd) return false;
+    if (active.bos && !t.bos) return false;
     if (active.asiaSwept && !t.asiaSwept) return false;
     if (active.noMonday && t.weekday === 1) return false;
     if (active.londonOnly && t.session !== 'London') return false;
@@ -163,7 +163,10 @@ export default function RuleToggleDemo({
 
   useEffect(() => {
     if (!autoplay) return;
-    const id = setInterval(() => setAutoStep(s => (s + 1) % AUTOPLAY_STEPS.length), 3200);
+    // Was 3200ms - felt sluggish for a page visitor just skimming, so this
+    // now advances roughly twice as fast. Still slow enough that the number
+    // change (and which rule chip just lit up) is readable, not a blur.
+    const id = setInterval(() => setAutoStep(s => (s + 1) % AUTOPLAY_STEPS.length), 1600);
     return () => clearInterval(id);
   }, [autoplay]);
 
@@ -178,7 +181,7 @@ export default function RuleToggleDemo({
         {!compact && (
           <div className="flex items-center gap-2 mb-1">
             <Sparkles className="w-4 h-4 text-primary" />
-            <p className="text-sm font-semibold">Sample account: London Reversal _ GU</p>
+            <p className="text-sm font-semibold">Sample account: London Reversal</p>
           </div>
         )}
         <p className="text-xs text-muted-foreground mb-4">
@@ -273,7 +276,7 @@ export default function RuleToggleDemo({
                 <tr className="border-b border-border bg-muted/30 text-muted-foreground">
                   <th className="text-left font-medium py-2 px-3">Date</th>
                   <th className="text-left font-medium py-2 px-3">Session</th>
-                  <th className="text-center font-medium py-2 px-3">CISD</th>
+                  <th className="text-center font-medium py-2 px-3">BOS</th>
                   <th className="text-center font-medium py-2 px-3">Asia Swept</th>
                   <th className="text-right font-medium py-2 px-3">Result</th>
                 </tr>
@@ -283,7 +286,7 @@ export default function RuleToggleDemo({
                   <tr key={t.id} className="border-b border-border last:border-b-0">
                     <td className="py-2 px-3 text-muted-foreground">{t.date}</td>
                     <td className="py-2 px-3">{t.session}</td>
-                    <td className="py-2 px-3 text-center">{t.cisd ? '✓' : '—'}</td>
+                    <td className="py-2 px-3 text-center">{t.bos ? '✓' : '—'}</td>
                     <td className="py-2 px-3 text-center">{t.asiaSwept ? '✓' : '—'}</td>
                     <td className={`py-2 px-3 text-right font-medium tabular-nums ${t.rr > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
                       {t.rr > 0 ? '+' : ''}{t.rr}R
