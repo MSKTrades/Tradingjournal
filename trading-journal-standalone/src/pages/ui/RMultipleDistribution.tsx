@@ -64,7 +64,19 @@ export default function RMultipleDistribution({ trades }: { trades: Trade[] }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={0} />
                 <YAxis tick={{ fontSize: 10 }} width={30} allowDecimals={false} />
-                <Tooltip contentStyle={{ fontSize: 11 }} formatter={(v: number) => [v, 'Trades']} />
+                {/* Default recharts Tooltip cursor is a flat, unstyled gray
+                    box spanning the FULL plot height at whatever category
+                    you're hovering - normally hidden behind the real bar,
+                    but a bucket with 0 trades has no bar to hide it, so
+                    hovering an empty bucket showed a full-height gray block
+                    that looked like a wrongly-colored/miscounted bar. Toned
+                    down to a faint tint instead of removed outright, so
+                    hover still gives *some* feedback on empty buckets. */}
+                <Tooltip
+                  contentStyle={{ fontSize: 11 }}
+                  formatter={(v: number) => [v, 'Trades']}
+                  cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }}
+                />
                 <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
                 <Bar dataKey="count" radius={[3, 3, 0, 0]}>
                   {data.map((d, i) => <Cell key={d.label} fill={BUCKET_COLORS[i]} />)}

@@ -82,6 +82,7 @@ export default function HourOfDayPerformance({ trades }: { trades: Trade[] }) {
                       `${item.payload.winRate}% win rate (${item.payload.count} trade${item.payload.count !== 1 ? 's' : ''}), ${fmtMoney(item.payload.totalGL)} net`,
                       'Hour',
                     ]}
+                    cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }}
                   />
                   <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
                   <Bar dataKey="winRate" radius={[3, 3, 0, 0]}>

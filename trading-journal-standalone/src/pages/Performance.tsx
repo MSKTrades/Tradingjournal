@@ -849,7 +849,11 @@ export default function Performance() {
                           width={55}
                           domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
                         />
-                        <Tooltip contentStyle={{ fontSize: 11 }} labelFormatter={(v) => fmtPeriod(v as string, true)} />
+                        <Tooltip
+                          contentStyle={{ fontSize: 11 }}
+                          labelFormatter={(v) => fmtPeriod(v as string, true)}
+                          cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }}
+                        />
                         <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
                         <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
                           {monthly.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
@@ -903,7 +907,7 @@ export default function Performance() {
                           width={55}
                           domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
                         />
-                        <Tooltip contentStyle={{ fontSize: 11 }} />
+                        <Tooltip contentStyle={{ fontSize: 11 }} cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }} />
                         <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
                         <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
                           {yearlyChartData.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
@@ -952,7 +956,7 @@ export default function Performance() {
                           width={55}
                           domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
                         />
-                        <Tooltip contentStyle={{ fontSize: 11 }} />
+                        <Tooltip contentStyle={{ fontSize: 11 }} cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }} />
                         <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
                         <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
                           {weekday.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
@@ -1011,7 +1015,7 @@ export default function Performance() {
                               width={55}
                               domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
                             />
-                            <Tooltip contentStyle={{ fontSize: 11 }} />
+                            <Tooltip contentStyle={{ fontSize: 11 }} cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }} />
                             <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
                             <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
                               {session.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
@@ -1080,7 +1084,7 @@ export default function Performance() {
                               width={55}
                               domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
                             />
-                            <Tooltip contentStyle={{ fontSize: 11 }} />
+                            <Tooltip contentStyle={{ fontSize: 11 }} cursor={{ fill: 'hsl(var(--muted-foreground))', fillOpacity: 0.08 }} />
                             <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
                             <Bar dataKey="total_gain" radius={[3, 3, 0, 0]} fillOpacity={0.85}>
                               {hourly.map((d, i) => <Cell key={i} fill={d.total_gain >= 0 ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-1))'} />)}
