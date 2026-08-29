@@ -20,19 +20,28 @@ import HourOfDayPerformance from './ui/HourOfDayPerformance';
 // Y-axis domain for the P/L bar charts below (Monthly/Yearly/Weekday/
 // Session/Hour) - always anchored at $0 (see the earlier fix: without this,
 // a single data point zooms the axis in tight around just that value with
-// no sense of where zero is), PLUS a 25% padding margin beyond whichever
-// side actually has data. That padding is the part that was still missing:
+// no sense of where zero is), PLUS a padding margin beyond whichever side
+// actually has data. That padding is the part that was still missing:
 // zero-anchoring alone means a chart with only one bar has a domain that
 // exactly matches that bar's own value, so the single bar still fills the
 // entire plot top-to-bottom - technically correct, but reads as "still
 // huge" exactly like the bug this was meant to fix. The padding leaves
 // visible headroom above/below even a single bar, so it reads as a
 // normal-sized bar in a chart rather than a bar that's maxed out the axis.
+// PADDING_FACTOR bumped from 1.25 (25% headroom) to 1.65 (65% headroom) per
+// explicit request - confirmed the 25% version WAS rendering correctly
+// (verified from a full, uncropped screenshot showing real empty space
+// below the bar), the ask was specifically for more visual breathing room
+// on a single-bar month/session, not a bug fix. Note this is a genuine
+// trade-off, not a free win: more padding shrinks how "full" any bar looks
+// (including once there are several bars to compare), so if a future month
+// with a big swing ever looks unexpectedly short, this constant is why.
+const PADDING_FACTOR = 1.65;
 function zeroAnchoredMin(dataMin: number): number {
-  return dataMin < 0 ? dataMin * 1.25 : 0;
+  return dataMin < 0 ? dataMin * PADDING_FACTOR : 0;
 }
 function zeroAnchoredMax(dataMax: number): number {
-  return dataMax > 0 ? dataMax * 1.25 : 0;
+  return dataMax > 0 ? dataMax * PADDING_FACTOR : 0;
 }
 
 // --- TYPES ---
