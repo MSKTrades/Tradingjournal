@@ -484,12 +484,29 @@ CREATE INDEX IF NOT EXISTS idx_trades_tags ON trades USING GIN (tags);
 -- cascade-delete with their group; a trade's selections are stored by
 -- group/option NAME (see trades.tag_selections below), same by-name-not-id
 -- tradeoff already accepted for the flat tags table and custom_columns.
+-- account_ids works exactly like strategies.account_ids / checklists.
+-- account_ids ([] = every account, including new ones; a non-empty array
+-- restricts a group to just those accounts). Added after tag groups had
+-- been in use for a while as a single trader's global category list (e.g.
+-- detailed per-timeframe price-level groups built for one specific
+-- account's note-taking style) - without this, every tag group a user ever
+-- created showed up on every account they added afterward too, with no way
+-- to keep a new account's tag list to just the broadly-applicable groups
+-- (HTF Bias, Execution Mistakes) instead of every hyper-specific one built
+-- for a different account.
 CREATE TABLE IF NOT EXISTS tag_groups (
   id          SERIAL PRIMARY KEY,
   name        TEXT NOT NULL UNIQUE,
   sort_order  INTEGER NOT NULL DEFAULT 0,
+  account_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Upgrade an existing database in place: every tag group that already
+-- exists gets the default '[]' (applies to every account, same as before
+-- this column existed), so nothing already built stops showing up anywhere
+-- until deliberately restricted via the "Applies To" control.
+ALTER TABLE tag_groups ADD COLUMN IF NOT EXISTS account_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS tag_group_options (
   id          SERIAL PRIMARY KEY,

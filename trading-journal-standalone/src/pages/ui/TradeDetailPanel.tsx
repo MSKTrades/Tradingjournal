@@ -242,7 +242,12 @@ export default function TradeDetailPanel({
   const [editingColId, setEditingColId] = useState<number | null>(null);
   const [editingColName, setEditingColName] = useState('');
   const [renamingCol, setRenamingCol] = useState(false);
-  const { data: rawTagGroups, refetch: refetchTagGroups } = useFetch<TagGroup[]>('/columns?resource=tag_groups');
+  // Scoped to the active account, same as checklists' own grading picker -
+  // a tag group's account_ids ('[]' = every account) decides whether it
+  // shows up here. See api/columns.ts's getTagGroups for the matching
+  // filter. Refetches automatically when the active account changes since
+  // the URL itself changes (useFetch's effect deps include the url).
+  const { data: rawTagGroups, refetch: refetchTagGroups } = useFetch<TagGroup[]>(`/columns?resource=tag_groups&account_id=${activeAccountId ?? ''}`);
   const tagGroups: TagGroup[] = rawTagGroups ?? [];
 
   // Guards the SL-distance auto-calc effect below against firing the moment
@@ -489,6 +494,16 @@ export default function TradeDetailPanel({
         return { ...f, tag_selections: { ...f.tag_selections, [groupName]: current.filter(v => v !== optionName) } };
       });
     }).catch(() => {});
+  }
+  // Restricting a group to specific accounts (or back to "All accounts")
+  // via TagGroupsPicker's new "Applies To" control. Since the tag groups
+  // list is already scoped to the active account (see the useFetch call
+  // above), narrowing a group's accounts to a set that no longer includes
+  // the one currently open can make it disappear from this very list right
+  // after refetching - that's the intended effect (the whole point of
+  // scoping), not a bug.
+  function handleUpdateTagGroupAccounts(groupId: number, accountIds: number[]) {
+    api.put('/columns?resource=tag_groups', { id: groupId, account_ids: accountIds }).then(() => refetchTagGroups()).catch(() => {});
   }
 
   async function handleAddField() {
@@ -950,6 +965,8 @@ export default function TradeDetailPanel({
                 onCreateOption={handleCreateTagGroupOption}
                 onDeleteGroup={handleDeleteTagGroup}
                 onDeleteOption={handleDeleteTagGroupOption}
+                accounts={accounts}
+                onUpdateGroupAccounts={handleUpdateTagGroupAccounts}
               />
             </Section>
           </div>

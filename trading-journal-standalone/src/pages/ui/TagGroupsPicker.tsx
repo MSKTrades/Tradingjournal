@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, X, Trash2 } from 'lucide-react';
+import { Plus, X, Trash2, Layers } from 'lucide-react';
 import { Input } from '../../lib/ui/form';
 import { TagGroup } from '../data/types';
 
@@ -17,6 +17,14 @@ type Props = {
   // trigger for it.
   onDeleteGroup?: (groupId: number, groupName: string) => void;
   onDeleteOption?: (optionId: number, groupName: string, optionName: string) => void;
+  // Lets a group be restricted to specific accounts instead of showing up
+  // on every one - see the "Applies To" control below. `accounts` is only
+  // needed to render the picker's chip list; both are optional so a caller
+  // that hasn't wired multi-account scoping up yet (or a user with just one
+  // account, where this control has nothing useful to do) keeps working
+  // exactly as before.
+  accounts?: { id: number; name: string }[];
+  onUpdateGroupAccounts?: (groupId: number, accountIds: number[]) => void;
 };
 
 const FALLBACK_COLOR = '#f59e0b';
@@ -225,6 +233,74 @@ function GroupOptionPicker({ group, selected, onToggle, onCreate, onDelete }: {
   );
 }
 
+// "Applies To" control for one group - lets you restrict a tag group (e.g.
+// a hyper-specific price-level group built for one particular account) to
+// just the account(s) it actually matters for, instead of it showing up
+// everywhere including brand-new accounts that have nothing to do with it.
+// Same chip-toggle pattern as StrategyDialog's "Applies To" picker and this
+// panel's own "add to other accounts" control for custom fields, just
+// rendered as a popover (via the same positioning hook GroupOptionPicker
+// above uses) since this list doesn't have room for a full inline picker
+// per row.
+function GroupAccountsPicker({ accountIds, accounts, onChange }: {
+  accountIds: number[];
+  accounts: { id: number; name: string }[];
+  onChange: (next: number[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverStyle = useSmartPopoverPosition(open, triggerRef);
+  const allAccounts = accountIds.length === 0;
+
+  function toggle(id: number) {
+    onChange(accountIds.includes(id) ? accountIds.filter(a => a !== id) : [...accountIds, id]);
+  }
+
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(p => !p)}
+        title="Which accounts this tag group applies to"
+        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground shrink-0"
+      >
+        <Layers className="w-2.5 h-2.5" />
+        {allAccounts ? 'All accounts' : `${accountIds.length} account${accountIds.length === 1 ? '' : 's'}`}
+      </button>
+      {open && createPortal(
+        <>
+          <div className="fixed inset-0 z-[55]" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-[60] w-52 rounded-md border border-border bg-popover text-popover-foreground shadow-lg p-2 flex flex-col gap-1"
+            style={popoverStyle ?? undefined}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-1 pb-0.5">Applies to</p>
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className={`px-2 py-1 rounded text-xs text-left transition-colors ${allAccounts ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
+            >
+              All accounts
+            </button>
+            {accounts.map(a => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => toggle(a.id)}
+                className={`px-2 py-1 rounded text-xs text-left truncate transition-colors ${!allAccounts && accountIds.includes(a.id) ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}
+              >
+                {a.name}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body
+      )}
+    </div>
+  );
+}
+
 // FX Replay-style tag GROUPS: a fixed list of your own categories (e.g.
 // "Confidence Level", "SL Levels"), each with its own set of selectable
 // sub-tags. Unlike the flat Tags picker above it (free-form single-level
@@ -256,7 +332,7 @@ const HTF_BIAS_STARTER_OPTIONS = ['Bullish', 'Bearish', 'Neutral / Ranging'];
 const HTF_BIAS_GROUP_NAME = 'HTF Bias';
 const HTF_BIAS_GROUP_RE = /htf.*bias|bias/i;
 
-export default function TagGroupsPicker({ groups, selections, onChange, onCreateGroup, onCreateOption, onDeleteGroup, onDeleteOption }: Props) {
+export default function TagGroupsPicker({ groups, selections, onChange, onCreateGroup, onCreateOption, onDeleteGroup, onDeleteOption, accounts, onUpdateGroupAccounts }: Props) {
   const [addingGroup, setAddingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
 
@@ -351,19 +427,28 @@ export default function TagGroupsPicker({ groups, selections, onChange, onCreate
         const selected = selections[group.name] ?? [];
         return (
           <div key={group.id} className="flex items-start justify-between gap-3 py-1 border-b border-border/50 last:border-0">
-            <span className="flex items-center gap-1 w-32 shrink-0 pt-0.5">
-              <span className="text-xs font-bold text-foreground truncate" title={group.name}>{group.name}</span>
-              {onDeleteGroup && (
-                <button
-                  type="button"
-                  onClick={() => onDeleteGroup(group.id, group.name)}
-                  title={`Delete "${group.name}" group`}
-                  className="shrink-0 text-muted-foreground hover:text-destructive opacity-60 hover:opacity-100"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
+            <div className="flex flex-col gap-0.5 w-32 shrink-0 pt-0.5">
+              <span className="flex items-center gap-1">
+                <span className="text-xs font-bold text-foreground truncate" title={group.name}>{group.name}</span>
+                {onDeleteGroup && (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteGroup(group.id, group.name)}
+                    title={`Delete "${group.name}" group`}
+                    className="shrink-0 text-muted-foreground hover:text-destructive opacity-60 hover:opacity-100"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
+              </span>
+              {onUpdateGroupAccounts && accounts && accounts.length > 1 && (
+                <GroupAccountsPicker
+                  accountIds={group.account_ids ?? []}
+                  accounts={accounts}
+                  onChange={(next) => onUpdateGroupAccounts(group.id, next)}
+                />
               )}
-            </span>
+            </div>
             <div className="flex-1 flex flex-wrap items-center gap-1.5">
               {selected.map(name => {
                 const color = colorFor(group, name);

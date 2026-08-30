@@ -229,7 +229,7 @@ function buildSeed(): Store {
   const execGroupId = nextId();
   const tagGroups: TagGroup[] = [
     {
-      id: htfGroupId, name: HTF_BIAS_GROUP, sort_order: 0,
+      id: htfGroupId, name: HTF_BIAS_GROUP, sort_order: 0, account_ids: [],
       options: [
         { id: nextId(), group_id: htfGroupId, name: 'Bullish', color: colorForIndex(2), sort_order: 0 },
         { id: nextId(), group_id: htfGroupId, name: 'Bearish', color: colorForIndex(7), sort_order: 1 },
@@ -237,7 +237,7 @@ function buildSeed(): Store {
       ],
     },
     {
-      id: execGroupId, name: EXEC_MISTAKES_GROUP, sort_order: 1,
+      id: execGroupId, name: EXEC_MISTAKES_GROUP, sort_order: 1, account_ids: [],
       options: [
         { id: nextId(), group_id: execGroupId, name: 'Moved Stop Loss', color: colorForIndex(7), sort_order: 0 },
         { id: nextId(), group_id: execGroupId, name: 'Chased Entry', color: colorForIndex(4), sort_order: 1 },
@@ -901,11 +901,20 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
   // --- /columns (custom fields + tags + tag groups) -------------------
   if (path === '/columns') {
     if (method === 'GET' && resource === 'tags') return store.tags;
-    if (method === 'GET' && resource === 'tag_groups') return store.tagGroups;
+    if (method === 'GET' && resource === 'tag_groups') {
+      // Mirrors api/columns.ts's getTagGroups filter, though the demo only
+      // ever has one account (multi-account is Pro-only, disabled here same
+      // as for real users) so this never actually excludes anything today.
+      const accountIdParam = params.get('account_id');
+      const filterId = accountIdParam ? Number(accountIdParam) : null;
+      return filterId
+        ? store.tagGroups.filter(g => g.account_ids.length === 0 || g.account_ids.includes(filterId))
+        : store.tagGroups;
+    }
     if (method === 'GET') return store.customColumns.filter(c => c.account_id === accountId);
     if (method === 'POST' && resource === 'tag_groups') {
       checkAndConsumeCap(store, 'tagGroups');
-      const g: TagGroup = { id: nextId(), name: b.name, sort_order: store.tagGroups.length, options: [] };
+      const g: TagGroup = { id: nextId(), name: b.name, sort_order: store.tagGroups.length, account_ids: b.account_ids ?? [], options: [] };
       store.tagGroups.push(g);
       return g;
     }
@@ -925,6 +934,13 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
       };
       store.customColumns.push(col);
       return col;
+    }
+    if (method === 'PUT' && resource === 'tag_groups') {
+      const group = store.tagGroups.find(g => g.id === b.id);
+      if (!group) throw new Error('Tag group not found');
+      if (b.name !== undefined) group.name = b.name;
+      if (b.account_ids !== undefined) group.account_ids = b.account_ids;
+      return { id: group.id };
     }
     if (method === 'PUT') {
       const col = store.customColumns.find(c => c.id === b.id);

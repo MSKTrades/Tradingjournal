@@ -201,10 +201,14 @@ export type TagGroupOption = {
 
 // A user-defined tag category ("Confidence Level", "SL Levels", ...) with
 // its own set of selectable sub-tags - FX Replay's "tag groups" pattern.
+// account_ids works exactly like Strategy/Checklist's own account_ids: []
+// means every account (including new ones), a non-empty array restricts
+// this group to just those accounts.
 export type TagGroup = {
   id: number;
   name: string;
   sort_order: number;
+  account_ids: number[];
   options: TagGroupOption[];
 };
 
