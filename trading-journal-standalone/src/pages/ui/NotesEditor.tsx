@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
-import { Clock3, Loader2, Plus, Trash2, X, ZoomIn } from 'lucide-react';
+import { Clock3, Loader2, MessageSquare, Plus, Trash2, X, ZoomIn } from 'lucide-react';
 import { NoteBlock, Timeframe, TIMEFRAME_PRESETS } from '../data/types';
 import { isDemoMode } from '../../lib/demoMode';
 
@@ -88,6 +88,55 @@ function TimeframePicker({ value, options, onPick, onClose }: {
   );
 }
 
+// Small popover for writing a free-text note about one specific screenshot
+// - "what happened / what you were thinking on this chart". Same badge +
+// popover, click-outside-to-close shape as TimeframePicker above (that's
+// the explicit ask - comments should work "the same as what we're doing
+// with TFs"), but it doesn't auto-open on paste the way the timeframe
+// picker does: stacking two auto-opening popovers on every pasted
+// screenshot would be more clutter than help, and a comment is usually
+// written after you've actually looked at the chart for a moment, not in
+// the same instant you paste it. The badge is always there as the
+// invitation instead. Saves as you type (blurring/closing just dismisses
+// the popover, nothing is lost) rather than needing an explicit Save
+// button - one less click for what's meant to be a quick, low-friction note.
+function CommentPopover({ value, onChange, onClose }: {
+  value: string | undefined;
+  onChange: (v: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [onClose]);
+
+  useEffect(() => { textareaRef.current?.focus(); }, []);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute bottom-9 left-1.5 z-10 w-64 rounded-lg border border-border bg-popover shadow-lg p-2"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <p className="text-[11px] font-medium text-muted-foreground px-1 pb-1.5">Notes on this chart</p>
+      <textarea
+        ref={textareaRef}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="What happened here? What worked or didn't…"
+        rows={3}
+        className="w-full resize-none bg-transparent border border-border rounded-md px-2 py-1.5 text-xs outline-none focus:border-primary placeholder:text-muted-foreground"
+      />
+    </div>
+  );
+}
+
 function AutoTextarea({ value, onChange, onPasteImage, placeholder, focused }: {
   value: string;
   onChange: (v: string) => void;
@@ -149,6 +198,10 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
   // extra click (see insertImageAfter), and whenever the badge itself is
   // clicked to change an already-set timeframe.
   const [openTfFor, setOpenTfFor] = useState<number | null>(null);
+  // Which image block's comment popover is open, if any - same idea as
+  // openTfFor but never set automatically (see CommentPopover's comment on
+  // why it doesn't auto-open on paste).
+  const [openCommentFor, setOpenCommentFor] = useState<number | null>(null);
 
   // Saved custom timeframes merged with the built-in presets, deduped and
   // case-insensitively - so once someone's saved "2H" it shows up in the
@@ -238,9 +291,13 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
   }
 
   function setImageTimeframe(i: number, tf: string) {
-    setBlock(i, { ...(normalized[i] as { type: 'image'; url: string; timeframe?: string }), timeframe: tf });
+    setBlock(i, { ...(normalized[i] as { type: 'image'; url: string; timeframe?: string; comment?: string }), timeframe: tf });
     onAddTimeframe?.(tf);
     setOpenTfFor(null);
+  }
+
+  function setImageComment(i: number, comment: string) {
+    setBlock(i, { ...(normalized[i] as { type: 'image'; url: string; timeframe?: string; comment?: string }), comment });
   }
 
   return (
@@ -321,6 +378,28 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
                 options={tfOptions}
                 onPick={(tf) => setImageTimeframe(i, tf)}
                 onClose={() => setOpenTfFor(null)}
+              />
+            )}
+            {/* Comment badge - bottom-left, same "always visible once set,
+                otherwise only on hover" treatment as the timeframe badge
+                above (just the opposite corner, so the two never collide). */}
+            <button
+              onClick={() => setOpenCommentFor(openCommentFor === i ? null : i)}
+              title={block.comment}
+              className={`absolute bottom-1.5 left-1.5 h-7 max-w-[85%] px-2 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
+                block.comment
+                  ? 'bg-black/60 text-white hover:bg-black/80'
+                  : 'bg-black/60 text-white/80 hover:bg-black/80 opacity-0 group-hover:opacity-100'
+              }`}
+            >
+              <MessageSquare className="w-3 h-3 shrink-0" />
+              <span className="truncate">{block.comment || 'Add comment'}</span>
+            </button>
+            {openCommentFor === i && (
+              <CommentPopover
+                value={block.comment}
+                onChange={(v) => setImageComment(i, v)}
+                onClose={() => setOpenCommentFor(null)}
               />
             )}
           </div>

@@ -1,9 +1,9 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../lib/ui/button';
 import { Badge, Checkbox } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
-import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, FileUp, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Plus, Columns, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ArrowLeft, FileUp, Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import TradeDetailPanel, { TradePayload } from './ui/TradeDetailPanel';
@@ -480,6 +480,13 @@ export default function Journal() {
   const location = useLocation();
   const navigate = useNavigate();
   const openedFromLinkRef = useRef<string | null>(null);
+  // Once someone arrives here via a Vision Board "Open in Journal" link,
+  // keep a "Back to Vision Board" link visible in the header for the rest
+  // of this visit to the page - not just while the deep-linked trade's
+  // panel happens to be open. They may close that panel to look around the
+  // table a bit before heading back, and the way in shouldn't disappear the
+  // moment they do.
+  const [fromVisionBoard, setFromVisionBoard] = useState(false);
   useEffect(() => {
     const tradeParam = new URLSearchParams(location.search).get('trade');
     if (!tradeParam || tradeParam === openedFromLinkRef.current || trades.length === 0) return;
@@ -488,6 +495,7 @@ export default function Journal() {
     openedFromLinkRef.current = tradeParam;
     setEditTrade(match);
     setDialogOpen(true);
+    setFromVisionBoard(true);
     // location.pathname, not a hardcoded '/journal' - this same component
     // also renders at /demo/app/journal inside the demo sandbox (see
     // DemoShell in App.tsx), and a hardcoded real-app path would bounce a
@@ -495,6 +503,13 @@ export default function Journal() {
     // the query string in place.
     navigate(location.pathname, { replace: true });
   }, [location.search, location.pathname, trades, navigate]);
+  // Vision Board only exists as a real-app route (not in the demo sandbox -
+  // see Layout.tsx's DEMO_HIDDEN), so fromVisionBoard can only ever be true
+  // when this page is rendered at the real /journal path - but deriving the
+  // link from the current pathname rather than hardcoding '/vision-board'
+  // costs nothing and matches the same "don't assume the route prefix"
+  // fix already made for the ?trade= redirect above.
+  const visionBoardHref = location.pathname.replace(/journal$/, 'vision-board');
   const usedTagNames = new Set(trades.flatMap(allTagsOnTrade));
   const accountTagOptions = allTagOptions.filter(t => usedTagNames.has(t.name));
   // Main Tag chip's own options: which tag GROUPS actually have a selection
@@ -650,6 +665,14 @@ export default function Journal() {
     <div>
       <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <div>
+          {fromVisionBoard && (
+            <Link
+              to={visionBoardHref}
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline mb-1"
+            >
+              <ArrowLeft className="w-3 h-3" /> Back to Vision Board
+            </Link>
+          )}
           <h1 className="text-xl font-bold">Trade Journal</h1>
           <p className="text-sm text-muted-foreground">
             {trades.length} trade{trades.length !== 1 ? 's' : ''}

@@ -127,9 +127,16 @@ export type Trade = {
 // TimeframePicker there); nothing forces every screenshot to have one, so
 // older notes and screenshots someone chooses to skip labelling just have
 // no badge rather than a fake default.
+//
+// `comment` is the same idea for free-text notes about that specific
+// screenshot ("waited for the sweep before entering", "chased it, no
+// confirmation") - set via NotesEditor's comment popover on each image,
+// same optional/no-default treatment as timeframe. Vision Board aggregates
+// these across a trade's screenshots to build its win/loss narrative - see
+// VisionBoard.tsx's commentNarrative().
 export type NoteBlock =
   | { type: 'text'; value: string }
-  | { type: 'image'; url: string; timeframe?: string };
+  | { type: 'image'; url: string; timeframe?: string; comment?: string };
 
 // `value` is a plain number for every ordinary numeric field condition
 // (rr < 2, entry_price >= 1.27, etc). The one exception is the reserved

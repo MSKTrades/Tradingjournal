@@ -7,6 +7,7 @@ import { useAuth } from '../lib/auth';
 import { isAdminEmail } from '../lib/admin';
 import { DEMO_BASE } from '../lib/demoMode';
 import { Button } from '../lib/ui/button';
+import ProBadge from './ProBadge';
 import Logo from './Logo';
 import AccountSwitcher from './AccountSwitcher';
 import PromoReminderModal from './PromoReminderModal';
@@ -168,7 +169,18 @@ export default function Layout({ children, demoMode = false }: { children: React
                   <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r-full bg-sidebar-active" />
                 )}
                 <Icon className="w-[18px] h-[18px] shrink-0" />
-                {!collapsed && <span>{label}</span>}
+                {!collapsed && (
+                  <span className="flex items-center gap-1.5 truncate">
+                    {label}
+                    {/* Only Vision Board is a full nav item that's also a
+                        registered Pro feature (see proFeatures.ts) - every
+                        other Pro feature badges itself inline on whichever
+                        page/card it actually lives on (HTF Bias Alignment,
+                        Weekly Digest, etc.), so this doesn't get a general
+                        to-key lookup, just the one explicit check. */}
+                    {to === 'vision-board' && !demoMode && <ProBadge feature="vision_board" />}
+                  </span>
+                )}
               </Link>
             );
           })}

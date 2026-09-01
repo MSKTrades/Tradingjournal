@@ -46,7 +46,8 @@ export type ProFeatureKey =
   | 'htf_bias_alignment'
   | 'weekly_digest'
   | 'r_multiple_distribution'
-  | 'public_track_record';
+  | 'public_track_record'
+  | 'vision_board';
 
 /** What each Pro feature actually is, in plain language — shown in the
  * badge's tooltip and in the fuller ProNotice banner. Keep this list in
@@ -92,5 +93,8 @@ export const PRO_FEATURES: Record<ProFeatureKey, { message: string }> = {
   },
   public_track_record: {
     message: 'Public Track Record (your shareable public results page) is a Pro feature.',
+  },
+  vision_board: {
+    message: 'Vision Board (your wins/losses pattern view, including the timeframe and comment-narrative analysis) is a Pro feature.',
   },
 };

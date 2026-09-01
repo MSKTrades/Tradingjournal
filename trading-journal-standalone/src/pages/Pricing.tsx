@@ -58,6 +58,7 @@ const PLANS = [
       'Execution Mistakes analysis',
       'HTF Bias Alignment',
       'R-Multiple Distribution',
+      'Vision Board (wins/losses pattern + comment narrative analysis)',
       'Chart Replay & Backtesting — unlimited history',
       'Priority support',
     ],
