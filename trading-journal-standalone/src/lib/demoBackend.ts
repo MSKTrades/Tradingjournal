@@ -25,7 +25,7 @@
 // client bundle.
 import type {
   Account, Trade, Strategy, Checklist, ChecklistItem, CustomColumn, Tag, TagGroup,
-  TagGroupOption, LedgerEntry, Condition, StrategyResult, DailyRoutineNote,
+  TagGroupOption, LedgerEntry, Condition, StrategyResult, DailyRoutineNote, Timeframe,
 } from '../pages/data/types';
 import { TAG_CONDITION_FIELD } from '../pages/data/types';
 import { showDemoCapToast } from './demoToast';
@@ -84,6 +84,7 @@ type Store = {
   customColumns: CustomColumn[];
   tags: Tag[];
   tagGroups: TagGroup[];
+  timeframes: Timeframe[];
   ledger: LedgerEntry[];
   // How many NEW items a demo visitor has added in this tab, per category -
   // each capped at 1 (see ADD_CAPS below). Seed data doesn't count against
@@ -99,6 +100,7 @@ const ADD_CAPS: Record<string, number> = {
   columns: 1,
   tagGroups: 1,
   tagGroupOptions: 1,
+  timeframes: 1,
   accounts: 0, // multi-account is a Pro feature even for real users - see proFeatures.ts
 };
 
@@ -106,7 +108,7 @@ function capName(key: string): string {
   const names: Record<string, string> = {
     trades: 'trade', strategies: 'strategy playbook', checklists: 'checklist',
     checklistItems: 'checklist item', columns: 'custom field', tagGroups: 'tag group',
-    tagGroupOptions: 'tag group option', accounts: 'trading account',
+    tagGroupOptions: 'tag group option', timeframes: 'timeframe', accounts: 'trading account',
   };
   return names[key] ?? key;
 }
@@ -400,6 +402,16 @@ function buildSeed(): Store {
     customColumns: [],
     tags,
     tagGroups,
+    // A small starter list so the timeframe picker on a pasted screenshot
+    // isn't empty on first look - the real TIMEFRAME_PRESETS cover this too
+    // (NotesEditor merges them client-side regardless), this just mirrors
+    // what a real account looks like after a bit of use.
+    timeframes: [
+      { id: nextId(), name: '15M', sort_order: 0 },
+      { id: nextId(), name: '1H', sort_order: 1 },
+      { id: nextId(), name: '4H', sort_order: 2 },
+      { id: nextId(), name: 'Daily', sort_order: 3 },
+    ],
     ledger,
     added: {},
   };
@@ -901,6 +913,16 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
   // --- /columns (custom fields + tags + tag groups) -------------------
   if (path === '/columns') {
     if (method === 'GET' && resource === 'tags') return store.tags;
+    if (method === 'GET' && resource === 'timeframes') return store.timeframes;
+    if (method === 'POST' && resource === 'timeframes') {
+      const name = String(b.name ?? '').trim();
+      const existing = store.timeframes.find(t => t.name.toLowerCase() === name.toLowerCase());
+      if (existing) return existing;
+      checkAndConsumeCap(store, 'timeframes');
+      const tf: Timeframe = { id: nextId(), name, sort_order: store.timeframes.length };
+      store.timeframes.push(tf);
+      return tf;
+    }
     if (method === 'GET' && resource === 'tag_groups') {
       // Mirrors api/columns.ts's getTagGroups filter, though the demo only
       // ever has one account (multi-account is Pro-only, disabled here same

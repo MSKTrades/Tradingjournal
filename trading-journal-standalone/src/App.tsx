@@ -17,6 +17,7 @@ import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Summary from './pages/Summary';
 import Journal from './pages/Journal';
+import VisionBoard from './pages/VisionBoard';
 import Performance from './pages/Performance';
 import Strategies from './pages/Strategies';
 import StrategyDetail from './pages/StrategyDetail';
@@ -182,6 +183,7 @@ export default function App() {
             <Route path="/signup" element={<PublicOnly><Signup /></PublicOnly>} />
 
             <Route path="/journal" element={<Protected><AuthedShell><Journal /></AuthedShell></Protected>} />
+            <Route path="/vision-board" element={<Protected><AuthedShell><VisionBoard /></AuthedShell></Protected>} />
             <Route path="/performance" element={<Protected><AuthedShell><Performance /></AuthedShell></Protected>} />
             <Route path="/strategies" element={<Protected><AuthedShell><Strategies /></AuthedShell></Protected>} />
             <Route path="/strategies/:id" element={<Protected><AuthedShell><StrategyDetail /></AuthedShell></Protected>} />

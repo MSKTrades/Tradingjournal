@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Radar, Trophy, Sparkles, DoorOpen } from 'lucide-react';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Radar, Trophy, Sparkles, DoorOpen, Images } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTheme } from '../lib/theme';
 import { useAuth } from '../lib/auth';
@@ -23,6 +23,7 @@ import DemoCapToastHost from './DemoCapToastHost';
 const NAV_ITEMS = [
   { to: '',             label: 'Summary',     icon: BarChart2,  disabled: false },
   { to: 'journal',      label: 'Journal',     icon: BookOpen,   disabled: false },
+  { to: 'vision-board', label: 'Vision Board', icon: Images,    disabled: false },
   { to: 'performance',  label: 'Performance', icon: TrendingUp, disabled: false },
   { to: 'strategies',   label: 'Strategies',  icon: Settings,   disabled: false },
   { to: 'checklists',   label: 'Checklists',  icon: ListChecks, disabled: false },
@@ -49,8 +50,12 @@ const ADMIN_NAV_ITEM = { to: 'admin', label: 'Admin', icon: ShieldCheck, disable
 // Nav items that need a real backend feature the demo sandbox doesn't mock
 // (real historical candles for Backtest; ledger/rules simulation state for
 // Challenge Simulator) - hidden from the demo sidebar rather than shown and
-// left to error.
-const DEMO_HIDDEN = new Set(['backtest', 'challenge-simulator']);
+// left to error. Vision Board is hidden here too, not because the demo
+// backend can't support it (it easily could - it just reads the same
+// /trades data every other demo page already uses), but because the seed
+// trades don't carry screenshots, so the page would only ever show empty
+// placeholders - not a useful preview of what it actually does.
+const DEMO_HIDDEN = new Set(['backtest', 'challenge-simulator', 'vision-board']);
 
 function navHref(base: string, to: string): string {
   if (to === '') return base || '/';

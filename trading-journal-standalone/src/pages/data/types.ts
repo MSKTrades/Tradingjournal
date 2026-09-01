@@ -120,9 +120,16 @@ export type Trade = {
 // Ordered content stream for the trade detail panel's notes editor — lets
 // text and pasted/uploaded screenshots interleave in whatever order they
 // were written, Notion-style, instead of two separate fields.
+//
+// `timeframe` on an image block is optional and free-form (e.g. "15M",
+// "4H", "Daily") - which chart timeframe that particular screenshot was
+// taken on. Set via the small picker NotesEditor shows on each image (see
+// TimeframePicker there); nothing forces every screenshot to have one, so
+// older notes and screenshots someone chooses to skip labelling just have
+// no badge rather than a fake default.
 export type NoteBlock =
   | { type: 'text'; value: string }
-  | { type: 'image'; url: string };
+  | { type: 'image'; url: string; timeframe?: string };
 
 // `value` is a plain number for every ordinary numeric field condition
 // (rr < 2, entry_price >= 1.27, etc). The one exception is the reserved
@@ -211,6 +218,24 @@ export type TagGroup = {
   account_ids: number[];
   options: TagGroupOption[];
 };
+
+// A user-defined chart timeframe label (e.g. "15M", "4H", "Daily") a pasted
+// screenshot can be tagged with - see NoteBlock's `timeframe` field. Same
+// shape and same "reusable, user-scoped, create-on-first-use" pattern as
+// Tag above, minus the color (a screenshot's timeframe badge is plain text,
+// not a colored chip). Not account-scoped - which timeframes someone works
+// with is a personal habit, not something that differs per trading account.
+export type Timeframe = {
+  id: number;
+  name: string;
+  sort_order: number;
+};
+
+// Shown in the timeframe picker before a user has saved any of their own -
+// picking one of these is what actually creates the first row in the
+// `timeframes` table (POST /columns?resource=timeframes), same "offer a
+// default, persist on first real use" approach the tag color palette uses.
+export const TIMEFRAME_PRESETS = ['1M', '5M', '15M', '1H', '4H', 'Daily', 'Weekly'];
 
 export const ENTRY_TYPES = ['Market', 'Limit', 'Stop'];
 

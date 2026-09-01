@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3, Pencil, Check, Trash2, Star, Smile } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
+import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, Timeframe, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
 import { computeDrawdown, positionSizeLots, slPipsFromPrices } from '../data/risk';
 import { useAccount } from '../../lib/accounts';
 import { api, useFetch } from '../../lib/api';
@@ -249,6 +249,8 @@ export default function TradeDetailPanel({
   // the URL itself changes (useFetch's effect deps include the url).
   const { data: rawTagGroups, refetch: refetchTagGroups } = useFetch<TagGroup[]>(`/columns?resource=tag_groups&account_id=${activeAccountId ?? ''}`);
   const tagGroups: TagGroup[] = rawTagGroups ?? [];
+  const { data: rawTimeframes, refetch: refetchTimeframes } = useFetch<Timeframe[]>('/columns?resource=timeframes');
+  const timeframes: Timeframe[] = rawTimeframes ?? [];
 
   // Guards the SL-distance auto-calc effect below against firing the moment
   // a trade loads: opening an existing trade (or switching between trades)
@@ -504,6 +506,14 @@ export default function TradeDetailPanel({
   // scoping), not a bug.
   function handleUpdateTagGroupAccounts(groupId: number, accountIds: number[]) {
     api.put('/columns?resource=tag_groups', { id: groupId, account_ids: accountIds }).then(() => refetchTagGroups()).catch(() => {});
+  }
+  // Fire-and-forget, same as tag/tag-group creation above - NotesEditor
+  // already applied the timeframe to the note block locally, this just
+  // saves it to the reusable list for next time. A failure here (offline,
+  // demo cap, etc.) isn't worth surfacing - worst case it just isn't
+  // remembered as a quick-pick option next time.
+  function handleAddTimeframe(name: string) {
+    api.post('/columns', { resource: 'timeframes', name }).then(() => refetchTimeframes()).catch(() => {});
   }
 
   async function handleAddField() {
@@ -1137,7 +1147,12 @@ export default function TradeDetailPanel({
               </div>
             </div>
 
-            <NotesEditor blocks={form.notes_blocks} onChange={(blocks) => set('notes_blocks', blocks)} />
+            <NotesEditor
+              blocks={form.notes_blocks}
+              onChange={(blocks) => set('notes_blocks', blocks)}
+              timeframes={timeframes}
+              onAddTimeframe={handleAddTimeframe}
+            />
           </div>
         </div>
       </div>

@@ -466,6 +466,13 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(await getTagGroups(sql, userId, accountId));
       return;
     }
+    if (req.query.resource === 'timeframes') {
+      // Not account-scoped (see the Timeframe type note in data/types.ts) -
+      // every one of this user's accounts sees the same saved list.
+      const rows = await sql.unsafe('SELECT * FROM timeframes WHERE user_id = $1 ORDER BY sort_order ASC, id ASC', [userId]);
+      res.status(200).json(rows);
+      return;
+    }
     if (req.query.resource === 'admin_stats') {
       // Gated on email, not just "logged in" — this is the one place in the
       // app that shows data across every user, so a plain requireUserId()
@@ -580,6 +587,24 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       const rows = await sql.unsafe(
         `INSERT INTO tags (name, color, sort_order, user_id) VALUES ($1, $2, $3, $4) RETURNING *`,
         [name, p.color ?? '#f59e0b', nextOrder, userId]
+      );
+      res.status(200).json(rows[0]);
+      return;
+    }
+    if (p.resource === 'timeframes') {
+      const name = String(p.name ?? '').trim();
+      if (!name) { res.status(400).json({ error: 'name is required' }); return; }
+      // Same create-if-not-exists behaviour as `tags` above - the picker
+      // calls this the moment a preset or a typed-in custom timeframe is
+      // picked, so "already saved" should silently return the existing row
+      // rather than erroring on the unique (user_id, lower(name)) index.
+      const existing = await sql.unsafe('SELECT * FROM timeframes WHERE user_id = $1 AND lower(name) = lower($2)', [userId, name]);
+      if (existing.length > 0) { res.status(200).json(existing[0]); return; }
+      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM timeframes WHERE user_id = $1', [userId]);
+      const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
+      const rows = await sql.unsafe(
+        `INSERT INTO timeframes (name, sort_order, user_id) VALUES ($1, $2, $3) RETURNING *`,
+        [name, nextOrder, userId]
       );
       res.status(200).json(rows[0]);
       return;

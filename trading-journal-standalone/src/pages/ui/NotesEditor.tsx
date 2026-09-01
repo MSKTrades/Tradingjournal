@@ -1,13 +1,92 @@
 import { useEffect, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
-import { Loader2, Trash2, X, ZoomIn } from 'lucide-react';
-import { NoteBlock } from '../data/types';
+import { Clock3, Loader2, Plus, Trash2, X, ZoomIn } from 'lucide-react';
+import { NoteBlock, Timeframe, TIMEFRAME_PRESETS } from '../data/types';
 import { isDemoMode } from '../../lib/demoMode';
 
 type Props = {
   blocks: NoteBlock[];
   onChange: (blocks: NoteBlock[]) => void;
+  // Saved custom timeframes (see the Timeframe type) + a way to persist a
+  // newly-picked one for reuse next time. Both optional so NotesEditor still
+  // works if a caller doesn't wire them up - the timeframe badge/picker on
+  // each screenshot just won't render without `timeframes` passed.
+  timeframes?: Timeframe[];
+  onAddTimeframe?: (name: string) => void;
 };
+
+// Small popover shown on each screenshot to record which chart timeframe it
+// was taken on - opens automatically right after a screenshot is pasted (see
+// openTfFor in NotesEditor below), or can be reopened any time by clicking
+// the badge in the image's top-left corner. Picking a preset that isn't in
+// this user's saved list yet (or typing a custom one) calls onAddTimeframe
+// so it's there to pick again next time, same "save on first real use"
+// pattern the tag picker uses for colors.
+function TimeframePicker({ value, options, onPick, onClose }: {
+  value: string | undefined;
+  options: string[];
+  onPick: (tf: string) => void;
+  onClose: () => void;
+}) {
+  const [custom, setCustom] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [onClose]);
+
+  function submitCustom() {
+    const trimmed = custom.trim();
+    if (!trimmed) return;
+    onPick(trimmed);
+    setCustom('');
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="absolute top-9 left-1.5 z-10 w-52 rounded-lg border border-border bg-popover shadow-lg p-2"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <p className="text-[11px] font-medium text-muted-foreground px-1 pb-1.5">Which timeframe is this?</p>
+      <div className="flex flex-wrap gap-1 px-1 pb-2">
+        {options.map(tf => (
+          <button
+            key={tf}
+            onClick={() => onPick(tf)}
+            className={`px-2 py-1 rounded-md text-xs border transition-colors ${
+              tf === value
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'border-border hover:bg-muted'
+            }`}
+          >
+            {tf}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-1 px-1">
+        <input
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submitCustom(); }}
+          placeholder="Add your own…"
+          className="min-w-0 flex-1 bg-transparent border border-border rounded-md px-2 py-1 text-xs outline-none focus:border-primary"
+        />
+        <button
+          onClick={submitCustom}
+          disabled={!custom.trim()}
+          className="h-6 w-6 shrink-0 rounded-md border border-border flex items-center justify-center hover:bg-muted disabled:opacity-40"
+        >
+          <Plus className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function AutoTextarea({ value, onChange, onPasteImage, placeholder, focused }: {
   value: string;
@@ -60,11 +139,32 @@ function AutoTextarea({ value, onChange, onPasteImage, placeholder, focused }: {
 // an "Add Screenshot" file-picker button here, but paste already covers the
 // same job with less UI to scan past, so it was dropped in favor of just
 // the placeholder text telling you paste works.
-export default function NotesEditor({ blocks, onChange }: Props) {
+export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTimeframe }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [focusIndex, setFocusIndex] = useState<number | null>(null);
+  // Which image block's timeframe popover is open, if any - set right after
+  // a screenshot is pasted so the picker shows up immediately without an
+  // extra click (see insertImageAfter), and whenever the badge itself is
+  // clicked to change an already-set timeframe.
+  const [openTfFor, setOpenTfFor] = useState<number | null>(null);
+
+  // Saved custom timeframes merged with the built-in presets, deduped and
+  // case-insensitively - so once someone's saved "2H" it shows up in the
+  // quick-pick list right alongside 1H/4H instead of only living in the
+  // free-text box.
+  const tfOptions = (() => {
+    const seen = new Set<string>();
+    const all: string[] = [];
+    for (const tf of [...TIMEFRAME_PRESETS, ...timeframes.map(t => t.name)]) {
+      const key = tf.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      all.push(tf);
+    }
+    return all;
+  })();
 
   // Invariant: always end with a text block so there's somewhere to type
   // after the last image.
@@ -116,6 +216,11 @@ export default function NotesEditor({ blocks, onChange }: Props) {
       next.splice(i + 1, 0, { type: 'image', url: blob.url }, { type: 'text', value: '' });
       onChange(next);
       setFocusIndex(i + 2);
+      // Prompt for the timeframe right away, per the newly-pasted image -
+      // this is the "just show an option to select when a screenshot is
+      // pasted" ask, rather than something you have to remember to go set
+      // later. Dismissing it (click elsewhere) just leaves it unset.
+      setOpenTfFor(i + 1);
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         setUploadError('Upload timed out after 45s. Check that a Blob store is connected to this Vercel project (Storage tab) and that your network allows connections to *.vercel-storage.com, then try again.');
@@ -130,6 +235,12 @@ export default function NotesEditor({ blocks, onChange }: Props) {
 
   function removeImage(i: number) {
     onChange(normalized.filter((_, idx) => idx !== i));
+  }
+
+  function setImageTimeframe(i: number, tf: string) {
+    setBlock(i, { ...(normalized[i] as { type: 'image'; url: string; timeframe?: string }), timeframe: tf });
+    onAddTimeframe?.(tf);
+    setOpenTfFor(null);
   }
 
   return (
@@ -155,7 +266,12 @@ export default function NotesEditor({ blocks, onChange }: Props) {
             key={i}
             value={block.value}
             focused={i === focusIndex}
-            placeholder={i === 0 ? 'Write your trade notes here — paste a screenshot (Ctrl+V) anywhere to drop it in...' : 'Continue writing…'}
+            // Only the very first block carries instructional placeholder
+            // text. A "Continue writing…" prompt used to repeat after every
+            // single screenshot, which read as clutter once more than one
+            // or two images were pasted in a row with nothing typed between
+            // them - an empty block just stays visually quiet now instead.
+            placeholder={i === 0 ? 'Write your trade notes here — paste a screenshot (Ctrl+V) anywhere to drop it in...' : undefined}
             onChange={(v) => setBlock(i, { type: 'text', value: v })}
             onPasteImage={(file) => insertImageAfter(i, file)}
           />
@@ -183,6 +299,30 @@ export default function NotesEditor({ blocks, onChange }: Props) {
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
+            {/* Timeframe badge - always visible (not just on hover, unlike
+                the zoom/delete buttons above) since it's information, not
+                just an action, and blank/unlabelled is itself worth seeing
+                at a glance. Click to open/change; auto-opens right after
+                this image is first pasted (see openTfFor). */}
+            <button
+              onClick={() => setOpenTfFor(openTfFor === i ? null : i)}
+              className={`absolute top-1.5 left-1.5 h-7 px-2 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
+                block.timeframe
+                  ? 'bg-black/60 text-white hover:bg-black/80'
+                  : 'bg-black/60 text-white/80 hover:bg-black/80 opacity-0 group-hover:opacity-100'
+              }`}
+            >
+              <Clock3 className="w-3 h-3" />
+              {block.timeframe ?? 'Set TF'}
+            </button>
+            {openTfFor === i && (
+              <TimeframePicker
+                value={block.timeframe}
+                options={tfOptions}
+                onPick={(tf) => setImageTimeframe(i, tf)}
+                onClose={() => setOpenTfFor(null)}
+              />
+            )}
           </div>
         ))}
       </div>

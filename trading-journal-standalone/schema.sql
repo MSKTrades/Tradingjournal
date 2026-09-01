@@ -1112,3 +1112,26 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_account ON ledger_entries (account_id);
+
+-- ============================================================================
+-- Timeframes — a small reusable, user-defined list of labels ("1M", "15M",
+-- "4H", "Daily", ...) a screenshot pasted into a trade's notes can be
+-- tagged with (see notes_blocks' image.timeframe in trades, and the
+-- Timeframe type in src/pages/data/types.ts), so a chart image records
+-- which timeframe it was taken on. Same shape and pattern as `tags` above
+-- (id/name/sort_order/user_id, unique per user case-insensitively) - not
+-- account-scoped, since which timeframes someone works with is a personal
+-- habit that doesn't change per trading account. Starts empty for every
+-- user; the picker offers a sensible default list client-side
+-- (TIMEFRAME_PRESETS) and only writes a row here the first time a preset
+-- (or a typed-in custom one) is actually picked.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS timeframes (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS timeframes_user_name_idx ON timeframes (user_id, lower(name));
