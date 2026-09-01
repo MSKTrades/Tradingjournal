@@ -25,7 +25,7 @@ function commonPatterns(trades: Trade[]): Pattern[] {
       for (const opt of options) bump(`${group}: ${opt}`);
     }
     if (t.direction) bump(`${t.direction} trades`);
-    const session = t.closed_session || t.session_in;
+    const session = tradeSession(t);
     if (session) bump(`${session} session`);
     if (t.coin_token) bump(t.coin_token);
     if (t.entry_type) bump(`${t.entry_type} entry`);
@@ -35,6 +35,15 @@ function commonPatterns(trades: Trade[]): Pattern[] {
     // alongside "these wins mostly happened in the London session".
     const tfCombo = tfComboLabel(t);
     if (tfCombo) bump(`TFs analyzed: ${tfCombo}`);
+    // Day-of-week and time-of-day, same treatment - if a real majority of
+    // this column's trades cluster on e.g. Mondays or in the same 3-hour
+    // execution window, that's exactly the kind of thing worth surfacing
+    // as a pattern chip, not just something you'd have to notice yourself
+    // from the precise breakdown panel below.
+    const weekday = tradeWeekday(t);
+    if (weekday) bump(`${weekday}s`);
+    const timeBucket = tradeTimeBucket(t);
+    if (timeBucket) bump(`Executed ${timeBucket}`);
   }
 
   const threshold = Math.ceil(trades.length * 0.6);
@@ -74,71 +83,114 @@ function tfComboLabel(t: Trade): string | null {
   return tfs.length > 0 ? tfs.join(' + ') : null;
 }
 
-// --- Comment narrative -----------------------------------------------------
+// --- Precise breakdown by direction / session / day / time ----------------
 //
-// A lightweight keyword-frequency read of the free-text comments left on
-// screenshots (NoteBlock's `comment` field) - deliberately NOT an
-// AI-generated summary. It counts which meaningful words show up across a
-// real share of a column's commented trades (same "needs a real majority,
-// not just one mention" spirit as commonPatterns above, just tuned looser
-// since comments are free text and rarely repeat a word verbatim the way a
-// picked tag does). This is a genuine first pass at "what's the narrative
-// here" without quietly bolting a new AI call/cost onto a feature that
-// wasn't asked to include one. A true generative narrative - reusing
-// whatever already powers SMC Analysis (see schema.sql's smc_chart_markups
-// table) - would be a natural, larger next step, and a reasonable
-// candidate for its own Pro tier on top of this.
-const COMMENT_STOPWORDS = new Set([
-  'the', 'and', 'but', 'was', 'were', 'this', 'that', 'these', 'those', 'with', 'from', 'into',
-  'have', 'has', 'had', 'having', 'does', 'did', 'doing', 'about', 'again', 'after', 'before',
-  'because', 'been', 'being', 'between', 'during', 'each', 'more', 'most', 'once', 'only', 'other',
-  'same', 'some', 'such', 'than', 'then', 'there', 'they', 'them', 'their', 'here', 'when', 'where',
-  'which', 'while', 'your', 'youre', 'just', 'still', 'also', 'chart', 'trade', 'entry', 'price',
-]);
+// The "what these have in common" panel above only ever surfaces a
+// dimension (direction, session, day, time...) as a chip when a real
+// majority of the column shares the exact same value - useful for the
+// standout cases, but it hides the actual split otherwise (e.g. "6 Long /
+// 4 Short" never shows up as a chip since neither side is a 60%+ majority).
+// TradeProfile below is the more precise complement: an always-there
+// breakdown of the real percentages across these four specific dimensions,
+// not a fuzzy "did something win outright" scan.
+type DistRow = { label: string; count: number; pct: number };
 
-function tokenizeComment(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9']+/)
-    .filter(w => w.length >= 4 && !COMMENT_STOPWORDS.has(w));
-}
-
-// Every meaningful word across all of a trade's screenshot comments,
-// deduped WITHIN the trade first - so one trade that repeats a word
-// several times in its own notes can't outweigh "how many different
-// trades actually mention this" when counted across the column.
-function tradeCommentWords(t: Trade): Set<string> {
-  const words = new Set<string>();
-  for (const b of t.notes_blocks ?? []) {
-    if (b.type === 'image' && b.comment?.trim()) {
-      for (const w of tokenizeComment(b.comment)) words.add(w);
-    }
-  }
-  return words;
-}
-
-function hasComment(t: Trade): boolean {
-  return (t.notes_blocks ?? []).some(b => b.type === 'image' && !!b.comment?.trim());
-}
-
-type NarrativePoint = { label: string; count: number; total: number };
-
-function commentNarrative(trades: Trade[]): NarrativePoint[] {
-  const commented = trades.filter(hasComment);
-  if (commented.length < 2) return [];
+function distribution(trades: Trade[], keyFn: (t: Trade) => string | null): DistRow[] {
   const counts = new Map<string, number>();
-  for (const t of commented) {
-    for (const w of tradeCommentWords(t)) counts.set(w, (counts.get(w) ?? 0) + 1);
+  let total = 0;
+  for (const t of trades) {
+    const k = keyFn(t);
+    if (!k) continue;
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+    total++;
   }
-  // Looser than commonPatterns' 60% - comments are free text, so even a
-  // word repeated by ~a third of the group is a real, noticeable thread.
-  const threshold = Math.max(2, Math.ceil(commented.length * 0.34));
+  if (total === 0) return [];
   return Array.from(counts.entries())
-    .filter(([, count]) => count >= threshold)
-    .map(([label, count]) => ({ label, count, total: commented.length }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 8);
+    .map(([label, count]) => ({ label, count, pct: Math.round((count / total) * 100) }))
+    .sort((a, b) => b.count - a.count);
 }
+
+function tradeDirection(t: Trade): string | null {
+  return t.direction ?? null;
+}
+
+function tradeSession(t: Trade): string | null {
+  return t.closed_session || t.session_in || null;
+}
+
+// Weekday from the date the trade was placed (falling back to the date it
+// closed) - deliberately pinned to UTC so a trade logged near midnight
+// doesn't land on a different weekday depending on the viewer's own
+// timezone than it would for someone else looking at the same trade.
+function tradeWeekday(t: Trade): string | null {
+  const raw = t.trade_placed_at || t.date_closed;
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { weekday: 'long', timeZone: 'UTC' });
+}
+
+// Execution time bucketed into 3-hour windows ("07:00–10:00") rather than
+// exact minute - two trades executed at 07:12 and 07:48 are the same real
+// pattern ("early London") and exact-minute matching would never group them.
+function tradeTimeBucket(t: Trade): string | null {
+  const raw = t.trade_executed_at;
+  if (!raw) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(raw);
+  if (!m) return null;
+  const hour = Number(m[1]);
+  if (Number.isNaN(hour) || hour < 0 || hour > 23) return null;
+  const start = Math.floor(hour / 3) * 3;
+  const end = (start + 3) % 24;
+  const fmt = (h: number) => `${String(h).padStart(2, '0')}:00`;
+  return `${fmt(start)}–${fmt(end)}`;
+}
+
+function TradeProfile({ trades, accent }: { trades: Trade[]; accent: 'win' | 'loss' }) {
+  if (trades.length < 2) return null;
+  const dims = [
+    { title: 'Direction', rows: distribution(trades, tradeDirection) },
+    { title: 'Session', rows: distribution(trades, tradeSession) },
+    { title: 'Day', rows: distribution(trades, tradeWeekday) },
+    { title: 'Time', rows: distribution(trades, tradeTimeBucket) },
+  ].filter(d => d.rows.length > 0);
+  if (dims.length === 0) return null;
+
+  const chipClass = accent === 'win'
+    ? 'bg-green-600/10 text-green-700 dark:text-green-400 border-green-600/20'
+    : 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20';
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 mb-3">
+      <p className="text-[11px] font-medium text-muted-foreground mb-2">Breakdown by direction, session, day &amp; time</p>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+        {dims.map(d => (
+          <div key={d.title}>
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-1">{d.title}</p>
+            <div className="flex flex-wrap gap-1">
+              {d.rows.slice(0, 3).map(r => (
+                <span key={r.label} className={`px-1.5 py-0.5 rounded-full text-[11px] font-medium border ${chipClass}`}>
+                  {r.label} &middot; {r.pct}%
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Comments on screenshots (NoteBlock's `comment` field, set from the Notes
+// editor - see NotesEditor.tsx) stay a plain per-trade thing here for now -
+// shown on each card below (see TradeCard) so the raw notes are still
+// visible and useful on their own. An earlier version of this file also
+// tried rolling those comments up into an automatic "what's working / not
+// working" narrative per column with a simple keyword-frequency pass. That's
+// intentionally shelved for now - the plan is to build that properly later
+// as a real AI-driven analysis (in the spirit of what already powers SMC
+// Analysis - see schema.sql's smc_chart_markups table) rather than ship a
+// keyword-count version now and replace it later.
 
 // Most recent timestamp this trade has, for sorting "latest first" - falls
 // back down the chain to whatever's actually populated, same fallback order
@@ -176,14 +228,6 @@ function TradeCard({ trade, accent, onZoom }: { trade: Trade; accent: 'win' | 'l
               <Clock3 className="w-3 h-3" /> {shot.timeframe}
             </span>
           )}
-          {shot.comment && (
-            <span
-              title={shot.comment}
-              className="absolute bottom-1.5 left-1.5 h-6 max-w-[80%] px-2 rounded-md bg-black/60 text-white text-[11px] font-medium flex items-center gap-1"
-            >
-              <MessageSquare className="w-3 h-3 shrink-0" /> <span className="truncate">{shot.comment}</span>
-            </span>
-          )}
           <span className={`absolute top-1.5 right-1.5 h-6 px-2 rounded-md text-[11px] font-semibold flex items-center ${accent === 'win' ? 'bg-green-600/90 text-white' : 'bg-red-500/90 text-white'}`}>
             {trade.rr != null ? `${trade.rr >= 0 ? '+' : ''}${fmtNum(trade.rr, 1)}R` : trade.profit_loss}
           </span>
@@ -206,6 +250,15 @@ function TradeCard({ trade, accent, onZoom }: { trade: Trade; accent: 'win' | 'l
               <span key={i} className="px-1.5 py-0.5 rounded text-[11px] bg-muted text-muted-foreground">{c}</span>
             ))}
           </div>
+        )}
+        {/* Comment on the chart, shown as plain readable text (not a small
+            overlay badge on top of the image - that read as too easy to
+            miss) so it's actually visible at a glance. */}
+        {shot?.comment && (
+          <p className="flex items-start gap-1.5 mt-2 text-xs text-foreground/90">
+            <MessageSquare className="w-3.5 h-3.5 mt-0.5 text-muted-foreground shrink-0" />
+            <span className="line-clamp-2">{shot.comment}</span>
+          </p>
         )}
         {/* Deep-links into the Journal table with this trade's detail panel
             already open - see the ?trade= handling added to Journal.tsx.
@@ -238,8 +291,6 @@ export default function VisionBoard() {
   );
   const winPatterns = useMemo(() => commonPatterns(winners), [winners]);
   const lossPatterns = useMemo(() => commonPatterns(losers), [losers]);
-  const winNarrative = useMemo(() => commentNarrative(winners), [winners]);
-  const lossNarrative = useMemo(() => commentNarrative(losers), [losers]);
 
   return (
     <div>
@@ -286,25 +337,7 @@ export default function VisionBoard() {
               </p>
             )}
           </div>
-          <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 mb-3">
-            {winNarrative.length > 0 ? (
-              <>
-                <p className="text-[11px] font-medium text-muted-foreground mb-1.5">What's working — from your comments</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {winNarrative.map(p => (
-                    <span key={p.label} className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-600/10 text-green-700 dark:text-green-400 border border-green-600/20">
-                      "{p.label}" &middot; {p.count}/{p.total}
-                    </span>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <MessageSquare className="w-3.5 h-3.5 shrink-0" />
-                Add a comment to a couple more screenshots (click the comment badge on any chart) and a narrative of what's working will show up here.
-              </p>
-            )}
-          </div>
+          <TradeProfile trades={winners} accent="win" />
           <div className="space-y-3">
             {winners.map(t => <TradeCard key={t.id} trade={t} accent="win" onZoom={setLightbox} />)}
           </div>
@@ -335,25 +368,7 @@ export default function VisionBoard() {
               </p>
             )}
           </div>
-          <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 mb-3">
-            {lossNarrative.length > 0 ? (
-              <>
-                <p className="text-[11px] font-medium text-muted-foreground mb-1.5">What's not working — from your comments</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {lossNarrative.map(p => (
-                    <span key={p.label} className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
-                      "{p.label}" &middot; {p.count}/{p.total}
-                    </span>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <MessageSquare className="w-3.5 h-3.5 shrink-0" />
-                Add a comment to a couple more screenshots (click the comment badge on any chart) and a narrative of what's not working will show up here.
-              </p>
-            )}
-          </div>
+          <TradeProfile trades={losers} accent="loss" />
           <div className="space-y-3">
             {losers.map(t => <TradeCard key={t.id} trade={t} accent="loss" onZoom={setLightbox} />)}
           </div>

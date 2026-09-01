@@ -89,17 +89,19 @@ function TimeframePicker({ value, options, onPick, onClose }: {
 }
 
 // Small popover for writing a free-text note about one specific screenshot
-// - "what happened / what you were thinking on this chart". Same badge +
-// popover, click-outside-to-close shape as TimeframePicker above (that's
-// the explicit ask - comments should work "the same as what we're doing
-// with TFs"), but it doesn't auto-open on paste the way the timeframe
-// picker does: stacking two auto-opening popovers on every pasted
+// - "what happened / what you were thinking on this chart". Same
+// click-to-open-a-popover, click-outside-to-close shape as TimeframePicker
+// above (that's the explicit ask - comments should work "the same as what
+// we're doing with TFs"), but it doesn't auto-open on paste the way the
+// timeframe picker does: stacking two auto-opening popovers on every pasted
 // screenshot would be more clutter than help, and a comment is usually
 // written after you've actually looked at the chart for a moment, not in
-// the same instant you paste it. The badge is always there as the
-// invitation instead. Saves as you type (blurring/closing just dismisses
-// the popover, nothing is lost) rather than needing an explicit Save
-// button - one less click for what's meant to be a quick, low-friction note.
+// the same instant you paste it. The always-visible comment row below the
+// image (not an overlay badge on top of it - that read as too easy to
+// miss) is the invitation instead. Saves as you type (blurring/closing just
+// dismisses the popover, nothing is lost) rather than needing an explicit
+// Save button - one less click for what's meant to be a quick, low-friction
+// note.
 function CommentPopover({ value, onChange, onClose }: {
   value: string | undefined;
   onChange: (v: string) => void;
@@ -121,7 +123,7 @@ function CommentPopover({ value, onChange, onClose }: {
   return (
     <div
       ref={ref}
-      className="absolute bottom-9 left-1.5 z-10 w-64 rounded-lg border border-border bg-popover shadow-lg p-2"
+      className="absolute top-full left-0 mt-1 z-10 w-full sm:w-80 rounded-lg border border-border bg-popover shadow-lg p-2"
       onClick={(e) => e.stopPropagation()}
     >
       <p className="text-[11px] font-medium text-muted-foreground px-1 pb-1.5">Notes on this chart</p>
@@ -337,71 +339,81 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
           // are usually chart/platform captures where more pixels legible
           // is strictly better, and the drawer itself is wide enough now
           // to give them real room instead of shrinking them down.
-          <div key={i} className="relative group w-full rounded-lg overflow-hidden border border-border">
-            <img
-              src={block.url} alt="Trade screenshot" className="w-full h-auto block cursor-zoom-in"
-              onClick={() => setLightbox(block.url)}
-            />
-            <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                className="h-7 w-7 rounded-md bg-black/60 text-white flex items-center justify-center hover:bg-black/80"
+          <div key={i} className="w-full rounded-lg overflow-hidden border border-border">
+            <div className="relative group">
+              <img
+                src={block.url} alt="Trade screenshot" className="w-full h-auto block cursor-zoom-in"
                 onClick={() => setLightbox(block.url)}
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
+              />
+              <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  className="h-7 w-7 rounded-md bg-black/60 text-white flex items-center justify-center hover:bg-black/80"
+                  onClick={() => setLightbox(block.url)}
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  className="h-7 w-7 rounded-md bg-black/60 text-white flex items-center justify-center hover:bg-red-600"
+                  onClick={() => removeImage(i)}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {/* Timeframe badge - always visible (not just on hover, unlike
+                  the zoom/delete buttons above) since it's information, not
+                  just an action, and blank/unlabelled is itself worth seeing
+                  at a glance. Click to open/change; auto-opens right after
+                  this image is first pasted (see openTfFor). */}
               <button
-                className="h-7 w-7 rounded-md bg-black/60 text-white flex items-center justify-center hover:bg-red-600"
-                onClick={() => removeImage(i)}
+                onClick={() => setOpenTfFor(openTfFor === i ? null : i)}
+                className={`absolute top-1.5 left-1.5 h-7 px-2 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
+                  block.timeframe
+                    ? 'bg-black/60 text-white hover:bg-black/80'
+                    : 'bg-black/60 text-white/80 hover:bg-black/80 opacity-0 group-hover:opacity-100'
+                }`}
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <Clock3 className="w-3 h-3" />
+                {block.timeframe ?? 'Set TF'}
               </button>
+              {openTfFor === i && (
+                <TimeframePicker
+                  value={block.timeframe}
+                  options={tfOptions}
+                  onPick={(tf) => setImageTimeframe(i, tf)}
+                  onClose={() => setOpenTfFor(null)}
+                />
+              )}
             </div>
-            {/* Timeframe badge - always visible (not just on hover, unlike
-                the zoom/delete buttons above) since it's information, not
-                just an action, and blank/unlabelled is itself worth seeing
-                at a glance. Click to open/change; auto-opens right after
-                this image is first pasted (see openTfFor). */}
-            <button
-              onClick={() => setOpenTfFor(openTfFor === i ? null : i)}
-              className={`absolute top-1.5 left-1.5 h-7 px-2 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
-                block.timeframe
-                  ? 'bg-black/60 text-white hover:bg-black/80'
-                  : 'bg-black/60 text-white/80 hover:bg-black/80 opacity-0 group-hover:opacity-100'
-              }`}
-            >
-              <Clock3 className="w-3 h-3" />
-              {block.timeframe ?? 'Set TF'}
-            </button>
-            {openTfFor === i && (
-              <TimeframePicker
-                value={block.timeframe}
-                options={tfOptions}
-                onPick={(tf) => setImageTimeframe(i, tf)}
-                onClose={() => setOpenTfFor(null)}
-              />
-            )}
-            {/* Comment badge - bottom-left, same "always visible once set,
-                otherwise only on hover" treatment as the timeframe badge
-                above (just the opposite corner, so the two never collide). */}
-            <button
-              onClick={() => setOpenCommentFor(openCommentFor === i ? null : i)}
-              title={block.comment}
-              className={`absolute bottom-1.5 left-1.5 h-7 max-w-[85%] px-2 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
-                block.comment
-                  ? 'bg-black/60 text-white hover:bg-black/80'
-                  : 'bg-black/60 text-white/80 hover:bg-black/80 opacity-0 group-hover:opacity-100'
-              }`}
-            >
-              <MessageSquare className="w-3 h-3 shrink-0" />
-              <span className="truncate">{block.comment || 'Add comment'}</span>
-            </button>
-            {openCommentFor === i && (
-              <CommentPopover
-                value={block.comment}
-                onChange={(v) => setImageComment(i, v)}
-                onClose={() => setOpenCommentFor(null)}
-              />
-            )}
+            {/* Comment control - moved off the image itself and onto its own
+                full-width row underneath. It used to be a small badge
+                overlaid on the bottom-left corner of the screenshot, same
+                treatment as the timeframe badge above, but that read as too
+                easy to miss sitting on top of a busy chart image (feedback
+                after shipping it). Living in normal document flow, in the
+                app's own text color against a plain background, is a lot
+                harder not to notice - and it's always shown now, not just
+                on hover, the same "worth seeing even when empty" reasoning
+                as the timeframe badge. */}
+            <div className="relative">
+              <button
+                onClick={() => setOpenCommentFor(openCommentFor === i ? null : i)}
+                className={`w-full flex items-center gap-1.5 px-2.5 py-2 text-xs text-left border-t border-border transition-colors ${
+                  block.comment ? 'bg-primary/10 hover:bg-primary/15' : 'bg-muted/40 hover:bg-muted text-muted-foreground'
+                }`}
+              >
+                <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${block.comment ? 'text-primary' : ''}`} />
+                <span className={`truncate ${block.comment ? 'text-foreground font-medium' : ''}`}>
+                  {block.comment || 'Add a comment on this chart…'}
+                </span>
+              </button>
+              {openCommentFor === i && (
+                <CommentPopover
+                  value={block.comment}
+                  onChange={(v) => setImageComment(i, v)}
+                  onClose={() => setOpenCommentFor(null)}
+                />
+              )}
+            </div>
           </div>
         ))}
       </div>
