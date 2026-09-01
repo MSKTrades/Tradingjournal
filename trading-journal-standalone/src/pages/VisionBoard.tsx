@@ -135,6 +135,18 @@ function tradeTimeBucket(t: Trade): string | null {
 // full trade list, not the winners/losers columns), and keeps whichever
 // combinations clear a minimum sample size, ranked by win rate.
 //
+// A first version of this showed every combination that cleared the sample
+// bar, which meant a lot of near-duplicates: if every one of your Tuesday
+// losses also happened to be Long and in the London session, "Long +
+// Tuesday", "London session + Tuesday", and "Long + London session +
+// Tuesday" all show up separately even though they're the exact same
+// finding about the exact same trades, just described three different
+// ways. Now, any combinations that match the IDENTICAL set of trades are
+// collapsed into one - keeping the simplest (fewest conditions) way of
+// describing that set, since a longer combo covering the same trades isn't
+// telling you anything the shorter one didn't - and only the top 3 distinct
+// findings are shown per side.
+//
 // Worth being upfront about the shape of this: it finds EXACT-match
 // combinations - the same single day (not a range like "Tue–Thu"), the
 // same fixed 3-hour window (not a custom-fitted one). Actually discovering
@@ -143,8 +155,10 @@ function tradeTimeBucket(t: Trade): string | null {
 // what a client-side pass like this one is trying to be.
 const MIN_COMBO_SAMPLE = 3;
 const COMBO_TRADE_LIMIT = 300; // most recent decided trades considered, for cost and relevance
+const MAX_COMBOS_SHOWN = 3;
 
 type Combo = { label: string; wins: number; losses: number; total: number; winRate: number };
+type ComboCandidate = Combo & { conds: string[]; tradeIds: Set<number> };
 
 // Every atomic condition this trade could take part in a combination with -
 // deduped, and capped so one heavily-tagged trade can't blow up the 2-/3-way
@@ -180,36 +194,71 @@ function combinationsOf<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+// Same signature (sorted, comma-joined trade ids) = the exact same set of
+// trades matched this combination - the thing we're collapsing duplicates
+// on.
+function tradeSetSignature(tradeIds: Set<number>): string {
+  return Array.from(tradeIds).sort((a, b) => a - b).join(',');
+}
+
+// Ranks candidates by `rank`, then walks them in that order keeping only
+// the first (best-ranked) combination seen for each distinct set of
+// matching trades - but for THAT combination, reports the simplest label
+// among every candidate sharing that same trade set (fewest conditions,
+// then shortest text), not necessarily the top-ranked one's own label.
+// Stops once MAX_COMBOS_SHOWN distinct trade-sets have been kept.
+function pickTopDistinct(candidates: ComboCandidate[], rank: (a: ComboCandidate, b: ComboCandidate) => number): Combo[] {
+  const bySignature = new Map<string, ComboCandidate[]>();
+  for (const c of candidates) {
+    const sig = tradeSetSignature(c.tradeIds);
+    const group = bySignature.get(sig);
+    if (group) group.push(c); else bySignature.set(sig, [c]);
+  }
+
+  const orderedSignatures = [...candidates]
+    .sort(rank)
+    .map(c => tradeSetSignature(c.tradeIds))
+    .filter((sig, i, arr) => arr.indexOf(sig) === i); // first (best-ranked) occurrence of each signature
+
+  return orderedSignatures.slice(0, MAX_COMBOS_SHOWN).map(sig => {
+    const group = bySignature.get(sig)!;
+    const simplest = [...group].sort((a, b) => a.conds.length - b.conds.length || a.label.length - b.label.length)[0];
+    return { label: simplest.label, wins: simplest.wins, losses: simplest.losses, total: simplest.total, winRate: simplest.winRate };
+  });
+}
+
 function bestWorstCombinations(trades: Trade[]): { best: Combo[]; worst: Combo[] } {
   const decided = trades
     .filter(t => t.profit_loss === 'Profit' || t.profit_loss === 'Loss')
     .sort((a, b) => tradeTimestamp(b) - tradeTimestamp(a))
     .slice(0, COMBO_TRADE_LIMIT);
 
-  const stats = new Map<string, { wins: number; losses: number }>();
+  const stats = new Map<string, { conds: string[]; tradeIds: Set<number>; wins: number; losses: number }>();
   for (const t of decided) {
     const conds = tradeConditions(t);
     if (conds.length < 2) continue;
     const sizes = conds.length >= 3 ? [2, 3] : [2];
     for (const size of sizes) {
       for (const combo of combinationsOf(conds, size)) {
-        const key = combo.slice().sort().join(' + ');
-        const entry = stats.get(key) ?? { wins: 0, losses: 0 };
+        const sorted = combo.slice().sort();
+        const key = sorted.join(' + ');
+        const entry = stats.get(key) ?? { conds: sorted, tradeIds: new Set<number>(), wins: 0, losses: 0 };
+        entry.tradeIds.add(t.id);
         if (t.profit_loss === 'Profit') entry.wins++; else entry.losses++;
         stats.set(key, entry);
       }
     }
   }
 
-  const rows: Combo[] = Array.from(stats.entries())
-    .map(([label, { wins, losses }]) => {
+  const candidates: ComboCandidate[] = Array.from(stats.entries())
+    .map(([label, { conds, tradeIds, wins, losses }]) => {
       const total = wins + losses;
-      return { label, wins, losses, total, winRate: Math.round((wins / total) * 100) };
+      return { label, conds, tradeIds, wins, losses, total, winRate: Math.round((wins / total) * 100) };
     })
     .filter(r => r.total >= MIN_COMBO_SAMPLE);
 
-  const best = [...rows].sort((a, b) => b.winRate - a.winRate || b.total - a.total).slice(0, 6);
-  const worst = [...rows].sort((a, b) => a.winRate - b.winRate || b.total - a.total).slice(0, 6);
+  const best = pickTopDistinct(candidates, (a, b) => b.winRate - a.winRate || b.total - a.total);
+  const worst = pickTopDistinct(candidates, (a, b) => a.winRate - b.winRate || b.total - a.total);
   return { best, worst };
 }
 
