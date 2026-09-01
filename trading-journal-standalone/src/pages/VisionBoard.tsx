@@ -5,6 +5,7 @@ import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import { Trade, NoteBlock, TIMEFRAME_PRESETS, fmtMoney, fmtNum, plColor } from './data/types';
 import ProBadge from '../components/ProBadge';
+import { stripCommentHtml } from './ui/NotesEditor';
 
 // The "something in common" panel above each column - counts how often a
 // tag/tag-group selection/direction/session/pair/entry-type shows up across
@@ -83,37 +84,6 @@ function tfComboLabel(t: Trade): string | null {
   return tfs.length > 0 ? tfs.join(' + ') : null;
 }
 
-// --- Precise breakdown by direction / session / day / time ----------------
-//
-// The "what these have in common" panel above only ever surfaces a
-// dimension (direction, session, day, time...) as a chip when a real
-// majority of the column shares the exact same value - useful for the
-// standout cases, but it hides the actual split otherwise (e.g. "6 Long /
-// 4 Short" never shows up as a chip since neither side is a 60%+ majority).
-// TradeProfile below is the more precise complement: an always-there
-// breakdown of the real percentages across these four specific dimensions,
-// not a fuzzy "did something win outright" scan.
-type DistRow = { label: string; count: number; pct: number };
-
-function distribution(trades: Trade[], keyFn: (t: Trade) => string | null): DistRow[] {
-  const counts = new Map<string, number>();
-  let total = 0;
-  for (const t of trades) {
-    const k = keyFn(t);
-    if (!k) continue;
-    counts.set(k, (counts.get(k) ?? 0) + 1);
-    total++;
-  }
-  if (total === 0) return [];
-  return Array.from(counts.entries())
-    .map(([label, count]) => ({ label, count, pct: Math.round((count / total) * 100) }))
-    .sort((a, b) => b.count - a.count);
-}
-
-function tradeDirection(t: Trade): string | null {
-  return t.direction ?? null;
-}
-
 function tradeSession(t: Trade): string | null {
   return t.closed_session || t.session_in || null;
 }
@@ -146,38 +116,125 @@ function tradeTimeBucket(t: Trade): string | null {
   return `${fmt(start)}–${fmt(end)}`;
 }
 
-function TradeProfile({ trades, accent }: { trades: Trade[]; accent: 'win' | 'loss' }) {
-  if (trades.length < 2) return null;
-  const dims = [
-    { title: 'Direction', rows: distribution(trades, tradeDirection) },
-    { title: 'Session', rows: distribution(trades, tradeSession) },
-    { title: 'Day', rows: distribution(trades, tradeWeekday) },
-    { title: 'Time', rows: distribution(trades, tradeTimeBucket) },
-  ].filter(d => d.rows.length > 0);
-  if (dims.length === 0) return null;
+// --- Best & worst combinations ---------------------------------------------
+//
+// Which exact combinations of direction + session + day + time + tags
+// actually correlate with the highest (and lowest) win rate - e.g. "Short +
+// Tuesday + London session + 18:00–21:00" might genuinely win far more
+// than your average, while some other combination loses far more. An
+// earlier version of this file showed direction/session/day/time as four
+// separate breakdowns; this replaces that with the actual thing that
+// matters - not "here's your Long/Short split" on its own, but "here's
+// which specific combinations of everything actually correlate with
+// winning or losing."
+//
+// This looks at every 2- and 3-way combination of conditions present on
+// each decided (Profit/Loss) trade, tallies win/loss counts per exact
+// combination across the account's recent history (win rate is a
+// whole-account question, not a "these 10 wins" one - so this uses the
+// full trade list, not the winners/losers columns), and keeps whichever
+// combinations clear a minimum sample size, ranked by win rate.
+//
+// Worth being upfront about the shape of this: it finds EXACT-match
+// combinations - the same single day (not a range like "Tue–Thu"), the
+// same fixed 3-hour window (not a custom-fitted one). Actually discovering
+// the best boundaries for a range, rather than checking fixed ones, is a
+// meaningfully bigger statistics problem than this - a real next step, not
+// what a client-side pass like this one is trying to be.
+const MIN_COMBO_SAMPLE = 3;
+const COMBO_TRADE_LIMIT = 300; // most recent decided trades considered, for cost and relevance
 
-  const chipClass = accent === 'win'
-    ? 'bg-green-600/10 text-green-700 dark:text-green-400 border-green-600/20'
-    : 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20';
+type Combo = { label: string; wins: number; losses: number; total: number; winRate: number };
 
+// Every atomic condition this trade could take part in a combination with -
+// deduped, and capped so one heavily-tagged trade can't blow up the 2-/3-way
+// combinatorics below.
+function tradeConditions(t: Trade): string[] {
+  const conds: string[] = [];
+  if (t.direction) conds.push(t.direction);
+  const session = tradeSession(t);
+  if (session) conds.push(`${session} session`);
+  const weekday = tradeWeekday(t);
+  if (weekday) conds.push(weekday);
+  const timeBucket = tradeTimeBucket(t);
+  if (timeBucket) conds.push(timeBucket);
+  for (const tag of t.tags ?? []) conds.push(tag);
+  for (const [group, options] of Object.entries(t.tag_selections ?? {})) {
+    for (const opt of options) conds.push(`${group}: ${opt}`);
+  }
+  return Array.from(new Set(conds)).slice(0, 10);
+}
+
+function combinationsOf<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  const combo: T[] = [];
+  function build(start: number) {
+    if (combo.length === size) { out.push(combo.slice()); return; }
+    for (let i = start; i < items.length; i++) {
+      combo.push(items[i]);
+      build(i + 1);
+      combo.pop();
+    }
+  }
+  build(0);
+  return out;
+}
+
+function bestWorstCombinations(trades: Trade[]): { best: Combo[]; worst: Combo[] } {
+  const decided = trades
+    .filter(t => t.profit_loss === 'Profit' || t.profit_loss === 'Loss')
+    .sort((a, b) => tradeTimestamp(b) - tradeTimestamp(a))
+    .slice(0, COMBO_TRADE_LIMIT);
+
+  const stats = new Map<string, { wins: number; losses: number }>();
+  for (const t of decided) {
+    const conds = tradeConditions(t);
+    if (conds.length < 2) continue;
+    const sizes = conds.length >= 3 ? [2, 3] : [2];
+    for (const size of sizes) {
+      for (const combo of combinationsOf(conds, size)) {
+        const key = combo.slice().sort().join(' + ');
+        const entry = stats.get(key) ?? { wins: 0, losses: 0 };
+        if (t.profit_loss === 'Profit') entry.wins++; else entry.losses++;
+        stats.set(key, entry);
+      }
+    }
+  }
+
+  const rows: Combo[] = Array.from(stats.entries())
+    .map(([label, { wins, losses }]) => {
+      const total = wins + losses;
+      return { label, wins, losses, total, winRate: Math.round((wins / total) * 100) };
+    })
+    .filter(r => r.total >= MIN_COMBO_SAMPLE);
+
+  const best = [...rows].sort((a, b) => b.winRate - a.winRate || b.total - a.total).slice(0, 6);
+  const worst = [...rows].sort((a, b) => a.winRate - b.winRate || b.total - a.total).slice(0, 6);
+  return { best, worst };
+}
+
+function ComboList({ combos, tone }: { combos: Combo[]; tone: 'win' | 'loss' }) {
+  if (combos.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Not enough matching trades yet — need at least {MIN_COMBO_SAMPLE} decided trades sharing the exact same combination of direction/session/day/time/tags.
+      </p>
+    );
+  }
+  const chipClass = tone === 'win'
+    ? 'border-green-600/20 bg-green-600/5 text-green-700 dark:text-green-400'
+    : 'border-red-500/20 bg-red-500/5 text-red-600 dark:text-red-400';
   return (
-    <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 mb-3">
-      <p className="text-[11px] font-medium text-muted-foreground mb-2">Breakdown by direction, session, day &amp; time</p>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
-        {dims.map(d => (
-          <div key={d.title}>
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-1">{d.title}</p>
-            <div className="flex flex-wrap gap-1">
-              {d.rows.slice(0, 3).map(r => (
-                <span key={r.label} className={`px-1.5 py-0.5 rounded-full text-[11px] font-medium border ${chipClass}`}>
-                  {r.label} &middot; {r.pct}%
-                </span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <ul className="space-y-1.5">
+      {combos.map(c => (
+        <li key={c.label} className={`flex items-center justify-between gap-3 rounded-md border px-2 py-1.5 text-xs ${chipClass}`}>
+          <span className="text-foreground/90">{c.label}</span>
+          <span className="shrink-0 font-semibold whitespace-nowrap">
+            {c.winRate}% <span className="font-normal opacity-70">({c.wins}/{c.total})</span>
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -257,7 +314,11 @@ function TradeCard({ trade, accent, onZoom }: { trade: Trade; accent: 'win' | 'l
         {shot?.comment && (
           <p className="flex items-start gap-1.5 mt-2 text-xs text-foreground/90">
             <MessageSquare className="w-3.5 h-3.5 mt-0.5 text-muted-foreground shrink-0" />
-            <span className="line-clamp-2">{shot.comment}</span>
+            {/* Comments can now carry basic formatting (bold/italic/lists -
+                see NotesEditor.tsx) - stripped to plain text for this
+                compact card blurb, same reasoning as the comment row's own
+                collapsed preview in the Notes editor. */}
+            <span className="line-clamp-2">{stripCommentHtml(shot.comment)}</span>
           </p>
         )}
         {/* Deep-links into the Journal table with this trade's detail panel
@@ -291,6 +352,10 @@ export default function VisionBoard() {
   );
   const winPatterns = useMemo(() => commonPatterns(winners), [winners]);
   const lossPatterns = useMemo(() => commonPatterns(losers), [losers]);
+  // Best/worst combinations are a whole-account win-rate question, not a
+  // "these 10 latest wins" one - computed once from every trade, not from
+  // the winners/losers slices above.
+  const combos = useMemo(() => bestWorstCombinations(trades), [trades]);
 
   return (
     <div>
@@ -337,7 +402,10 @@ export default function VisionBoard() {
               </p>
             )}
           </div>
-          <TradeProfile trades={winners} accent="win" />
+          <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 mb-3">
+            <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Best combinations (highest win rate)</p>
+            <ComboList combos={combos.best} tone="win" />
+          </div>
           <div className="space-y-3">
             {winners.map(t => <TradeCard key={t.id} trade={t} accent="win" onZoom={setLightbox} />)}
           </div>
@@ -368,7 +436,10 @@ export default function VisionBoard() {
               </p>
             )}
           </div>
-          <TradeProfile trades={losers} accent="loss" />
+          <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 mb-3">
+            <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Worst combinations (lowest win rate)</p>
+            <ComboList combos={combos.worst} tone="loss" />
+          </div>
           <div className="space-y-3">
             {losers.map(t => <TradeCard key={t.id} trade={t} accent="loss" onZoom={setLightbox} />)}
           </div>

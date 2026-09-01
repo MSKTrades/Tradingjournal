@@ -128,12 +128,14 @@ export type Trade = {
 // older notes and screenshots someone chooses to skip labelling just have
 // no badge rather than a fake default.
 //
-// `comment` is the same idea for free-text notes about that specific
+// `comment` is the same idea for a free-text note about that specific
 // screenshot ("waited for the sweep before entering", "chased it, no
 // confirmation") - set via NotesEditor's comment popover on each image,
-// same optional/no-default treatment as timeframe. Vision Board aggregates
-// these across a trade's screenshots to build its win/loss narrative - see
-// VisionBoard.tsx's commentNarrative().
+// same optional/no-default treatment as timeframe. It holds a small
+// allowlisted subset of HTML (bold/italic/underline/lists), not plain text
+// - see NotesEditor.tsx's sanitizeCommentHtml (applied before it's ever
+// stored) and stripCommentHtml (used anywhere it needs to show up as a
+// single-line plain-text preview, e.g. Vision Board's trade cards).
 export type NoteBlock =
   | { type: 'text'; value: string }
   | { type: 'image'; url: string; timeframe?: string; comment?: string };

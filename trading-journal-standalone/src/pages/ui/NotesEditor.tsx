@@ -1,8 +1,58 @@
 import { useEffect, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
-import { Clock3, Loader2, MessageSquare, Plus, Trash2, X, ZoomIn } from 'lucide-react';
+import { Bold, Clock3, Italic, List, ListOrdered, Loader2, MessageSquare, Plus, Trash2, Underline, X, ZoomIn } from 'lucide-react';
 import { NoteBlock, Timeframe, TIMEFRAME_PRESETS } from '../data/types';
 import { isDemoMode } from '../../lib/demoMode';
+
+// Comments are stored as a small allowlisted subset of HTML (bold/italic/
+// underline/lists - see the toolbar in CommentPopover below), not plain
+// text, so someone can actually format a note the way the toolbar suggests.
+// Two helpers keep that safe and presentable everywhere the comment shows
+// up:
+//
+// - sanitizeCommentHtml strips everything down to that allowlist before a
+//   comment is ever stored - every attribute is dropped too (no href/src/
+//   style/onclick survive), and any tag outside the allowlist is unwrapped
+//   (its own text/children kept, just not the wrapping tag) rather than
+//   deleted outright. This runs once at save time, not on every render, so
+//   every future place a comment gets displayed inherits the same safety
+//   without having to sanitize again itself.
+// - stripCommentHtml renders the sanitized HTML into a detached element and
+//   reads back the plain text - used for the compact, single-line previews
+//   (the collapsed comment row here, the card blurb on Vision Board) where
+//   showing literal "<b>" characters or letting a <ul> break a line-clamp
+//   would look broken; the full formatting is still there when a comment is
+//   actually opened for editing/viewing in its own space.
+const COMMENT_ALLOWED_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'UL', 'OL', 'LI', 'BR', 'DIV', 'P']);
+
+export function sanitizeCommentHtml(html: string): string {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  function clean(node: Node) {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const el = child as HTMLElement;
+        if (!COMMENT_ALLOWED_TAGS.has(el.tagName)) {
+          while (el.firstChild) el.parentNode?.insertBefore(el.firstChild, el);
+          el.parentNode?.removeChild(el);
+          continue;
+        }
+        while (el.attributes.length > 0) el.removeAttribute(el.attributes[0].name);
+        clean(el);
+      } else if (child.nodeType !== Node.TEXT_NODE) {
+        child.parentNode?.removeChild(child);
+      }
+    }
+  }
+  clean(template.content);
+  return template.innerHTML;
+}
+
+export function stripCommentHtml(html: string): string {
+  const el = document.createElement('div');
+  el.innerHTML = html;
+  return (el.textContent ?? '').trim();
+}
 
 type Props = {
   blocks: NoteBlock[];
@@ -88,27 +138,51 @@ function TimeframePicker({ value, options, onPick, onClose }: {
   );
 }
 
-// Small popover for writing a free-text note about one specific screenshot
-// - "what happened / what you were thinking on this chart". Same
-// click-to-open-a-popover, click-outside-to-close shape as TimeframePicker
-// above (that's the explicit ask - comments should work "the same as what
-// we're doing with TFs"), but it doesn't auto-open on paste the way the
-// timeframe picker does: stacking two auto-opening popovers on every pasted
-// screenshot would be more clutter than help, and a comment is usually
-// written after you've actually looked at the chart for a moment, not in
-// the same instant you paste it. The always-visible comment row below the
-// image (not an overlay badge on top of it - that read as too easy to
-// miss) is the invitation instead. Saves as you type (blurring/closing just
-// dismisses the popover, nothing is lost) rather than needing an explicit
-// Save button - one less click for what's meant to be a quick, low-friction
-// note.
-function CommentPopover({ value, onChange, onClose }: {
+// Formatting toolbar buttons for CommentPopover's editor - deliberately the
+// small, well-supported document.execCommand set (bold/italic/underline/
+// lists) rather than pulling in a full rich-text editor library, since a
+// chart comment is a few sentences, not a document. execCommand is
+// officially deprecated but still broadly supported everywhere this app
+// already needs to run; if that ever stops being true, this is the one
+// place that needs to change.
+const COMMENT_TOOLBAR: { cmd: string; label: string; Icon: typeof Bold }[] = [
+  { cmd: 'bold', label: 'Bold', Icon: Bold },
+  { cmd: 'italic', label: 'Italic', Icon: Italic },
+  { cmd: 'underline', label: 'Underline', Icon: Underline },
+  { cmd: 'insertUnorderedList', label: 'Bulleted list', Icon: List },
+  { cmd: 'insertOrderedList', label: 'Numbered list', Icon: ListOrdered },
+];
+
+// Popover for writing a formatted note about one specific screenshot -
+// "what happened / what you were thinking on this chart". Same click-to-
+// open, click-outside-to-close shape as TimeframePicker above (that's the
+// explicit ask - comments should work "the same as what we're doing with
+// TFs"), but it doesn't auto-open on paste the way the timeframe picker
+// does: stacking two auto-opening popovers on every pasted screenshot would
+// be more clutter than help, and a comment is usually written after you've
+// actually looked at the chart for a moment, not in the same instant you
+// paste it. The always-visible comment row below the image is the
+// invitation instead.
+//
+// Sized to match the screenshot it's attached to (full width of the same
+// card, and - via `minHeight`, measured from the actual rendered image -
+// roughly as tall) rather than a small fixed box, so there's real room to
+// write and format a proper note instead of squinting at three lines.
+//
+// The editable area is a plain contentEditable div, deliberately left
+// UNCONTROLLED after its first render (its initial HTML is set once via a
+// ref in useEffect, then React never touches its children again) - a
+// contentEditable whose content React re-renders on every keystroke fights
+// the browser's own cursor/selection position, which is the classic bug
+// with "controlled" rich-text boxes built this way.
+function CommentPopover({ value, onChange, onClose, minHeight }: {
   value: string | undefined;
-  onChange: (v: string) => void;
+  onChange: (html: string) => void;
   onClose: () => void;
+  minHeight?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editableRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -116,24 +190,57 @@ function CommentPopover({ value, onChange, onClose }: {
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  useEffect(() => { textareaRef.current?.focus(); }, []);
+  useEffect(() => {
+    if (editableRef.current) editableRef.current.innerHTML = value ?? '';
+    editableRef.current?.focus();
+    // Deliberately empty deps - this sets the STARTING content once. After
+    // that the div is uncontrolled; see the component comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function runCommand(cmd: string) {
+    editableRef.current?.focus();
+    document.execCommand(cmd);
+    onChange(editableRef.current?.innerHTML ?? '');
+  }
 
   return (
     <div
       ref={ref}
-      className="absolute top-full left-0 mt-1 z-10 w-full sm:w-80 rounded-lg border border-border bg-popover shadow-lg p-2"
+      className="absolute top-full left-0 mt-1 z-10 w-full rounded-lg border border-border bg-popover shadow-lg overflow-hidden"
       onClick={(e) => e.stopPropagation()}
     >
-      <p className="text-[11px] font-medium text-muted-foreground px-1 pb-1.5">Notes on this chart</p>
-      <textarea
-        ref={textareaRef}
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="What happened here? What worked or didn't…"
-        rows={3}
-        className="w-full resize-none bg-transparent border border-border rounded-md px-2 py-1.5 text-xs outline-none focus:border-primary placeholder:text-muted-foreground"
+      <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border">
+        <p className="text-[11px] font-medium text-muted-foreground">Notes on this chart</p>
+        <div className="flex items-center gap-0.5">
+          {COMMENT_TOOLBAR.map(({ cmd, label, Icon }) => (
+            <button
+              key={cmd}
+              type="button"
+              title={label}
+              aria-label={label}
+              // onMouseDown (not onClick) with preventDefault - clicking a
+              // toolbar button must not steal focus/selection away from the
+              // editable area, or execCommand would have nothing to act on.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => runCommand(cmd)}
+              className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <Icon className="w-3.5 h-3.5" />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div
+        ref={editableRef}
+        contentEditable
+        onInput={(e) => onChange(e.currentTarget.innerHTML)}
+        data-placeholder="What happened here? What worked or didn't…"
+        style={{ minHeight: minHeight ? `${Math.round(minHeight)}px` : undefined }}
+        className="comment-editable w-full px-3 py-2.5 text-sm text-foreground leading-relaxed outline-none overflow-y-auto max-h-[70vh]"
       />
     </div>
   );
@@ -204,6 +311,25 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
   // openTfFor but never set automatically (see CommentPopover's comment on
   // why it doesn't auto-open on paste).
   const [openCommentFor, setOpenCommentFor] = useState<number | null>(null);
+  // The comment popover is sized to roughly match the screenshot it's
+  // attached to (see CommentPopover's comment) - this is the measured
+  // height of that specific image, captured the moment its comment row is
+  // clicked, from a ref to the actual rendered <img>.
+  const [commentEditorHeight, setCommentEditorHeight] = useState<number | undefined>(undefined);
+  const imgRefs = useRef<Map<number, HTMLImageElement>>(new Map());
+
+  function toggleComment(i: number) {
+    if (openCommentFor === i) {
+      setOpenCommentFor(null);
+      return;
+    }
+    const img = imgRefs.current.get(i);
+    // Clamped so a tiny screenshot doesn't leave almost no room to write,
+    // and a huge one doesn't turn the popover into most of the screen.
+    const measured = img ? Math.min(520, Math.max(140, img.clientHeight)) : 200;
+    setCommentEditorHeight(measured);
+    setOpenCommentFor(i);
+  }
 
   // Saved custom timeframes merged with the built-in presets, deduped and
   // case-insensitively - so once someone's saved "2H" it shows up in the
@@ -298,8 +424,8 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
     setOpenTfFor(null);
   }
 
-  function setImageComment(i: number, comment: string) {
-    setBlock(i, { ...(normalized[i] as { type: 'image'; url: string; timeframe?: string; comment?: string }), comment });
+  function setImageComment(i: number, rawHtml: string) {
+    setBlock(i, { ...(normalized[i] as { type: 'image'; url: string; timeframe?: string; comment?: string }), comment: sanitizeCommentHtml(rawHtml) });
   }
 
   return (
@@ -342,6 +468,7 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
           <div key={i} className="w-full rounded-lg overflow-hidden border border-border">
             <div className="relative group">
               <img
+                ref={(el) => { if (el) imgRefs.current.set(i, el); else imgRefs.current.delete(i); }}
                 src={block.url} alt="Trade screenshot" className="w-full h-auto block cursor-zoom-in"
                 onClick={() => setLightbox(block.url)}
               />
@@ -396,14 +523,20 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
                 as the timeframe badge. */}
             <div className="relative">
               <button
-                onClick={() => setOpenCommentFor(openCommentFor === i ? null : i)}
+                onClick={() => toggleComment(i)}
                 className={`w-full flex items-center gap-1.5 px-2.5 py-2 text-xs text-left border-t border-border transition-colors ${
-                  block.comment ? 'bg-primary/10 hover:bg-primary/15' : 'bg-muted/40 hover:bg-muted text-muted-foreground'
+                  block.comment ? 'bg-primary/15 hover:bg-primary/20' : 'bg-muted/40 hover:bg-muted text-muted-foreground'
                 }`}
               >
                 <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${block.comment ? 'text-primary' : ''}`} />
-                <span className={`truncate ${block.comment ? 'text-foreground font-medium' : ''}`}>
-                  {block.comment || 'Add a comment on this chart…'}
+                {/* Stripped to plain text for this single-line preview - the
+                    full formatting shows once the popover below is open.
+                    text-foreground (not a dimmer/muted tone) plus font-
+                    semibold once there's a real comment, specifically per
+                    feedback that the filled-in state wasn't easy to read at
+                    a glance. */}
+                <span className={`truncate ${block.comment ? 'text-foreground font-semibold' : ''}`}>
+                  {block.comment ? stripCommentHtml(block.comment) : 'Add a comment on this chart…'}
                 </span>
               </button>
               {openCommentFor === i && (
@@ -411,6 +544,7 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
                   value={block.comment}
                   onChange={(v) => setImageComment(i, v)}
                   onClose={() => setOpenCommentFor(null)}
+                  minHeight={commentEditorHeight}
                 />
               )}
             </div>
