@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../lib/ui/button';
 import { Badge, Checkbox } from '../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../lib/ui/table';
@@ -470,6 +471,30 @@ export default function Journal() {
   const [pageSize, setPageSize] = useState(25);
 
   const trades: Trade[] = rawTrades ?? [];
+
+  // Deep-linking into a single trade - e.g. "Open in Journal" from Vision
+  // Board (?trade=123) - opens that trade's detail panel automatically once
+  // its data has loaded, then strips the param from the URL so it doesn't
+  // keep re-opening on every navigation back to a plain /journal, and
+  // closing the panel manually actually stays closed.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const openedFromLinkRef = useRef<string | null>(null);
+  useEffect(() => {
+    const tradeParam = new URLSearchParams(location.search).get('trade');
+    if (!tradeParam || tradeParam === openedFromLinkRef.current || trades.length === 0) return;
+    const match = trades.find(t => String(t.id) === tradeParam);
+    if (!match) return;
+    openedFromLinkRef.current = tradeParam;
+    setEditTrade(match);
+    setDialogOpen(true);
+    // location.pathname, not a hardcoded '/journal' - this same component
+    // also renders at /demo/app/journal inside the demo sandbox (see
+    // DemoShell in App.tsx), and a hardcoded real-app path would bounce a
+    // demo visitor straight to the login screen instead of just clearing
+    // the query string in place.
+    navigate(location.pathname, { replace: true });
+  }, [location.search, location.pathname, trades, navigate]);
   const usedTagNames = new Set(trades.flatMap(allTagsOnTrade));
   const accountTagOptions = allTagOptions.filter(t => usedTagNames.has(t.name));
   // Main Tag chip's own options: which tag GROUPS actually have a selection

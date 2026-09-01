@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { TrendingUp, TrendingDown, Clock3, ImageOff, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { TrendingUp, TrendingDown, Clock3, ImageOff, X, BookOpen } from 'lucide-react';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
 import { Trade, NoteBlock, fmtMoney, fmtNum, plColor } from './data/types';
@@ -96,6 +97,16 @@ function TradeCard({ trade, accent, onZoom }: { trade: Trade; accent: 'win' | 'l
             ))}
           </div>
         )}
+        {/* Deep-links into the Journal table with this trade's detail panel
+            already open - see the ?trade= handling added to Journal.tsx.
+            Kept as a plain text link rather than another icon-only button so
+            its purpose is obvious without a hover/tooltip. */}
+        <Link
+          to={`/journal?trade=${trade.id}`}
+          className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-2.5"
+        >
+          <BookOpen className="w-3 h-3" /> Open in Journal
+        </Link>
       </div>
     </div>
   );
