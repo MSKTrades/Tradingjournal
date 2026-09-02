@@ -5,7 +5,6 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '.
 import { Trade, TagGroup, fmtMoney, plColor } from '../data/types';
 import { summarizeOutcome } from '../data/risk';
 import { useFetch } from '../../lib/api';
-import ProBadge from '../../components/ProBadge';
 
 // The tag group name the starter preset (TagGroupsPicker.tsx) creates -
 // matched exactly against fetched tag_groups to find each tag's color.
@@ -62,7 +61,6 @@ export default function ExecutionMistakeSummary({ trades }: { trades: Trade[] })
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-muted-foreground" />
           <CardTitle className="text-base font-bold">Execution Mistakes</CardTitle>
-          <ProBadge feature="execution_mistakes" />
         </div>
         <p className="text-xs text-muted-foreground mt-0.5">
           How trades tagged with each logged execution mistake line up with results.

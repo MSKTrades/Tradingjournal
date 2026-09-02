@@ -179,8 +179,10 @@ export default function Layout({ children, demoMode = false }: { children: React
                     {/* Only Vision Board is a full nav item that's also a
                         registered Pro feature (see proFeatures.ts) - every
                         other Pro feature badges itself inline on whichever
-                        page/card it actually lives on (HTF Bias Alignment,
-                        Weekly Digest, etc.), so this doesn't get a general
+                        page/card it actually lives on (Checklist Compliance,
+                        Weekly Digest, etc. - HTF Bias Alignment and Execution
+                        Mistakes used to be on this list too, until they moved
+                        to the Free plan), so this doesn't get a general
                         to-key lookup, just the one explicit check. */}
                     {to === 'vision-board' && !demoMode && <ProBadge feature="vision_board" />}
                   </span>

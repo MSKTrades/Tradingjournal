@@ -125,7 +125,7 @@ export const FEATURE_DETAILS: Record<string, FeatureDetailContent> = {
     highlights: [
       { title: 'Three honest buckets', desc: 'With your bias, against it, or neutral — every trade lands in exactly one, based on its own tags and direction.' },
       { title: 'A pattern you can act on', desc: 'If trading against your own bias is quietly costing you 15 points of win rate, this is where that becomes impossible to ignore.' },
-      { title: 'A Pro feature', desc: 'Free for every account during the launch promo — afterward it\'s part of the Pro plan.' },
+      { title: 'Included on the Free plan', desc: 'Uses the same "HTF Bias" starter tag group as Custom Fields & Tags — no separate setup, and nothing to upgrade for.' },
     ],
     visual: () => <HtfBiasVisual />,
     ctaHref: '/demo/app',

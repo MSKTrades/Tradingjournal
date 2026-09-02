@@ -80,7 +80,6 @@ export const FEATURES: FeatureSummary[] = [
     icon: Compass,
     title: 'HTF Bias Alignment',
     desc: 'See how often your entries actually agreed with the higher-timeframe bias, so you catch a fade-the-trend habit before it costs another month.',
-    pro: 'htf_bias_alignment',
   },
   {
     icon: Globe,

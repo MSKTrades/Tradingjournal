@@ -48,8 +48,6 @@ export type ProFeatureKey =
   | 'multi_strategy'
   | 'backtest'
   | 'checklist_compliance'
-  | 'execution_mistakes'
-  | 'htf_bias_alignment'
   | 'weekly_digest'
   | 'r_multiple_distribution'
   | 'public_track_record'
@@ -84,12 +82,6 @@ export const PRO_FEATURES: Record<ProFeatureKey, { message: string }> = {
   },
   checklist_compliance: {
     message: 'Checklist Compliance analysis is a Pro feature.',
-  },
-  execution_mistakes: {
-    message: 'Execution Mistakes analysis is a Pro feature.',
-  },
-  htf_bias_alignment: {
-    message: 'HTF Bias Alignment is a Pro feature.',
   },
   weekly_digest: {
     message: 'Weekly Digest is a Pro feature.',
