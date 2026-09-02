@@ -143,8 +143,26 @@ async function handlePortal(req: VercelRequest, res: VercelResponse, sql: Return
 async function syncSubscriptionToUser(sql: ReturnType<typeof db>, subscription: any) {
   const status: string = subscription.status;
   const plan = ['trialing', 'active', 'past_due'].includes(status) ? 'pro' : 'free';
-  const periodEnd = subscription.current_period_end
-    ? new Date(subscription.current_period_end * 1000).toISOString()
+  // Stripe's "Basil" API version (2025-03-31.basil and later — this account
+  // is on 2026-08-26.dahlia, well past that) REMOVED current_period_end
+  // from the top-level Subscription object entirely and moved it onto each
+  // subscription item instead (items.data[].current_period_end), since a
+  // multi-item subscription can have items on different billing cycles.
+  // Reading subscription.current_period_end directly (as this used to)
+  // silently comes back undefined on any account created after that
+  // version shipped — no error, just a permanently-null
+  // plan_current_period_end and a Billing page stuck showing "first charge
+  // on —." This checks the new item-level field first, the old top-level
+  // one for safety on an older pinned API version, and finally trial_end
+  // (which Basil did NOT remove) since for a trialing subscription that's
+  // functionally the same date anyway.
+  const periodEndUnix =
+    subscription.items?.data?.[0]?.current_period_end
+    ?? subscription.current_period_end
+    ?? subscription.trial_end
+    ?? null;
+  const periodEnd = periodEndUnix
+    ? new Date(periodEndUnix * 1000).toISOString()
     : null;
   await sql.unsafe(
     `UPDATE users SET plan = $1, stripe_subscription_id = $2, stripe_subscription_status = $3, plan_current_period_end = $4
