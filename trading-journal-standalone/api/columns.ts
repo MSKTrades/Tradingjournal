@@ -107,9 +107,27 @@ async function getTagGroups(sql: ReturnType<typeof db>, userId: number, accountI
 // fresh-install migration in schema.sql (back when there was only ever one
 // person's data); now that each signup gets its own isolated data, each
 // signup creates its own starter account instead.
+//
+// It also seeds one starter Strategy Playbook, "All Trades" — an empty
+// `conditions` array (the column's own DEFAULT) matches every trade with no
+// filtering at all (see StrategyDialog.tsx's own "No conditions — all
+// trades qualify" copy, and demoBackend.ts's `conditions.every(...)` which
+// is vacuously true on an empty array — the real API's strategy-results
+// query has the same behavior). Before this, a brand-new account's Summary
+// page showed "No active strategies found" and an empty strategy-results
+// table until the person went and manually built their first Strategy —
+// which is the exact "I just see this" blank-dashboard problem reported
+// against a fresh signup. `days`/`time_start`/`time_end`/`tp1_rr`/
+// `account_ids` are all left at their own table defaults (every day, no
+// time bounds, tp1_rr=3, every account) for the same "match everything,
+// out of the box" reasoning.
 async function createStarterAccount(sql: ReturnType<typeof db>, userId: number) {
   await sql.unsafe(
     `INSERT INTO accounts (name, type, sort_order, user_id) VALUES ('Default', 'Live', 0, $1)`,
+    [userId]
+  );
+  await sql.unsafe(
+    `INSERT INTO strategies (name, user_id) VALUES ('All Trades', $1)`,
     [userId]
   );
 }

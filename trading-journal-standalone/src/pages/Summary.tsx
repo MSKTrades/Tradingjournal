@@ -17,6 +17,8 @@ import HtfBiasAlignment from './ui/HtfBiasAlignment';
 import WeeklyDigest from './ui/WeeklyDigest';
 import { summarizeOutcome } from './data/risk';
 import ProBadge from '../components/ProBadge';
+import ProLocked from '../components/ProLocked';
+import EmptyBlock from '../components/EmptyBlock';
 import SessionClockWidget from './ui/SessionClockWidget';
 import { isDemoMode, DEMO_BASE } from '../lib/demoMode';
 
@@ -100,7 +102,15 @@ function useChecklistCompliance(trades: Trade[], checklists: Checklist[]) {
 function ChecklistCompliance({ trades, checklists }: { trades: Trade[]; checklists: Checklist[] }) {
   const stats = useChecklistCompliance(trades, checklists);
 
-  if (stats.length === 0) return null;
+  if (stats.length === 0) {
+    return (
+      <EmptyBlock
+        icon={ListChecks}
+        title="Checklist Compliance"
+        message="Enable a checklist on a trade and grade it against your rules to see compliance stats here."
+      />
+    );
+  }
 
   return (
     <div className="mb-6 flex flex-col gap-5">
@@ -444,7 +454,9 @@ export default function Summary() {
 
       <SessionClockWidget />
 
-      <WeeklyDigest trades={trades} checklists={checklists} />
+      <ProLocked feature="weekly_digest">
+        <WeeklyDigest trades={trades} checklists={checklists} />
+      </ProLocked>
 
       {totalTrades > 0 && (
         <div className="grid grid-cols-3 gap-4 mb-6">
@@ -529,7 +541,9 @@ export default function Summary() {
         </div>
       )}
 
-      <ChecklistCompliance trades={trades} checklists={checklists} />
+      <ProLocked feature="checklist_compliance">
+        <ChecklistCompliance trades={trades} checklists={checklists} />
+      </ProLocked>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
         <RiskGuardrail account={activeAccount} trades={trades} />

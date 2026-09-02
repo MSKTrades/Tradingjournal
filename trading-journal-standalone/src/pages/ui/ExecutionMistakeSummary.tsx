@@ -5,6 +5,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '.
 import { Trade, TagGroup, fmtMoney, plColor } from '../data/types';
 import { summarizeOutcome } from '../data/risk';
 import { useFetch } from '../../lib/api';
+import EmptyBlock from '../../components/EmptyBlock';
 
 // The tag group name the starter preset (TagGroupsPicker.tsx) creates -
 // matched exactly against fetched tag_groups to find each tag's color.
@@ -49,7 +50,15 @@ export default function ExecutionMistakeSummary({ trades }: { trades: Trade[] })
     return result.sort((a, b) => b.count - a.count);
   }, [trades]);
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    return (
+      <EmptyBlock
+        icon={AlertTriangle}
+        title="Execution Mistakes"
+        message="Tag a trade with an execution mistake (under the 'Execution Mistakes' tag group) to see how each one lines up with your results."
+      />
+    );
+  }
 
   function colorFor(name: string): string | null {
     return matchedGroup?.options.find(o => o.name.toLowerCase() === name.toLowerCase())?.color ?? null;

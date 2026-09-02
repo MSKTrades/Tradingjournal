@@ -6,6 +6,7 @@ import { Trade, Checklist, fmtMoney } from '../data/types';
 import { summarizeOutcome } from '../data/risk';
 import { EMOTIONS_POSITIVE, EMOTIONS_CAUTION } from './TradeDetailPanel';
 import ProBadge from '../../components/ProBadge';
+import EmptyBlock from '../../components/EmptyBlock';
 
 // Local-date (not UTC) "today" - trade_placed_at is a plain DATE string with
 // no time/timezone attached, so every date computed in this file stays in
@@ -205,9 +206,20 @@ export default function WeeklyDigest({ trades, checklists }: { trades: Trade[]; 
     return { avg: Math.round((sum / rated.length) * 10) / 10, count: rated.length };
   }, [selected.weekTrades]);
 
-  // Zero trades anywhere in the account - stay out of the way entirely,
-  // same convention RiskGuardrail/EmotionsRatingSummary already follow.
-  if (trades.length === 0) return null;
+  // Zero trades anywhere in the account - a proper empty-state card instead
+  // of vanishing entirely, so a brand-new account's dashboard shows the
+  // same "here's what this will look like" shape every other Summary card
+  // now follows (see EmptyBlock's own doc comment) instead of a gap where
+  // this full-width card would otherwise sit.
+  if (trades.length === 0) {
+    return (
+      <EmptyBlock
+        icon={CalendarDays}
+        title="Weekly Digest"
+        message="Log your first trade to get a standing Mon-Sun recap here — win rate, net $, checklist compliance, and the emotions that showed up along the way."
+      />
+    );
+  }
 
   // --- Narrative: plain, deterministic, rule-based sentences. Each rule is
   // independent and only fires when it has something real to say - no

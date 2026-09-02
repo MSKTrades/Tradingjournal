@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../lib/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../lib/ui/table';
 import { Trade, fmtMoney, plColor } from '../data/types';
 import { summarizeOutcome } from '../data/risk';
+import EmptyBlock from '../../components/EmptyBlock';
 
 // The tag group name the starter preset (TagGroupsPicker.tsx) creates -
 // same exact-match convention as ExecutionMistakeSummary.tsx: tag_selections
@@ -62,7 +63,15 @@ export default function HtfBiasAlignment({ trades }: { trades: Trade[] }) {
   }, [trades]);
 
   const taggedCount = aligned.length + against.length + neutral.length;
-  if (taggedCount === 0) return null;
+  if (taggedCount === 0) {
+    return (
+      <EmptyBlock
+        icon={Compass}
+        title="HTF Bias Alignment"
+        message="Tag a trade's higher-timeframe bias (Bullish/Bearish/Neutral, under the 'HTF Bias' tag group) to see how often your entries actually agreed with it."
+      />
+    );
+  }
 
   const rows: BiasRow[] = [
     { label: 'With HTF Bias', ...summarizeOutcome(aligned) },

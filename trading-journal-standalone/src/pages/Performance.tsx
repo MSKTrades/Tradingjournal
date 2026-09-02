@@ -16,6 +16,7 @@ import { computeDrawdown } from './data/risk';
 import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters, allTagsOnTrade, TagOption } from './ui/PerformanceFilterBar';
 import RMultipleDistribution from './ui/RMultipleDistribution';
 import HourOfDayPerformance from './ui/HourOfDayPerformance';
+import ProLocked from '../components/ProLocked';
 
 // Y-axis domain for the P/L bar charts below (Monthly/Yearly/Weekday/
 // Session/Hour) - always anchored at $0 (see the earlier fix: without this,
@@ -813,7 +814,9 @@ export default function Performance() {
               these describe the account's actual trading history, not a
               filtered slice of it. */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <RMultipleDistribution trades={rawTradesForHourly ?? []} />
+            <ProLocked feature="r_multiple_distribution">
+              <RMultipleDistribution trades={rawTradesForHourly ?? []} />
+            </ProLocked>
             <HourOfDayPerformance trades={rawTradesForHourly ?? []} />
           </div>
 
