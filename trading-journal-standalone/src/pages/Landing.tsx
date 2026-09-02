@@ -68,6 +68,35 @@ function HeroBackground() {
   );
 }
 
+/** Purely decorative — a soft two-layer orange wave along the bottom of a
+ * section, same low-opacity brand-gradient treatment as WeeklyDigest.tsx's
+ * card background. Used to break up a long stretch of flat dark background
+ * between the hero and the next bordered section, without adding real
+ * visual weight or competing with whatever sits on top of it. */
+function SectionWave() {
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 bottom-0 h-48 overflow-hidden opacity-[0.18] dark:opacity-[0.13]"
+      aria-hidden="true"
+    >
+      <svg viewBox="0 0 1200 190" preserveAspectRatio="none" className="w-full h-full">
+        <defs>
+          <linearGradient id="landingWaveA" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#f59e0b" />
+            <stop offset="100%" stopColor="#fb923c" />
+          </linearGradient>
+          <linearGradient id="landingWaveB" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#fbbf24" />
+            <stop offset="100%" stopColor="#f97316" />
+          </linearGradient>
+        </defs>
+        <path d="M0,95 C200,165 400,25 600,85 C800,145 1000,35 1200,95 L1200,190 L0,190 Z" fill="url(#landingWaveA)" />
+        <path d="M0,120 C250,60 450,180 700,110 C900,45 1050,135 1200,110 L1200,190 L0,190 Z" fill="url(#landingWaveB)" opacity="0.6" />
+      </svg>
+    </div>
+  );
+}
+
 type ComparisonValue = boolean | 'manual';
 const COMPARISON: { label: string; spreadsheet: ComparisonValue; notes: ComparisonValue; pipecho: ComparisonValue }[] = [
   { label: 'Automatic equity curve & running balance', spreadsheet: false, notes: false, pipecho: true },
@@ -139,7 +168,8 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="px-6 pb-20">
+      <section className="relative px-6 pb-20 overflow-hidden">
+        <SectionWave />
         <div className="max-w-3xl mx-auto">
           <div className="text-center mb-8">
             <h2 className="text-2xl font-semibold tracking-tight">Watch a rule change the numbers</h2>
