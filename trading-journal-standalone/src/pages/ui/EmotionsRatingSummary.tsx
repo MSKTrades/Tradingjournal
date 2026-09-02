@@ -63,7 +63,13 @@ export default function EmotionsRatingSummary({ trades }: { trades: Trade[] }) {
     return rows;
   }, [trades]);
 
-  if (emotionRows.length === 0 && ratingRows.length === 0) return null;
+  // Both sections already have their own "nothing here yet" message below
+  // (the italic "No trades tagged..."/"No trades rated yet." lines) - this
+  // card used to bail out entirely before ever reaching them whenever both
+  // were empty, which is exactly the kind of silent grid-hole the other
+  // Summary cards had (see EmptyBlock's doc comment). No early return here
+  // means a brand-new account still shows the card shell with its own
+  // built-in empty copy, instead of vanishing.
 
   return (
     <Card>

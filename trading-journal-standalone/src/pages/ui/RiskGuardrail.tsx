@@ -2,6 +2,7 @@ import { ShieldAlert } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../lib/ui/card';
 import { Account, Trade, fmtMoney } from '../data/types';
 import { computeDrawdown, computeTodayPnL, computeConsistency } from '../data/risk';
+import EmptyBlock from '../../components/EmptyBlock';
 
 type GaugeProps = {
   label: string;
@@ -42,8 +43,25 @@ function Gauge({ label, usedDollar, limitDollar, usedPct, sub }: GaugeProps) {
 }
 
 export default function RiskGuardrail({ account, trades }: { account: Account | null; trades: Trade[] }) {
+  // No account context yet (still loading/switching) - genuinely nothing to
+  // render a card shell around, unlike the "not configured" case below.
   if (!account) return null;
-  if (account.daily_loss_limit_pct == null && account.max_drawdown_limit_pct == null && account.consistency_rule_pct == null) return null;
+
+  // Risk Guardrail is opt-in per account (set from the account switcher's
+  // Edit Account dialog) - unlike the other Summary cards, an account with
+  // no limits set isn't "no data yet," it's "not turned on yet." Still gets
+  // the same always-visible EmptyBlock treatment as everything else though,
+  // so a new account's dashboard shows what this card is for instead of
+  // just missing a grid cell.
+  if (account.daily_loss_limit_pct == null && account.max_drawdown_limit_pct == null && account.consistency_rule_pct == null) {
+    return (
+      <EmptyBlock
+        icon={ShieldAlert}
+        title={`Risk Guardrail — ${account.name}`}
+        message="Set a daily loss limit, max drawdown limit, or consistency rule on this account (via the account switcher's Edit Account dialog) to get a live warning here when you're close to breaching one."
+      />
+    );
+  }
 
   const startingBalance = account.starting_balance ?? 0;
   const todayPnL = computeTodayPnL(trades);
