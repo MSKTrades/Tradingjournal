@@ -96,15 +96,15 @@ function fmtDate(iso: string) {
 
 export default function Landing() {
   useDocumentMeta({
-    title: 'PipEcho — Trading Journal, Backtesting & Session Analytics for Forex Traders',
-    description: 'A trading journal, backtesting and session-analytics workspace built for forex traders — Strategy Playbooks, Risk Guardrail, and pre-trade checklists included free.',
+    title: 'PipEcho — Trading Journal, Backtesting & Session Analytics for Traders',
+    description: 'A trading journal, backtesting and session-analytics workspace built for every trader — forex, crypto, futures, and stocks — with Strategy Playbooks, Risk Guardrail, and pre-trade checklists included free.',
     jsonLd: {
       '@context': 'https://schema.org',
       '@type': 'SoftwareApplication',
       name: 'PipEcho',
       applicationCategory: 'FinanceApplication',
       operatingSystem: 'Web',
-      description: 'A trading journal, backtesting and session-analytics workspace built for forex traders.',
+      description: 'A trading journal, backtesting and session-analytics workspace built for every trader, across forex, crypto, futures, and stocks.',
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
       url: 'https://pipecho.com/',
     },
@@ -117,7 +117,7 @@ export default function Landing() {
         <HeroBackground />
         <div className="relative max-w-6xl mx-auto">
           <span className="inline-block text-xs font-semibold tracking-wide uppercase text-primary bg-accent px-3 py-1 rounded-full mb-6">
-            Built for forex traders
+            Built for every trader — forex to crypto
           </span>
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight max-w-3xl mx-auto leading-tight">
             Trade with data, not guesswork.

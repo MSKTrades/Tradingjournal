@@ -12,7 +12,7 @@ function fmtDate(iso: string) {
 export default function Blog() {
   useDocumentMeta({
     title: 'Blog — PipEcho',
-    description: 'Notes on strategy, risk management, and backtesting for forex traders, from the trader building PipEcho.',
+    description: 'Notes on strategy, risk management, and backtesting for every trader, from the trader building PipEcho.',
   });
   return (
     <div className="min-h-screen bg-background text-foreground">

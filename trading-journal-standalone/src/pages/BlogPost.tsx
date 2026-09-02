@@ -20,7 +20,7 @@ export default function BlogPost() {
   // case anyway.
   useDocumentMeta({
     title: post ? `${post.title} — PipEcho` : 'PipEcho Blog',
-    description: post ? post.excerpt : 'Notes on strategy, risk management, and backtesting for forex traders.',
+    description: post ? post.excerpt : 'Notes on strategy, risk management, and backtesting for every trader.',
     jsonLd: post
       ? {
           '@context': 'https://schema.org',

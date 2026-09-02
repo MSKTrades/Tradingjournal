@@ -183,7 +183,7 @@ export function MarketingFooter() {
             <span>PipEcho</span>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            A trading journal and backtesting workspace for forex traders.
+            A trading journal and backtesting workspace for every trader.
           </p>
         </div>
         <div>

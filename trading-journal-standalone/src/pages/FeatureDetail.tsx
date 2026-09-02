@@ -28,7 +28,7 @@ export default function FeatureDetail() {
 
   useDocumentMeta({
     title: feature ? `${feature.title} — PipEcho` : 'PipEcho Features',
-    description: feature ? feature.desc : 'Everything PipEcho does for forex traders.',
+    description: feature ? feature.desc : 'Everything PipEcho does for every trader.',
     jsonLd: feature
       ? {
           '@context': 'https://schema.org',
