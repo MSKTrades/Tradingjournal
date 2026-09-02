@@ -60,7 +60,19 @@ export async function getUserFromRequest(req, sql) {
     const { payload } = await jwtVerify(token, getSecretKey());
     const userId = Number(payload.sub);
     if (!userId || isNaN(userId)) return null;
-    const rows = await sql.unsafe('SELECT id, email, name, created_at FROM users WHERE id = $1', [userId]);
+    // plan / stripe_subscription_status / plan_current_period_end are
+    // included so the client (useAuth()'s User) always knows the current
+    // billing state without a separate round trip - see api/stripe.ts's
+    // webhook handler for what writes these, and src/lib/proFeatures.ts's
+    // hasProAccess(user?.plan) for the one place that reads `plan` to decide
+    // real access. stripe_customer_id / stripe_subscription_id are
+    // deliberately left out of this SELECT - they're Stripe's own internal
+    // object ids, only ever needed server-side (checkout/portal/webhook),
+    // never by the browser.
+    const rows = await sql.unsafe(
+      'SELECT id, email, name, created_at, plan, stripe_subscription_status, plan_current_period_end FROM users WHERE id = $1',
+      [userId]
+    );
     return rows[0] ?? null;
   } catch {
     // Expired, malformed, or signed with an old/rotated secret — treat as logged out.

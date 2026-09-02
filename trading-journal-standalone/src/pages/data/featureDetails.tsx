@@ -33,15 +33,15 @@ export const FEATURE_DETAILS: Record<string, FeatureDetailContent> = {
     ctaLabel: 'Try the Journal in the demo',
   },
   'chart-replay-backtesting': {
-    intro: "Chart Replay & Backtesting pulls real historical candle data and lets you step through it bar-by-bar, so you can rehearse a setup — and see exactly where you would have entered, where you'd have been stopped out, and where it would have run — before a single dollar of live capital is at risk. Free accounts get up to 6 months of history; Pro gets unlimited.",
+    intro: "Still being built — not available in the app yet, so here's what it'll do once it ships: pull real historical candle data and let you step through it bar-by-bar, so you can rehearse a setup — and see exactly where you would have entered, where you'd have been stopped out, and where it would have run — before a single dollar of live capital is at risk. Free accounts will get up to 6 months of history; Pro will get unlimited.",
     highlights: [
       { title: 'Real historical candles', desc: 'Not a synthetic chart — the same kind of price data you\'d pull from TradingView, MT4/5, or Dukascopy, replayed bar by bar.' },
       { title: 'Rehearse before you risk', desc: 'Mark up a chart, place a hypothetical entry, and see how it would have actually played out — no live capital involved.' },
-      { title: 'Free gets 6 months, Pro gets unlimited', desc: 'Chart Replay & Backtesting itself is free for every account — the history window is the only thing the Pro plan extends.' },
+      { title: 'Free gets 6 months, Pro gets unlimited', desc: 'Chart Replay & Backtesting itself will be free for every account — the history window will be the only thing the Pro plan extends.' },
     ],
     visual: () => <BacktestVisual />,
     ctaHref: '/signup',
-    ctaLabel: 'Sign up free to try it',
+    ctaLabel: 'Sign up free for early access',
   },
   'performance-analytics': {
     intro: 'Performance Analytics turns your logged trades into the numbers that actually tell you whether your edge is real: win rate, average R, profit factor, expectancy, drawdown, and win/loss streaks — broken down by month, weekday, session, and hour of day, so you can see exactly where your edge is strongest and where it quietly falls apart.',

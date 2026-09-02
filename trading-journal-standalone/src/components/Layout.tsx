@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Radar, Trophy, Sparkles, DoorOpen, Images } from 'lucide-react';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Radar, Trophy, Sparkles, DoorOpen, Images, CreditCard } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTheme } from '../lib/theme';
 import { useAuth } from '../lib/auth';
@@ -28,14 +28,18 @@ const NAV_ITEMS = [
   { to: 'performance',  label: 'Performance', icon: TrendingUp, disabled: false },
   { to: 'strategies',   label: 'Strategies',  icon: Settings,   disabled: false },
   { to: 'checklists',   label: 'Checklists',  icon: ListChecks, disabled: false },
-  // Chart Replay & Backtesting - open to every signed-in user (free or
-  // paid), not just the admin account. See App.tsx and api/backtest.ts's
-  // resource=datasets/trades/fetch/drawings for where the actual (now
-  // removed) admin gate used to live. Not offered inside the demo sandbox
-  // (see demoMode below) - it needs real historical candle data, which the
-  // in-memory demo backend doesn't fake.
-  { to: 'backtest',     label: 'Backtest',    icon: History,    disabled: false },
+  // Chart Replay & Backtesting - gated to "Coming soon" for everyone right
+  // now (see App.tsx's /backtest route rendering BacktestComingSoon, and
+  // that file's own doc comment for why). Kept visible-but-disabled rather
+  // than removed entirely so the feature isn't a surprise once it ships -
+  // same pattern as any other `disabled: true` item below. Not offered
+  // inside the demo sandbox either way (see DEMO_HIDDEN below).
+  { to: 'backtest',     label: 'Backtest',    icon: History,    disabled: true },
   { to: 'challenge-simulator', label: 'Challenge Simulator', icon: Trophy, disabled: false },
+  // Real Stripe billing (src/pages/Billing.tsx, api/stripe.ts) - not shown
+  // in the demo sandbox at all (see DEMO_HIDDEN below), same as Backtest/
+  // Challenge Simulator/Vision Board.
+  { to: 'billing',      label: 'Billing',     icon: CreditCard, disabled: false },
 ];
 
 // Appended only for the admin account (see lib/admin.ts) — everyone else's
@@ -56,7 +60,7 @@ const ADMIN_NAV_ITEM = { to: 'admin', label: 'Admin', icon: ShieldCheck, disable
 // /trades data every other demo page already uses), but because the seed
 // trades don't carry screenshots, so the page would only ever show empty
 // placeholders - not a useful preview of what it actually does.
-const DEMO_HIDDEN = new Set(['backtest', 'challenge-simulator', 'vision-board']);
+const DEMO_HIDDEN = new Set(['backtest', 'challenge-simulator', 'vision-board', 'billing']);
 
 function navHref(base: string, to: string): string {
   if (to === '') return base || '/';

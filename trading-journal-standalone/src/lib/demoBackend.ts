@@ -876,12 +876,16 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
       return { deleted: 1 };
     }
   }
-  if (path === '/trades/bulk-delete' && method === 'POST') {
+  // /trades/bulk?resource=add / ?resource=delete - mirrors the real
+  // api/trades/bulk.ts's own dispatch (see that file for why bulk-add and
+  // bulk-delete are one route now instead of two: freeing a serverless
+  // function slot under the Vercel Hobby 12-function cap for api/stripe.ts).
+  if (path === '/trades/bulk' && resource === 'delete' && method === 'POST') {
     const ids: number[] = b.ids ?? [];
     store.trades = store.trades.filter(t => !ids.includes(t.id));
     return { deleted: ids.length };
   }
-  if (path === '/trades/bulk-add' && method === 'POST') {
+  if (path === '/trades/bulk' && resource === 'add' && method === 'POST') {
     const rows: any[] = b.trades ?? [];
     if (rows.length === 0) return { added: 0 };
     // Excel import shares the same 1-trade demo allowance as adding a

@@ -7,6 +7,7 @@ import { FEATURE_DETAILS } from './data/featureDetails';
 import { featureSlug } from '../lib/featureSlug';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
 import ProBadge from '../components/ProBadge';
+import ComingSoonBadge from '../components/ComingSoonBadge';
 
 /** One detail page per entry in FEATURES, reached from the Landing page's
  * feature grid and the header's Features mega-menu (both link to
@@ -64,6 +65,7 @@ export default function FeatureDetail() {
             <div className="min-w-0">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">{feature.title}</h1>
+                {feature.comingSoon && <ComingSoonBadge />}
                 {feature.pro && <ProBadge feature={feature.pro} />}
               </div>
               <p className="text-lg text-muted-foreground mt-3 max-w-2xl">{feature.desc}</p>

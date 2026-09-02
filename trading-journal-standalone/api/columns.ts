@@ -346,7 +346,8 @@ async function handleAuth(req: VercelRequest, res: VercelResponse, sql: ReturnTy
     const geo = getRequestGeo(req);
     const rows = await sql.unsafe(
       `INSERT INTO users (email, password_hash, name, signup_country, signup_city, signup_ip, login_count, last_login_at, last_seen_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 1, now(), now()) RETURNING id, email, name, created_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, 1, now(), now())
+       RETURNING id, email, name, created_at, plan, stripe_subscription_status, plan_current_period_end`,
       [email, passwordHash, name, geo.country, geo.city, geo.ip]
     );
     const user = rows[0];
@@ -388,7 +389,13 @@ async function handleAuth(req: VercelRequest, res: VercelResponse, sql: ReturnTy
        WHERE id = $1`,
       [row.id, geo.country, geo.city, geo.ip]
     );
-    res.status(200).json({ user: { id: row.id, email: row.email, name: row.name, created_at: row.created_at } });
+    res.status(200).json({
+      user: {
+        id: row.id, email: row.email, name: row.name, created_at: row.created_at,
+        plan: row.plan, stripe_subscription_status: row.stripe_subscription_status,
+        plan_current_period_end: row.plan_current_period_end,
+      },
+    });
     return;
   }
 

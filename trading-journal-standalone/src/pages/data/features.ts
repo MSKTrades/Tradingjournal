@@ -19,6 +19,13 @@ export type FeatureSummary = {
   title: string;
   desc: string;
   pro?: ProFeatureKey;
+  // Marketing-side "not available yet" flag — the real gate is the
+  // /backtest route itself (App.tsx renders BacktestComingSoon there
+  // instead of the real Backtest page; see that file's own doc comment for
+  // why). This just tells every place FEATURES gets rendered (this grid,
+  // MarketingChrome's mega-menu, FeatureDetail) to show a "Coming soon"
+  // badge instead of quietly listing it as already usable.
+  comingSoon?: boolean;
 };
 
 export const FEATURES: FeatureSummary[] = [
@@ -31,6 +38,7 @@ export const FEATURES: FeatureSummary[] = [
     icon: History,
     title: 'Chart Replay & Backtesting',
     desc: 'Pull real historical candle data and step through it bar-by-bar to rehearse a strategy before risking live capital.',
+    comingSoon: true,
   },
   {
     icon: TrendingUp,

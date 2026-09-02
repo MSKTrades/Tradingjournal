@@ -1,142 +1,177 @@
-# New: Upload or paste your own chart screenshots — AI cross-checked against live data
+# PipEcho — real Stripe billing (checkout, webhook, portal)
 
-This adds what you asked for: on every timeframe tab of SMC Analysis, you can
-now paste (Ctrl+V) or upload a screenshot of your own chart, and an AI vision
-model gives you a best-effort read of it — cross-checked against the real
-live data already loaded for that pair/timeframe, not just guessed from the
-picture.
+18 files: 4 new, 12 changed, **2 deleted**. One dependency added (`stripe`).
+One database migration (adds 5 columns to `users`). Needs real setup in
+your Stripe Dashboard before it does anything — see below, this is the
+part that only you can do.
 
-**Note:** this zip's `api/backtest.ts` and `src/pages/SmcAnalysis.tsx` also
-include the earlier "Something went wrong" fix (sequential candle fetching,
-no more all-or-nothing failure). If you haven't applied that fix zip yet,
-this one covers both — you don't need to apply them separately.
+## What this delivers
 
-## 1. New setup step: an Anthropic API key
+You asked to start adding a real payment method. This wires it in for
+real:
 
-This is the one genuinely new piece of infrastructure. The AI read is a real
-Claude API call (Claude has to actually look at your image), so it needs its
-own API key:
+- A logged-in user can go to **Billing** (new sidebar link) and click
+  **Add payment method**. That opens a real Stripe Checkout page, collects
+  a real card, and creates a real subscription.
+- **Nobody gets charged today.** The subscription's trial is set to end
+  exactly on the launch promo's end date (November 30, 2026 — the same
+  date already on the Pricing page). Stripe holds the first real charge
+  until then automatically; there's nothing to remember or come back and
+  flip later.
+- Once someone has a subscription (trialing or paid), the app actually
+  knows it — `hasProAccess()` now checks it for real, not just the promo.
+  A **Manage billing** button opens Stripe's own hosted portal (update
+  card, switch monthly/annual, cancel).
+- All of it is driven by Stripe webhook events, so it stays correct even
+  if someone closes the tab mid-checkout, a card fails, or they cancel
+  from the portal instead of from inside PipEcho.
 
-1. Go to **console.anthropic.com**, sign in (or create an account), and
-   create an API key under **Settings → API Keys**. Anthropic's API is
-   pay-as-you-go, separate from any claude.ai subscription — you'll need to
-   add billing details there if you haven't already.
-2. In Vercel, open the `tradingjournal` project → **Settings → Environment
-   Variables**, and add:
-   - `ANTHROPIC_API_KEY` = the key you just created.
-   - *(optional)* `SMC_VISION_MODEL` — only set this if you want to override
-     the model. It defaults to `claude-3-haiku-20240307`, the cheapest
-     Anthropic model that can still read an image — this feature is a rough
-     second opinion, not a precision tool, so there's no reason to spend
-     more per screenshot than that. If the reads ever feel too shallow, set
-     this to a stronger model (check current model names/pricing at
-     docs.claude.com).
-3. Redeploy after adding the env var (or it just won't be visible until the
-   next deploy).
+## Required: set this up in your Stripe Dashboard first
 
-**Cost**: each screenshot analyzed is one small API call — a chart image plus
-a few hundred words of prompt/response. At the default Haiku-tier model this
-is a fraction of a cent per upload. You only pay for images you actually
-upload; nothing runs in the background.
+Nothing above works until you do these steps once. Log into
+[dashboard.stripe.com](https://dashboard.stripe.com) (use **Live mode**
+when you're ready to actually launch this; **Test mode** first if you want
+to try the whole flow with a fake card before going live — Stripe's docs
+call this `4242 4242 4242 4242`, any future expiry, any CVC).
 
-## 2. Database migration — run this against Neon
+1. **Create two Price objects** under Product catalog → Add product:
+   - One product, e.g. "PipEcho Pro", with two recurring prices attached to
+     it: **$15.00/month** and **$12.00/month billed annually** (i.e. the
+     annual price is $144.00/year — matches the "save 20%" on the Pricing
+     page). Copy each price's ID (`price_...`).
+2. **Get your secret key**: Developers → API keys → copy the **Secret
+   key** (`sk_live_...` or `sk_test_...`).
+3. **Create the webhook endpoint**: Developers → Webhooks → Add endpoint.
+   - Endpoint URL: `https://<your-domain>/api/stripe?resource=webhook`
+     (the query string is required — it's how this one file tells the three
+     billing operations apart, see the code comments in `api/stripe.ts`).
+   - Events to send: `checkout.session.completed`,
+     `customer.subscription.updated`, `customer.subscription.deleted`.
+   - After creating it, copy the **Signing secret** (`whsec_...`).
+4. **Add these to Vercel** (Project Settings → Environment Variables):
+   - `STRIPE_SECRET_KEY` = the secret key from step 2
+   - `STRIPE_WEBHOOK_SECRET` = the signing secret from step 3
+   - `STRIPE_PRICE_PRO_MONTHLY` = the monthly price id from step 1
+   - `STRIPE_PRICE_PRO_ANNUAL` = the annual price id from step 1
+   - `APP_URL` should already be set from the Google login setup — if not,
+     set it to your real production URL (e.g. `https://pipecho.com`). Both
+     Checkout's redirect back to `/billing` and the webhook URL above
+     depend on this being correct.
 
-One new table. Copy/paste into Neon's SQL editor, or re-run the full
-`schema.sql` from this zip (idempotent, safe against your existing DB):
+Until these are set, clicking "Add payment method" fails with a clear
+"Billing is not fully configured yet" error rather than a confusing
+crash — safe to deploy the code before you've finished this part, nothing
+breaks for existing users either way.
 
-```sql
-CREATE TABLE IF NOT EXISTS smc_chart_markups (
-  id            SERIAL PRIMARY KEY,
-  pair          TEXT NOT NULL,
-  timeframe     TEXT NOT NULL,
-  image_url     TEXT NOT NULL,
-  live_context  JSONB,
-  analysis      JSONB,
-  raw_response  TEXT,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+## Run the database migration
 
-CREATE INDEX IF NOT EXISTS idx_smc_chart_markups_pair_tf ON smc_chart_markups (pair, timeframe);
-```
+`schema.sql` has 5 new lines near the `users` table (search for "Billing
+(Stripe)"). Run the whole file against your database the same way you've
+applied every schema.sql change so far — it's idempotent (`ADD COLUMN IF
+NOT EXISTS`), so re-running the entire file is always safe, not just the
+new part.
 
-## 3. No new Vercel function
+## Important: two files are deleted, not just changed
 
-Same reasoning as everything else in this feature — you're at the Hobby
-plan's 12-function cap. This lives as two more `resource=` branches inside
-`api/backtest.ts` (`smc_chart_analyze`, `smc_chart_markups`), so it inherits
-the same admin-only gate automatically. The image upload itself reuses your
-existing `/api/upload` endpoint (same one trade screenshots already use) —
-no new upload function either.
+`api/trades/bulk-add.ts` and `api/trades/bulk-delete.ts` are **replaced**
+by the new `api/trades/bulk.ts` — delete the old two files when you apply
+this, don't leave them alongside the new one. This isn't optional cleanup:
+the Vercel Hobby plan caps serverless functions at 12, and this project
+was already sitting exactly at that cap. Merging those two small,
+related endpoints into one (dispatched by `?resource=add` /
+`?resource=delete`, same pattern `api/columns.ts` already uses for tags/
+tag groups/timeframes) freed the one slot `api/stripe.ts` needed —
+without it, this delivery would fail to deploy on your current plan.
+Excel import and bulk-delete-from-Journal both still work exactly as
+before; only the URL they call internally changed
+(`src/pages/Journal.tsx` and the demo-mode fake backend were both updated
+to match).
 
-## 4. Files in this zip
+## Files changed
 
-```
-api/backtest.ts                          (smc_chart_analyze / smc_chart_markups resources + the earlier smcCandles fix)
-schema.sql                               (new smc_chart_markups table)
-src/pages/SmcAnalysis.tsx                (wires the new upload panel into each timeframe tab + the earlier fix)
-src/pages/ui/smc/types.ts                (new SmcChartAnalysis / SmcChartMarkup types)
-src/pages/ui/smc/ChartMarkupPanel.tsx    (new — the upload/paste UI + saved markups list)
-```
+**New:**
+- `api/_stripe.js` — shared Stripe client + raw-body helper (webhook
+  signature verification needs Stripe's exact original bytes, not
+  re-parsed JSON)
+- `api/stripe.ts` — the billing endpoint itself: `?resource=checkout`
+  (start a subscription), `?resource=portal` (manage an existing one),
+  `?resource=webhook` (Stripe → your database)
+- `api/trades/bulk.ts` — replaces the two deleted files (see above)
+- `src/pages/Billing.tsx` — the new Billing page (plan status, upgrade
+  card, "Manage billing")
 
-## 5. How it actually works
+**Changed:**
+- `schema.sql` — `users.plan` / `stripe_customer_id` /
+  `stripe_subscription_id` / `stripe_subscription_status` /
+  `plan_current_period_end`
+- `api/_auth.js` — the session check now also returns `plan` and the two
+  billing display fields
+- `api/columns.ts` — signup/login responses now include those same fields
+  (so a freshly logged-in user's plan is correct immediately, not just
+  after the next page load)
+- `src/lib/auth.tsx` — `User` type gained `plan` /
+  `stripe_subscription_status` / `plan_current_period_end`; added
+  `refreshUser()` (a quiet re-fetch, used once on returning from Stripe
+  Checkout)
+- `src/lib/proFeatures.ts` — `hasProAccess(plan)` is now the real check
+  this file's own comment always said it would become: promo-active OR
+  `plan === 'pro'`
+- `src/components/ProBadge.tsx`, `src/components/ProNotice.tsx` — updated
+  for `hasProAccess`'s new signature, plus slightly smarter copy for
+  someone who's on a real paid plan rather than just riding the promo
+- `src/components/Layout.tsx` — new "Billing" sidebar link (hidden inside
+  the public demo sandbox, same as Backtest/Challenge Simulator)
+- `src/App.tsx` — new `/billing` route
+- `src/pages/Pricing.tsx` — a logged-in visitor clicking the Pro plan now
+  goes straight to Billing instead of `/signup` (which would just bounce
+  them, since they already have an account)
+- `src/pages/Journal.tsx`, `src/lib/demoBackend.ts` — updated for the
+  bulk-add/bulk-delete → bulk merge above
+- `package.json` / `package-lock.json` — added `stripe` (^22.6.1)
 
-- On any timeframe tab, there's a new **"Chart Markup — AI Read"** card
-  below the chart. Click it and press Ctrl+V to paste a screenshot, drag a
-  file onto it, or click to browse for one.
-- The image uploads straight to your Blob storage (bypassing any server
-  body-size limit), then gets sent — as just a URL, not the raw bytes — to
-  Claude along with a compact summary of what the live data engine already
-  reads for that pair/timeframe (trend, current range, open Order
-  Blocks/FVGs, unswept liquidity).
-- Claude gives back: a plain-English description of what it sees in the
-  image, a note on whether that agrees or conflicts with the live data, a
-  rough bullish/bearish/neutral/unclear lean, a confidence level, and any
-  caveats (most commonly: it can't reliably read exact prices off a
-  screenshot's axis labels).
-- That's saved and shown in a running list under the same card — reload the
-  page and your past uploads for that pair/timeframe are still there.
-- Delete any one with the trash icon; click the thumbnail to view it full
-  size.
+**Deleted:**
+- `api/trades/bulk-add.ts`, `api/trades/bulk-delete.ts` (see above)
 
-## 6. Why this is a rougher tool than the rest of the page
+## How to apply
 
-Worth being direct about this, since it's a different kind of feature than
-everything else on this page. The six strategy models and the live structure
-detection work off real numeric candle data — they're precise, even if the
-underlying SMC interpretation is still just one reasonable reading. This new
-piece is different: an AI model looking at a picture cannot reliably read
-exact price levels off a chart's axis labels, cannot verify the screenshot is
-even current, and can be wrong about what it thinks it's seeing the same way
-any of us glancing at a chart can be wrong. That's exactly why it's paired
-with the real live data (so you get a cross-check, not just an opinion in a
-vacuum) and why every response comes back with an explicit confidence level
-and caveats rather than a flat verdict. Treat it the way you'd treat asking a
-knowledgeable friend to eyeball a screenshot — a useful second look, never a
-precise reading and never a signal to act on by itself.
+`MSKTrades/Tradingjournal` → `trading-journal-standalone/` on GitHub:
+replace the 12 changed files, add the 4 new ones, **delete** the 2 old
+bulk files. Run the schema.sql migration against your database. Set the
+4 new Stripe env vars in Vercel (see above). Commit to `main` — Vercel
+auto-deploys. Until the env vars are set, everything except the "Add
+payment method" / "Manage billing" buttons works exactly as before.
 
-## 7. Tested before sending this
+## Not part of this delivery
 
-- `tsc -b` (full project) — clean, zero errors. `vite build` — clean
-  production build.
-- A standalone script exercised the real `api/backtest.ts` handler directly
-  (mocked Anthropic's API response, real local Postgres) end-to-end:
-  uploading + analyzing a chart correctly stores and returns a fully parsed
-  result (not a stray JSON string — this caught and fixed a real bug where
-  the `analysis`/`live_context` columns were coming back as unparsed text
-  instead of objects), the saved markup shows up in the list for that
-  pair/timeframe, deleting it removes it, a request with no
-  `ANTHROPIC_API_KEY` configured comes back with that exact actionable
-  message instead of a generic error, and a non-admin account still gets a
-  404 on this new resource exactly like every other SMC/Backtest resource.
+- Australian GST isn't handled here — worth a mention since PIP ECHO PTY
+  LTD is now a registered Australian company. GST registration only
+  becomes mandatory once turnover crosses AUD $75,000/year, so this isn't
+  urgent; Stripe Tax (a Dashboard toggle, no code change) is the
+  straightforward way to handle it once you're closer to that.
+- No annual-vs-monthly switch UI beyond what's on the Billing page — an
+  existing Pro subscriber changes that (and cancels) through the Stripe
+  Billing Portal ("Manage billing"), not a custom in-app control.
+- Free-plan feature limits (1 account, 1 strategy playbook) are still not
+  actually enforced anywhere — same as before this delivery. `plan` is now
+  real and correct, so wiring an actual limit in later is just a couple of
+  `hasProAccess(user?.plan)` checks away, not a redesign.
 
-## 8. What to check after deploying
+## Verified before packaging
 
-- Add `ANTHROPIC_API_KEY` in Vercel and redeploy first — without it, you'll
-  see a clear "AI chart analysis is not configured yet" message if you try
-  to upload something, rather than a broken feature.
-- Open **SMC Analysis**, pick any timeframe tab, and paste or upload a real
-  chart screenshot. Give it a few seconds — you'll see "Uploading…" then
-  "Analyzing chart…" before the result card appears.
-- Confirm the result's bias/confidence badges and text look sensible, and
-  that reloading the page still shows your saved upload in the list.
-- Try deleting one.
+- `tsc --noEmit` clean for `src/` (the normal build check) and, separately,
+  a one-off `tsc` pass scoped to `api/` (that folder isn't covered by the
+  project's main tsconfig, so this needed its own check) — zero errors in
+  any new or changed file. The handful of pre-existing errors it surfaced
+  elsewhere (`api/backtest.ts`, an unrelated part of `api/columns.ts`) predate
+  this delivery and aren't touched by it.
+- `npm run build` succeeds.
+- Confirmed `api/` still has exactly 12 function files (not 13) after this
+  change — the Vercel Hobby cap this whole delivery had to work around.
+- Loaded the built app and confirmed `/billing` correctly bounces a
+  logged-out visitor to `/login` (same gate every other authenticated page
+  uses), and that the Pricing page still renders correctly for a logged-out
+  visitor.
+- Full checkout → webhook → portal round trip could **not** be tested
+  end-to-end here — that needs your real Stripe keys and a live database,
+  neither of which exist in this sandbox. Test it with Stripe test-mode
+  keys and a `4242 4242 4242 4242` card before flipping to live keys.

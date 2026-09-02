@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check } from 'lucide-react';
+import { Check, Clock3 } from 'lucide-react';
 import { Button } from '../lib/ui/button';
 import { Switch } from '../lib/ui/form';
 import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
 import { PROMO_END_LABEL } from '../lib/promo';
+import { useAuth } from '../lib/auth';
 
 // Pricing display only — no payment processing wired up yet (deliberate,
 // see the delivery README). Numbers here are a starting proposal, not
@@ -38,7 +39,7 @@ const PLANS = [
       'Custom fields & tags',
       'Pre-trade checklists',
       'Excel import',
-      'Chart Replay & Backtesting — up to 6 months of history',
+      'Chart Replay & Backtesting — up to 6 months of history (Coming soon)',
     ],
   },
   {
@@ -59,7 +60,7 @@ const PLANS = [
       'HTF Bias Alignment',
       'R-Multiple Distribution',
       'Vision Board (wins/losses pattern + comment narrative analysis)',
-      'Chart Replay & Backtesting — unlimited history',
+      'Chart Replay & Backtesting — unlimited history (Coming soon)',
       'Priority support',
     ],
   },
@@ -94,6 +95,7 @@ export default function Pricing() {
     description: 'Free forever for a single account with 1 strategy playbook, Risk Guardrail, and custom fields. Upgrade to Pro for unlimited accounts and strategies, starting at $12/month.',
   });
   const [annual, setAnnual] = useState(true);
+  const { user } = useAuth();
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -154,18 +156,39 @@ export default function Pricing() {
                     {price > 0 && <span className="text-muted-foreground text-sm">/ month{annual ? ', billed annually' : ''}</span>}
                   </div>
                 )}
-                <Link to="/signup" className="mt-6">
+                {/* A logged-in visitor clicking the Pro plan goes straight to
+                    Billing (real checkout) instead of /signup, which would
+                    just bounce them since they already have an account -
+                    everyone else (logged out, or looking at Free) still
+                    goes to /signup same as before. */}
+                <Link to={plan.highlighted && user ? '/billing' : '/signup'} className="mt-6">
                   <Button size="default" className="w-full h-10" variant={plan.highlighted ? 'default' : 'outline'}>
-                    {plan.cta}
+                    {plan.highlighted && user ? 'Go to Billing' : plan.cta}
                   </Button>
                 </Link>
                 <ul className="mt-7 space-y-3 flex-1">
-                  {plan.features.map(f => (
-                    <li key={f} className="flex items-start gap-2.5 text-sm">
-                      <Check className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-                      <span className="text-foreground/90">{f}</span>
-                    </li>
-                  ))}
+                  {plan.features.map(f => {
+                    // A feature string ending in "(Coming soon)" gets a
+                    // muted clock icon instead of the green check and its
+                    // suffix styled down — still listed (so it's not a
+                    // surprise once it ships) but visibly not "included
+                    // today" the way every checked line above it is.
+                    const comingSoon = f.endsWith('(Coming soon)');
+                    const label = comingSoon ? f.slice(0, -'(Coming soon)'.length).trim() : f;
+                    return (
+                      <li key={f} className="flex items-start gap-2.5 text-sm">
+                        {comingSoon
+                          ? <Clock3 className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+                          : <Check className="w-4 h-4 text-primary mt-0.5 shrink-0" />}
+                        <span className={comingSoon ? 'text-muted-foreground' : 'text-foreground/90'}>
+                          {label}
+                          {comingSoon && (
+                            <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide">(Coming soon)</span>
+                          )}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             );

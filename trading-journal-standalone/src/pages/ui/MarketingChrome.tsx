@@ -13,6 +13,7 @@ import { Button } from '../../lib/ui/button';
 import { useForceDarkTheme } from '../../lib/theme';
 import ContactDialog from '../../components/ContactDialog';
 import { featureSlug } from '../../lib/featureSlug';
+import ComingSoonBadge from '../../components/ComingSoonBadge';
 
 const NAV_LINKS = [
   { to: '/demo', label: 'Live Demo' },
@@ -30,13 +31,13 @@ const NAV_LINKS = [
 // list's titles in sync so featureSlug() below still resolves to a real page.
 const FEATURE_MENU: {
   column: string;
-  items: { icon: typeof BookOpen; title: string; desc: string }[];
+  items: { icon: typeof BookOpen; title: string; desc: string; comingSoon?: boolean }[];
 }[] = [
   {
     column: 'Core workflow',
     items: [
       { icon: BookOpen, title: 'Trade Journal', desc: 'Log every trade with full context, automatically.' },
-      { icon: History, title: 'Chart Replay & Backtesting', desc: 'Rehearse a strategy on real historical candles.' },
+      { icon: History, title: 'Chart Replay & Backtesting', desc: 'Rehearse a strategy on real historical candles.', comingSoon: true },
       { icon: Settings2, title: 'Strategy Playbooks', desc: 'Define a setup once, track it forever after.' },
       { icon: ListChecks, title: 'Pre-Trade Checklists', desc: 'Your own rules, enforced before every entry.' },
     ],
@@ -111,7 +112,10 @@ function FeaturesMenu() {
                           <item.icon className="w-4 h-4 text-primary" />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-medium leading-snug">{item.title}</p>
+                          <p className="text-sm font-medium leading-snug flex items-center gap-1.5 flex-wrap">
+                            {item.title}
+                            {item.comingSoon && <ComingSoonBadge />}
+                          </p>
                           <p className="text-xs text-muted-foreground leading-snug mt-0.5">{item.desc}</p>
                         </div>
                       </Link>

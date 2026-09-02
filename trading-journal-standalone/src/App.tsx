@@ -22,8 +22,9 @@ import Performance from './pages/Performance';
 import Strategies from './pages/Strategies';
 import StrategyDetail from './pages/StrategyDetail';
 import Checklists from './pages/Checklists';
+import Billing from './pages/Billing';
 import Admin from './pages/Admin';
-import Backtest from './pages/Backtest';
+import BacktestComingSoon from './pages/BacktestComingSoon';
 import ChallengeSimulator from './pages/ChallengeSimulator';
 import SmcAnalysis from './pages/SmcAnalysis';
 import SmcComingSoon from './pages/SmcComingSoon';
@@ -132,11 +133,12 @@ function DemoShell({ children }: { children: React.ReactNode }) {
 
 /** Gate for the Smart Money Concepts Analysis page - restricted to just the
  * admin account per an explicit, repeated instruction ("keep it to my
- * account, don't release to anyone else"). Unlike Backtest (which now has
- * no gate at all - see the note above), this one stays. The real access
- * control is server-side: api/backtest.ts's SMC_ONLY_RESOURCES (smc_candles,
- * smc_markups, etc.) all 404 for anyone but the admin - this is the UX to
- * match. */
+ * account, don't release to anyone else"). Unlike Backtest (which is gated
+ * the same way for EVERY account right now, admin included - see the
+ * BacktestComingSoon route above), this one only blocks non-admins. The real
+ * access control is server-side: api/backtest.ts's SMC_ONLY_RESOURCES
+ * (smc_candles, smc_markups, etc.) all 404 for anyone but the admin - this
+ * is the UX to match. */
 function SmcGate() {
   const { user } = useAuth();
   return isAdminEmail(user?.email) ? <SmcAnalysis /> : <SmcComingSoon />;
@@ -188,7 +190,17 @@ export default function App() {
             <Route path="/strategies" element={<Protected><AuthedShell><Strategies /></AuthedShell></Protected>} />
             <Route path="/strategies/:id" element={<Protected><AuthedShell><StrategyDetail /></AuthedShell></Protected>} />
             <Route path="/checklists" element={<Protected><AuthedShell><Checklists /></AuthedShell></Protected>} />
-            <Route path="/backtest" element={<Protected><AuthedShell><Backtest /></AuthedShell></Protected>} />
+            {/* Real Stripe billing - see api/stripe.ts. Not offered inside
+                the demo sandbox (DemoShell) - there's no real account or
+                Stripe customer behind a demo session to bill. */}
+            <Route path="/billing" element={<Protected><AuthedShell><Billing /></AuthedShell></Protected>} />
+            {/* Chart Replay & Backtesting is gated to BacktestComingSoon for
+                everyone right now, not just non-admins (unlike SmcGate below) -
+                see BacktestComingSoon.tsx's own doc comment for why. The real
+                Backtest page component still exists (src/pages/Backtest.tsx)
+                and is fully built; it's just not routed to from here while
+                that's true, so re-enabling it later is a one-line swap back. */}
+            <Route path="/backtest" element={<Protected><AuthedShell><BacktestComingSoon /></AuthedShell></Protected>} />
             <Route path="/challenge-simulator" element={<Protected><AuthedShell><ChallengeSimulator /></AuthedShell></Protected>} />
             <Route path="/smc-analysis" element={<Protected><AuthedShell><SmcGate /></AuthedShell></Protected>} />
             {/* No client-side email check here on purpose — the API

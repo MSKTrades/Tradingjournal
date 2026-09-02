@@ -8,6 +8,7 @@ import { FEATURES } from './data/features';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
 import RuleToggleDemo from './ui/RuleToggleDemo';
 import ProBadge from '../components/ProBadge';
+import ComingSoonBadge from '../components/ComingSoonBadge';
 import { featureSlug } from '../lib/featureSlug';
 
 // Decorative ascending-bar heights behind the hero headline — hand-picked
@@ -182,7 +183,7 @@ export default function Landing() {
             <p className="text-muted-foreground mt-2">One workspace for journaling, backtesting, and performance review.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {FEATURES.map(({ icon: Icon, title, desc, pro }) => (
+            {FEATURES.map(({ icon: Icon, title, desc, pro, comingSoon }) => (
               <Link
                 key={title}
                 to={`/features/${featureSlug(title)}`}
@@ -191,8 +192,9 @@ export default function Landing() {
                 <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center mb-4">
                   <Icon className="w-5 h-5 text-primary" />
                 </div>
-                <div className="flex items-center gap-2 mb-1.5">
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                   <h3 className="font-semibold">{title}</h3>
+                  {comingSoon && <ComingSoonBadge />}
                   {pro && <ProBadge feature={pro} />}
                 </div>
                 <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>

@@ -1016,6 +1016,40 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
 -- ============================================================================
+-- Billing (Stripe). `plan` is the one column the app actually reads to
+-- decide access (see src/lib/proFeatures.ts's hasProAccess(), which this
+-- migration is what lets it stop being "everyone gets Pro via the promo"
+-- and start being a real per-account check) - it's kept as a plain TEXT
+-- flag rather than derived on the fly from stripe_subscription_status on
+-- every request, so a page load never depends on Stripe being reachable.
+-- The three stripe_* columns are the write-through cache that keeps `plan`
+-- correct: webhook events (see api/stripe.ts, resource=webhook) update all
+-- of them together every time a subscription is created, renewed, paused,
+-- or canceled - `plan` itself only ever flips between 'free' and 'pro',
+-- while stripe_subscription_status carries Stripe's own finer-grained
+-- states (trialing/active/past_due/canceled/etc.) for display on the
+-- Billing page, in case someone needs to see why they're on Free.
+--
+-- A subscription is created now with subscription_data.trial_end set to
+-- the launch promo's end date (PROMO_END_DATE, src/lib/promo.ts) so a
+-- card can be collected today without charging anyone before the promo
+-- they were already promised actually ends - see api/stripe.ts's
+-- resource=checkout for where that trial_end is set.
+--
+-- stripe_customer_id and stripe_subscription_id are Stripe's own object
+-- ids (cus_..., sub_...), never shown to the user - stripe_customer_id is
+-- created the first time someone starts checkout (so a repeat visit to
+-- Billing reuses the same Stripe customer instead of creating a new one
+-- every time) and is also how the Billing Portal session is opened.
+-- ============================================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_status TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_current_period_end TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_users_stripe_customer_id ON users(stripe_customer_id);
+
+-- ============================================================================
 -- Smart Money Concepts (SMC) Analysis — admin-only (see api/backtest.ts's
 -- resource=smc_candles/smc_markups and its isAdminEmail gate). Two tables,
 -- same "keep raw candle data out of Postgres, put it in Blob, and just

@@ -610,7 +610,7 @@ export default function Journal() {
   async function handleBulkDelete() {
     if (selectedIds.size === 0) return;
     if (!window.confirm(`Delete ${selectedIds.size} selected trade${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
-    await api.post('/trades/bulk-delete', { ids: Array.from(selectedIds) });
+    await api.post('/trades/bulk?resource=delete', { ids: Array.from(selectedIds) });
     setSelectedIds(new Set());
     refetchTrades();
   }
@@ -839,7 +839,7 @@ export default function Journal() {
         onClose={() => setImportOpen(false)}
         customColumns={customCols}
         onImport={async (rows: ImportedTrade[]) => {
-          await api.post('/trades/bulk-add', { trades: rows, account_id: activeAccountId });
+          await api.post('/trades/bulk?resource=add', { trades: rows, account_id: activeAccountId });
           refetchTrades();
         }}
       />

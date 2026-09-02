@@ -16,10 +16,14 @@ import { PROMO_END_DATE, PROMO_END_LABEL } from './promo';
  * a Free account (a 2nd trading account, a 2nd strategy playbook) show an
  * inline note instead of a block.
  *
- * When real billing exists, `hasProAccess()` is the ONLY function that
- * needs to change — swap the promo check below for a real per-account
- * subscription check, and every badge/notice that reads from this file
- * starts meaning something for real, with no other code to touch.
+ * Real billing now exists (Stripe, see api/stripe.ts and the Billing page) —
+ * `hasProAccess()` below is the function that changed, exactly as this
+ * comment always said it would: it now takes the current user's `plan`
+ * (from useAuth()'s User.plan, sourced server-side from users.plan — see
+ * api/_auth.js's getUserFromRequest) and grants access if EITHER the promo
+ * is still running OR they have a real paid subscription. Every badge/
+ * notice below still reads through this one function, so they can never
+ * disagree with whatever actually gates a feature.
  */
 export { PROMO_END_DATE, PROMO_END_LABEL };
 
@@ -27,14 +31,16 @@ export function isPromoActive(): boolean {
   return new Date() <= new Date(`${PROMO_END_DATE}T23:59:59`);
 }
 
-/** Does the current visitor get Pro-level access right now? Today this is
- * just "is the launch promo still active" — everyone, Free or Pro, passes
- * until PROMO_END_DATE. This is intentionally the only place in the app
- * that decides real access; ProBadge/ProNotice are presentation only and
- * both read from this same function, so they can never disagree with
- * whatever actually gates a feature. */
-export function hasProAccess(): boolean {
-  return isPromoActive();
+/** Does the current visitor get Pro-level access right now? True while the
+ * launch promo is active (everyone, Free or Pro, passes — see isPromoActive
+ * above) OR once they have a real Stripe subscription in a state that counts
+ * as paid (`plan === 'pro'`, written by api/stripe.ts's webhook handler —
+ * trialing/active/past_due all count, see that file's syncSubscriptionToUser
+ * for why). Pass `user?.plan` from useAuth() — omitting it (no user, or
+ * called somewhere without one handy) just falls back to the promo check,
+ * same as before real billing existed. */
+export function hasProAccess(plan?: string | null): boolean {
+  return isPromoActive() || plan === 'pro';
 }
 
 export type ProFeatureKey =
