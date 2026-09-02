@@ -12,8 +12,8 @@ import { isPromoActive, PROMO_END_LABEL } from '../lib/proFeatures';
 // Pricing.tsx (same numbers, same monthly/annual split) - that page is the
 // sales pitch, this one is where an already-signed-up person actually acts
 // on it.
-const PRICE_MONTHLY = 15;
-const PRICE_ANNUAL = 12;
+const PRICE_MONTHLY = 18;
+const PRICE_ANNUAL = 15;
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -192,7 +192,7 @@ export default function Billing() {
               <span className={`text-sm font-medium ${interval !== 'annual' ? 'text-foreground' : 'text-muted-foreground'}`}>Monthly</span>
               <Switch checked={interval === 'annual'} onCheckedChange={v => setIntervalChoice(v ? 'annual' : 'monthly')} />
               <span className={`text-sm font-medium ${interval === 'annual' ? 'text-foreground' : 'text-muted-foreground'}`}>
-                Annual <span className="text-primary">(save 20%)</span>
+                Annual <span className="text-primary">(save 17%)</span>
               </span>
             </div>
             <div className="flex items-baseline gap-1 mb-1">

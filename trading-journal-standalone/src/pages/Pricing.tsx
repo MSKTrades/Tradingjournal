@@ -46,8 +46,8 @@ const PLANS = [
   },
   {
     name: 'Pro',
-    priceMonthly: 15,
-    priceAnnual: 12,
+    priceMonthly: 18,
+    priceAnnual: 15,
     tagline: 'For traders serious about the process.',
     cta: 'Get Pro free',
     highlighted: true,
@@ -92,7 +92,7 @@ function formatPrice(n: number) {
 export default function Pricing() {
   useDocumentMeta({
     title: 'Pricing — PipEcho',
-    description: 'Free forever for a single account with 1 strategy playbook, Risk Guardrail, and custom fields. Upgrade to Pro for unlimited accounts and strategies, starting at $12/month.',
+    description: 'Free forever for a single account with 1 strategy playbook, Risk Guardrail, and custom fields. Upgrade to Pro for unlimited accounts and strategies, starting at $15/month.',
   });
   const [annual, setAnnual] = useState(true);
   const { user } = useAuth();
@@ -118,7 +118,7 @@ export default function Pricing() {
             <span className={`text-sm font-medium ${!annual ? 'text-foreground' : 'text-muted-foreground'}`}>Monthly</span>
             <Switch checked={annual} onCheckedChange={setAnnual} />
             <span className={`text-sm font-medium ${annual ? 'text-foreground' : 'text-muted-foreground'}`}>
-              Annual <span className="text-primary">(save 20%)</span>
+              Annual <span className="text-primary">(save 17%)</span>
             </span>
           </div>
         </div>
