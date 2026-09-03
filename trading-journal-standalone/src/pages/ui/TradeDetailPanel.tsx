@@ -148,6 +148,95 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
+// Themed replacement for a native `<input list="...">` datalist - a browser
+// datalist can't be styled at all (it always renders in the OS/browser's own
+// light popup regardless of the app's dark theme, which is exactly the "not
+// aligned with the theme" bug this was reported as), doesn't scroll past a
+// browser-decided handful of rows, and has no way to show an explicit "add
+// this as new" affordance - typing something new works, but nothing on
+// screen says so. This is a real dropdown instead: matches TimeframePicker's
+// shape in NotesEditor.tsx (click outside to close, a scrollable option
+// list, an explicit add row), scoped to a single free-text field rather than
+// a multi-select popover.
+function PairPicker({ value, options, onChange, onPick }: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  onPick: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const query = value.trim().toLowerCase();
+  const filtered = query
+    ? options.filter(o => o.toLowerCase().includes(query))
+    : options;
+  const exactMatch = options.some(o => o.toLowerCase() === query);
+  const showAddRow = query.length > 0 && !exactMatch;
+
+  function pick(v: string) {
+    onPick(v);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="relative">
+        <Input
+          value={value}
+          placeholder="e.g. EURUSD"
+          onFocus={() => setOpen(true)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onChange(e.target.value); setOpen(true); }}
+          onKeyDown={(e: React.KeyboardEvent) => {
+            if (e.key === 'Enter' && showAddRow) { e.preventDefault(); pick(value.trim()); }
+            if (e.key === 'Escape') setOpen(false);
+          }}
+          className="pr-8"
+        />
+        <ChevronDown
+          className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+        />
+      </div>
+      {open && (filtered.length > 0 || showAddRow) && (
+        <div className="absolute top-full left-0 mt-1 z-20 w-full rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
+          <div className="max-h-48 overflow-y-auto py-1">
+            {filtered.map(o => (
+              <button
+                key={o}
+                type="button"
+                onClick={() => pick(o)}
+                className={cn(
+                  'w-full text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors',
+                  o.toLowerCase() === query && 'bg-muted font-medium'
+                )}
+              >
+                {o}
+              </button>
+            ))}
+            {showAddRow && (
+              <button
+                type="button"
+                onClick={() => pick(value.trim())}
+                className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1.5 border-t border-border"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add "{value.trim()}"
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CollapsibleSection({ storageKey, title, subtitle, children }: {
   storageKey: string; title: string; subtitle?: string; children: React.ReactNode;
 }) {
@@ -451,15 +540,25 @@ export default function TradeDetailPanel({
     };
   }
 
-  // If the pair the user typed isn't one we already know about (preset or
-  // previously saved), remember it - fire-and-forget, same as timeframes -
-  // so it shows up as a suggestion next time without ever blocking the save.
+  // Same fire-and-forget, server-deduped pattern as handleAddTimeframe below
+  // - safe to call for every pick, whether it's an existing preset/saved
+  // pair or a brand new one just typed in, since the POST itself is a
+  // no-op (returns the existing row) when the name's already known.
+  function handleAddInstrument(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    api.post('/columns', { resource: 'instruments', name: trimmed }).then(() => refetchInstruments()).catch(() => {});
+  }
+
+  // Safety net for the rare case a pair got typed directly into the field
+  // without ever going through PairPicker's dropdown (e.g. autofill) - keeps
+  // it from silently never being remembered.
   function saveNewInstrumentIfNeeded() {
     const name = (form.coin_token ?? '').trim();
     if (!name) return;
     const known = instrumentOptions.some(i => i.toLowerCase() === name.toLowerCase());
     if (known) return;
-    api.post('/columns', { resource: 'instruments', name }).then(() => refetchInstruments()).catch(() => {});
+    handleAddInstrument(name);
   }
 
   async function handleSave() {
@@ -640,11 +739,12 @@ export default function TradeDetailPanel({
               </FieldRow>
               <NumField label="Trade #" {...numField('trade_number')} step={1} min={1} />
               <FieldRow label="Pair">
-                <>
-                  <Input value={form.coin_token ?? ''} list="inst-list" placeholder="e.g. EURUSD"
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('coin_token', e.target.value || null)} />
-                  <datalist id="inst-list">{instrumentOptions.map(i => <option key={i} value={i} />)}</datalist>
-                </>
+                <PairPicker
+                  value={form.coin_token ?? ''}
+                  options={instrumentOptions}
+                  onChange={(v) => set('coin_token', v || null)}
+                  onPick={(v) => { set('coin_token', v || null); handleAddInstrument(v); }}
+                />
               </FieldRow>
               <FieldRow label="Side">
                 <Select value={form.direction} onChange={e => set('direction', e.target.value)}>
