@@ -18,6 +18,7 @@ import ComingSoonBadge from '../../components/ComingSoonBadge';
 const NAV_LINKS = [
   { to: '/demo', label: 'Live Demo' },
   { to: '/pricing', label: 'Pricing' },
+  { to: '/playbooks', label: 'Playbooks' },
   { to: '/blog', label: 'Blog' },
 ];
 
@@ -203,6 +204,7 @@ export function MarketingFooter() {
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Resources</h4>
           <ul className="space-y-2 text-sm">
+            <li><Link to="/playbooks" className="text-muted-foreground hover:text-foreground">Playbooks</Link></li>
             <li><Link to="/blog" className="text-muted-foreground hover:text-foreground">Blog</Link></li>
             <li><Link to="/tools/session-clock" className="text-muted-foreground hover:text-foreground">Free Session Clock</Link></li>
             <li><ContactDialog variant="footer" /></li>

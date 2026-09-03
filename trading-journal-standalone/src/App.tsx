@@ -13,6 +13,8 @@ import Pricing from './pages/Pricing';
 import Blog from './pages/Blog';
 import BlogPost from './pages/BlogPost';
 import TrackRecord from './pages/TrackRecord';
+import Playbooks from './pages/Playbooks';
+import PlaybookDetail from './pages/PlaybookDetail';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Summary from './pages/Summary';
@@ -181,6 +183,8 @@ export default function App() {
                 as Landing/Pricing/Blog above. Anyone with the link (a prop
                 firm, an investor) can open it without a PipEcho login. */}
             <Route path="/track/:token" element={<TrackRecord />} />
+            <Route path="/playbooks" element={<Playbooks />} />
+            <Route path="/playbooks/:slug" element={<PlaybookDetail />} />
             <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
             <Route path="/signup" element={<PublicOnly><Signup /></PublicOnly>} />
 

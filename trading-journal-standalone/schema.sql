@@ -148,6 +148,33 @@ CREATE TABLE IF NOT EXISTS strategies (
 -- already built stops showing up anywhere until you deliberately restrict it.
 ALTER TABLE strategies ADD COLUMN IF NOT EXISTS account_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 
+-- Playbooks: publishing a strategy makes a read-only, public page out of its
+-- real win rate / profit factor / R-multiple equity curve (computed live
+-- from the trades that actually match its rules - see api/summary/index.ts's
+-- resource=playbook), the same idea as the "public track record" an account
+-- can already opt into (public_share_token on accounts, below) but scoped to
+-- one strategy's rules instead of a whole account's $ P&L. Deliberately no
+-- dollar figures ever flow through this path (see api/summary/index.ts) - a
+-- Playbook is meant to be safe to share publicly without revealing real
+-- account size or earnings.
+--
+-- Publishing is currently admin-only (see isAdminEmail in api/_auth.js) -
+-- gated in the API, not by this schema - but every column here is already
+-- per-strategy (so per-user), not a separate join table, so opening this up
+-- to any user later is a permission change, not a schema change.
+ALTER TABLE strategies ADD COLUMN IF NOT EXISTS playbook_published BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE strategies ADD COLUMN IF NOT EXISTS playbook_slug TEXT;
+ALTER TABLE strategies ADD COLUMN IF NOT EXISTS playbook_title TEXT;
+ALTER TABLE strategies ADD COLUMN IF NOT EXISTS playbook_description TEXT;
+ALTER TABLE strategies ADD COLUMN IF NOT EXISTS playbook_published_at TIMESTAMPTZ;
+
+-- Slugs are the public URL (/playbooks/:slug) so they must be globally
+-- unique, but only among rows that actually have one - a partial index
+-- (WHERE playbook_slug IS NOT NULL) so the many strategies that never
+-- publish don't all collide on NULL.
+CREATE UNIQUE INDEX IF NOT EXISTS strategies_playbook_slug_idx
+  ON strategies (playbook_slug) WHERE playbook_slug IS NOT NULL;
+
 -- Custom fields are scoped to a single account (account_id), not shared
 -- across every account you track - a fresh account starts with none, and a
 -- field you add while journaling one account never shows up on another. See

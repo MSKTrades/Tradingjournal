@@ -180,6 +180,45 @@ export type Strategy = {
   active: boolean;
   sort_order: number;
   account_ids: number[]; // which accounts this strategy is counted on; [] = every account, including new ones you create later
+  // Playbook fields - set once this strategy has been published as a public,
+  // read-only Playbook page (win rate / profit factor / R-multiple equity
+  // curve, no dollar figures - see api/summary/index.ts's resource=playbook).
+  // Publishing is currently admin-only; see isAdminEmail in src/lib/admin.ts.
+  playbook_published: boolean;
+  playbook_slug: string | null;
+  playbook_title: string | null;
+  playbook_description: string | null;
+  playbook_published_at: string | null;
+};
+
+// Public-facing types for the two unauthenticated Playbook endpoints
+// (GET /api/summary?resource=playbooks and ?resource=playbook&slug=...) -
+// kept here alongside Strategy since a Playbook is just a published view of
+// one, not a separate entity with its own management UI.
+export type PlaybookSummary = {
+  slug: string;
+  title: string;
+  description: string | null;
+  publishedAt: string;
+  totalTrades: number;
+  winRate: number;
+  profitFactor: number | null;
+  totalR: number;
+  avgR: number;
+};
+
+export type PlaybookDetail = PlaybookSummary & {
+  conditions: Condition[];
+  days: number[];
+  timeStart: string | null;
+  timeEnd: string | null;
+  tp1Rr: number;
+  tp2Rr: number | null;
+  splitPercent: number | null;
+  wins: number;
+  losses: number;
+  equityCurve: { idx: number; r: number }[];
+  lastUpdated: string;
 };
 
 export type CustomColumn = {

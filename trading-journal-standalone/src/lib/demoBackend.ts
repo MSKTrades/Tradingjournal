@@ -188,6 +188,11 @@ function buildSeed(): Store {
     active: true,
     sort_order: 0,
     account_ids: [],
+    playbook_published: false,
+    playbook_slug: null,
+    playbook_title: null,
+    playbook_description: null,
+    playbook_published_at: null,
   };
   // time_end covers every hour the seed generator below can produce
   // (7am-2pm) - narrower and the "Best Strategy" stat on Summary reads as
@@ -1064,7 +1069,11 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
     if (method === 'GET') return store.strategies;
     if (method === 'POST') {
       checkAndConsumeCap(store, 'strategies');
-      const s: Strategy = { ...b, id: nextId(), sort_order: store.strategies.length };
+      const s: Strategy = {
+        playbook_published: false, playbook_slug: null, playbook_title: null,
+        playbook_description: null, playbook_published_at: null,
+        ...b, id: nextId(), sort_order: store.strategies.length,
+      };
       store.strategies.push(s);
       return s;
     }

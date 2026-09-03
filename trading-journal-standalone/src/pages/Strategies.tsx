@@ -1,11 +1,15 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '../lib/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../lib/ui/card';
 import { Badge, Switch } from '../lib/ui/form';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Megaphone, ExternalLink } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
+import { useAuth } from '../lib/auth';
+import { isAdminEmail } from '../lib/admin';
 import StrategyDialog, { StrategyPayload } from './ui/StrategyDialog';
+import PublishPlaybookDialog from './ui/PublishPlaybookDialog';
 import { Strategy, Condition, FIELD_LABELS, WEEKDAYS, TAG_CONDITION_FIELD } from './data/types';
 import ProBadge from '../components/ProBadge';
 import ProNotice from '../components/ProNotice';
@@ -24,10 +28,13 @@ function condLabel(c: Condition): string {
 export default function Strategies() {
   const { data: rawStrategies, loading, refetch } = useFetch<Strategy[]>('/strategies');
   const { accounts, activeAccountId } = useAccount();
+  const { user } = useAuth();
+  const canPublishPlaybooks = isAdminEmail(user?.email);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editStrat, setEditStrat] = useState<Strategy | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [playbookStrat, setPlaybookStrat] = useState<Strategy | null>(null);
 
 const allStrategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
   ...s,
@@ -82,6 +89,18 @@ const allStrategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
     refetch();
   }
 
+  async function handlePublish(fields: { title: string; slug: string; description: string }) {
+    if (!playbookStrat) return;
+    await api.post(`/strategies?id=${playbookStrat.id}&resource=playbook`, fields);
+    refetch();
+  }
+
+  async function handleUnpublish() {
+    if (!playbookStrat) return;
+    await api.del(`/strategies?id=${playbookStrat.id}&resource=playbook`);
+    refetch();
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -130,6 +149,16 @@ const allStrategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
                 <CardTitle className="text-sm font-semibold">{s.name}</CardTitle>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <Switch checked={s.active} onCheckedChange={() => handleToggleActive(s)} />
+                  {canPublishPlaybooks && (
+                    <Button
+                      variant="ghost" size="icon"
+                      className={`h-7 w-7 ${s.playbook_published ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                      title={s.playbook_published ? 'Playbook settings' : 'Publish as Playbook'}
+                      onClick={() => setPlaybookStrat(s)}
+                    >
+                      <Megaphone className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                     onClick={() => { setEditStrat(s); setDialogOpen(true); }}>
                     <Pencil className="w-3.5 h-3.5" />
@@ -140,6 +169,15 @@ const allStrategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
                   </Button>
                 </div>
               </div>
+              {s.playbook_published && s.playbook_slug && (
+                <Link
+                  to={`/playbooks/${s.playbook_slug}`}
+                  target="_blank"
+                  className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline w-fit mt-1"
+                >
+                  <Megaphone className="w-3 h-3" /> Published as Playbook <ExternalLink className="w-2.5 h-2.5" />
+                </Link>
+              )}
             </CardHeader>
             <CardContent className="flex flex-col gap-3 pt-0">
               <div>
@@ -211,6 +249,15 @@ const allStrategies: Strategy[] = (rawStrategies ?? []).map((s: any) => ({
       </div>
 
       <StrategyDialog open={dialogOpen} strategy={editStrat} onSave={handleSave} onClose={() => setDialogOpen(false)} />
+      {canPublishPlaybooks && (
+        <PublishPlaybookDialog
+          open={playbookStrat != null}
+          strategy={playbookStrat}
+          onPublish={handlePublish}
+          onUnpublish={handleUnpublish}
+          onClose={() => setPlaybookStrat(null)}
+        />
+      )}
     </div>
   );
 }
