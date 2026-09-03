@@ -132,7 +132,7 @@ export default function Landing() {
             <Link to="/signup">
               <Button size="default" className="h-11 px-6 text-base">Get started free</Button>
             </Link>
-            <Link to="/demo">
+            <Link to="/demo/app">
               <Button variant="outline" size="default" className="h-11 px-6 text-base">Try the live demo</Button>
             </Link>
           </div>
@@ -149,7 +149,7 @@ export default function Landing() {
           </div>
           <RuleToggleDemo autoplay compact />
           <div className="text-center mt-6">
-            <Link to="/demo" className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+            <Link to="/demo/app" className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
               Try it yourself, no signup needed <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>

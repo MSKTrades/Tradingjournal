@@ -25,7 +25,7 @@
 // client bundle.
 import type {
   Account, Trade, Strategy, Checklist, ChecklistItem, CustomColumn, Tag, TagGroup,
-  TagGroupOption, LedgerEntry, Condition, StrategyResult, DailyRoutineNote, Timeframe,
+  TagGroupOption, LedgerEntry, Condition, StrategyResult, DailyRoutineNote, Timeframe, Instrument,
 } from '../pages/data/types';
 import { TAG_CONDITION_FIELD } from '../pages/data/types';
 import { showDemoCapToast } from './demoToast';
@@ -85,6 +85,7 @@ type Store = {
   tags: Tag[];
   tagGroups: TagGroup[];
   timeframes: Timeframe[];
+  instruments: Instrument[];
   ledger: LedgerEntry[];
   // How many NEW items a demo visitor has added in this tab, per category -
   // each capped at 1 (see ADD_CAPS below). Seed data doesn't count against
@@ -101,6 +102,7 @@ const ADD_CAPS: Record<string, number> = {
   tagGroups: 1,
   tagGroupOptions: 1,
   timeframes: 1,
+  instruments: 1,
   accounts: 0, // multi-account is a Pro feature even for real users - see proFeatures.ts
 };
 
@@ -108,7 +110,7 @@ function capName(key: string): string {
   const names: Record<string, string> = {
     trades: 'trade', strategies: 'strategy playbook', checklists: 'checklist',
     checklistItems: 'checklist item', columns: 'custom field', tagGroups: 'tag group',
-    tagGroupOptions: 'tag group option', timeframes: 'timeframe', accounts: 'trading account',
+    tagGroupOptions: 'tag group option', timeframes: 'timeframe', instruments: 'trading pair', accounts: 'trading account',
   };
   return names[key] ?? key;
 }
@@ -417,6 +419,9 @@ function buildSeed(): Store {
       { id: nextId(), name: '4H', sort_order: 2 },
       { id: nextId(), name: 'Daily', sort_order: 3 },
     ],
+    // Starts empty - the static INSTRUMENTS presets in TradeDetailPanel already
+    // cover the common pairs client-side, so there's nothing to seed here.
+    instruments: [],
     ledger,
     added: {},
   };
@@ -931,6 +936,16 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
       const tf: Timeframe = { id: nextId(), name, sort_order: store.timeframes.length };
       store.timeframes.push(tf);
       return tf;
+    }
+    if (method === 'GET' && resource === 'instruments') return store.instruments;
+    if (method === 'POST' && resource === 'instruments') {
+      const name = String(b.name ?? '').trim();
+      const existing = store.instruments.find(i => i.name.toLowerCase() === name.toLowerCase());
+      if (existing) return existing;
+      checkAndConsumeCap(store, 'instruments');
+      const inst: Instrument = { id: nextId(), name, sort_order: store.instruments.length };
+      store.instruments.push(inst);
+      return inst;
     }
     if (method === 'GET' && resource === 'tag_groups') {
       // Mirrors api/columns.ts's getTagGroups filter, though the demo only

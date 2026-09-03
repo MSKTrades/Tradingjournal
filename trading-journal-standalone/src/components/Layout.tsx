@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Radar, Trophy, Sparkles, DoorOpen, Images, CreditCard } from 'lucide-react';
+import { BarChart2, BookOpen, Settings, TrendingUp, Sun, Moon, PanelLeftClose, PanelLeftOpen, ListChecks, History, LogOut, ShieldCheck, Radar, Trophy, Sparkles, DoorOpen, Images, CreditCard, Megaphone } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTheme } from '../lib/theme';
 import { useAuth } from '../lib/auth';
@@ -51,6 +51,12 @@ const NAV_ITEMS = [
 // route- and API-level gates this pairs with.
 const SMC_NAV_ITEM = { to: 'smc-analysis', label: 'SMC Analysis', icon: Radar, disabled: false };
 const ADMIN_NAV_ITEM = { to: 'admin', label: 'Admin', icon: ShieldCheck, disabled: false };
+// Playbooks - admin-only for now while we build out a library of published
+// strategies ("once we've added a few strategies, we'll open it for all").
+// Same gate shape as SMC_NAV_ITEM/ADMIN_NAV_ITEM: hidden entirely from the
+// sidebar for non-admins, and App.tsx's PlaybooksGate/PlaybookDetailGate
+// back this up route-side regardless of what the sidebar shows.
+const PLAYBOOKS_NAV_ITEM = { to: 'playbooks', label: 'Playbooks', icon: Megaphone, disabled: false };
 
 // Nav items that need a real backend feature the demo sandbox doesn't mock
 // (real historical candles for Backtest; ledger/rules simulation state for
@@ -76,7 +82,7 @@ export default function Layout({ children, demoMode = false }: { children: React
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(COLLAPSE_KEY) === '1');
   const base = demoMode ? DEMO_BASE : '';
-  const navItems = (!demoMode && isAdminEmail(user?.email) ? [...NAV_ITEMS, SMC_NAV_ITEM, ADMIN_NAV_ITEM] : NAV_ITEMS)
+  const navItems = (!demoMode && isAdminEmail(user?.email) ? [...NAV_ITEMS, PLAYBOOKS_NAV_ITEM, SMC_NAV_ITEM, ADMIN_NAV_ITEM] : NAV_ITEMS)
     .filter(item => !demoMode || !DEMO_HIDDEN.has(item.to));
 
   async function handleLogout() {

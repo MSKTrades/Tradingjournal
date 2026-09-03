@@ -1196,3 +1196,27 @@ CREATE TABLE IF NOT EXISTS timeframes (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS timeframes_user_name_idx ON timeframes (user_id, lower(name));
+
+-- ============================================================================
+-- Instruments — same idea and shape as timeframes above, but for the pair/
+-- ticker typed into a trade's "Instrument" field (trades.coin_token). That
+-- field has always been free-text (an <input list="inst-list"> with a
+-- static suggestion list - see INSTRUMENTS in TradeDetailPanel.tsx), so
+-- anyone could already type a pair outside the preset list; what was
+-- missing was that list ever growing to remember it. This table is that
+-- memory: whenever a trade is saved with a coin_token not already in the
+-- combined preset+saved list, it gets added here (see api/columns.ts's
+-- resource=instruments POST), so it shows up as a suggestion on every
+-- future trade instead of needing to be retyped from scratch each time.
+-- Not account-scoped, same reasoning as timeframes - the pairs someone
+-- trades are a personal habit, not specific to one trading account.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS instruments (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS instruments_user_name_idx ON instruments (user_id, lower(name));

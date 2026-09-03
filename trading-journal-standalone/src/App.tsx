@@ -146,6 +146,36 @@ function SmcGate() {
   return isAdminEmail(user?.email) ? <SmcAnalysis /> : <SmcComingSoon />;
 }
 
+/** Gate for the in-app Playbooks library - admin-only for now. Per an
+ * explicit instruction, this isn't on the public marketing site yet ("once
+ * we've added a few strategies, we'll open it for all... show it only to
+ * me and hide it for all" other users in the meantime). Same shape as
+ * SmcGate: a non-admin who somehow lands on /playbooks sees a plain
+ * "not available" message instead of a broken page, while the real access
+ * control stays server-side (api/strategies.ts's ?resource=playbook 404s
+ * for non-admins, and api/summary/index.ts's public playbooks/playbook
+ * resources only ever return already-published strategies regardless). */
+function PlaybooksComingSoon() {
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-2 px-6 text-center">
+      <h1 className="text-xl font-semibold">Playbooks</h1>
+      <p className="max-w-sm text-sm text-muted-foreground">
+        This is coming soon - we're still building out the library.
+      </p>
+    </div>
+  );
+}
+
+function PlaybooksGate() {
+  const { user } = useAuth();
+  return isAdminEmail(user?.email) ? <Playbooks /> : <PlaybooksComingSoon />;
+}
+
+function PlaybookDetailGate() {
+  const { user } = useAuth();
+  return isAdminEmail(user?.email) ? <PlaybookDetail /> : <PlaybooksComingSoon />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -183,8 +213,6 @@ export default function App() {
                 as Landing/Pricing/Blog above. Anyone with the link (a prop
                 firm, an investor) can open it without a PipEcho login. */}
             <Route path="/track/:token" element={<TrackRecord />} />
-            <Route path="/playbooks" element={<Playbooks />} />
-            <Route path="/playbooks/:slug" element={<PlaybookDetail />} />
             <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
             <Route path="/signup" element={<PublicOnly><Signup /></PublicOnly>} />
 
@@ -207,6 +235,12 @@ export default function App() {
             <Route path="/backtest" element={<Protected><AuthedShell><BacktestComingSoon /></AuthedShell></Protected>} />
             <Route path="/challenge-simulator" element={<Protected><AuthedShell><ChallengeSimulator /></AuthedShell></Protected>} />
             <Route path="/smc-analysis" element={<Protected><AuthedShell><SmcGate /></AuthedShell></Protected>} />
+            {/* In-app, admin-only for now - see PlaybooksGate above for why.
+                Not linked from the public marketing site anymore (that's
+                what delivery52 originally did) - just from Layout.tsx's
+                sidebar, and only for the admin account. */}
+            <Route path="/playbooks" element={<Protected><AuthedShell><PlaybooksGate /></AuthedShell></Protected>} />
+            <Route path="/playbooks/:slug" element={<Protected><AuthedShell><PlaybookDetailGate /></AuthedShell></Protected>} />
             {/* No client-side email check here on purpose — the API
                 (?resource=admin_stats) is the real gate and 404s anyone but
                 the admin. Layout.tsx just hides the nav link for everyone

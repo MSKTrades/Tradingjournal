@@ -279,6 +279,16 @@ export type Timeframe = {
   sort_order: number;
 };
 
+// A user-saved pair/ticker, same shape and purpose as Timeframe above - see
+// the `instruments` table migration in schema.sql for why this exists (the
+// Instrument field was always free-text; this is what makes a typed-in pair
+// "remembered" as a suggestion next time instead of needing to be retyped).
+export type Instrument = {
+  id: number;
+  name: string;
+  sort_order: number;
+};
+
 // Shown in the timeframe picker before a user has saved any of their own -
 // picking one of these is what actually creates the first row in the
 // `timeframes` table (POST /columns?resource=timeframes), same "offer a

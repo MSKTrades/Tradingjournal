@@ -498,6 +498,15 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(rows);
       return;
     }
+    if (req.query.resource === 'instruments') {
+      // Same shape and same "not account-scoped" reasoning as timeframes
+      // just above - the pairs saved here are the ones TradeDetailPanel.tsx
+      // merges into the Instrument field's suggestion list, on top of the
+      // static INSTRUMENTS presets.
+      const rows = await sql.unsafe('SELECT * FROM instruments WHERE user_id = $1 ORDER BY sort_order ASC, id ASC', [userId]);
+      res.status(200).json(rows);
+      return;
+    }
     if (req.query.resource === 'admin_stats') {
       // Gated on email, not just "logged in" — this is the one place in the
       // app that shows data across every user, so a plain requireUserId()
@@ -629,6 +638,26 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
       const rows = await sql.unsafe(
         `INSERT INTO timeframes (name, sort_order, user_id) VALUES ($1, $2, $3) RETURNING *`,
+        [name, nextOrder, userId]
+      );
+      res.status(200).json(rows[0]);
+      return;
+    }
+    if (p.resource === 'instruments') {
+      // Same create-if-not-exists shape as timeframes above - fired from
+      // TradeDetailPanel.tsx right after a trade saves successfully with a
+      // coin_token that isn't already a known preset or saved instrument,
+      // so "already saved" (someone re-typing a pair they've used before)
+      // silently returns the existing row instead of erroring on the
+      // unique (user_id, lower(name)) index.
+      const name = String(p.name ?? '').trim();
+      if (!name) { res.status(400).json({ error: 'name is required' }); return; }
+      const existing = await sql.unsafe('SELECT * FROM instruments WHERE user_id = $1 AND lower(name) = lower($2)', [userId, name]);
+      if (existing.length > 0) { res.status(200).json(existing[0]); return; }
+      const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM instruments WHERE user_id = $1', [userId]);
+      const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
+      const rows = await sql.unsafe(
+        `INSERT INTO instruments (name, sort_order, user_id) VALUES ($1, $2, $3) RETURNING *`,
         [name, nextOrder, userId]
       );
       res.status(200).json(rows[0]);

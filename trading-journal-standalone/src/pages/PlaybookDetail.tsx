@@ -3,7 +3,6 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { ArrowRight, ShieldAlert, Target, Percent, TrendingUp, Sigma } from 'lucide-react';
-import { MarketingHeader, MarketingFooter } from './ui/MarketingChrome';
 import { Card, CardContent } from '../lib/ui/card';
 import { Badge } from '../lib/ui/form';
 import { useFetch } from '../lib/api';
@@ -43,23 +42,21 @@ function StatCard({ icon: Icon, label, value, tone }: {
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <MarketingHeader />
-      <div className="flex-1 flex items-center justify-center px-6 py-20">
-        <div className="max-w-sm text-center text-muted-foreground text-sm">{children}</div>
-      </div>
-      <MarketingFooter />
+    <div className="flex items-center justify-center px-6 py-20">
+      <div className="max-w-sm text-center text-muted-foreground text-sm">{children}</div>
     </div>
   );
 }
 
-/** Public, unauthenticated detail page for one published Playbook — the
+/** In-app, admin-only detail page for one published Playbook — the
  * strategy's real rules plus its win rate / profit factor / R-multiple
  * equity curve, computed live server-side (see api/summary/index.ts's
  * resource=playbook&slug=...). Deliberately no dollar figures anywhere on
  * this page - the API response itself never carries any (see that
  * handler's comment), so there's nothing to accidentally render even by
- * mistake. */
+ * mistake. This used to be a public, unauthenticated page (see App.tsx's
+ * history) but was pulled back inside the account — see App.tsx's
+ * PlaybookDetailGate. */
 export default function PlaybookDetail() {
   const { slug } = useParams<{ slug: string }>();
   useDocumentMeta({
@@ -89,137 +86,110 @@ export default function PlaybookDetail() {
   } = data;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <MarketingHeader />
+    <div>
+      <div className="mb-4">
+        <Badge variant="outline" className="mb-2">Playbook</Badge>
+        <h1 className="text-xl font-bold">{title}</h1>
+        {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
+      </div>
 
-      <section className="px-6 pt-14 pb-8">
-        <div className="max-w-3xl mx-auto text-center">
-          <Badge variant="outline" className="mb-4">Playbook</Badge>
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">{title}</h1>
-          {description && <p className="text-lg text-muted-foreground mt-4">{description}</p>}
-        </div>
-      </section>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <StatCard icon={Target} label="Trades" value={String(totalTrades)} />
+        <StatCard icon={Percent} label="Win Rate" value={`${winRate}%`} />
+        <StatCard icon={TrendingUp} label="Total R" value={`${totalR > 0 ? '+' : ''}${totalR}R`} tone={totalR >= 0 ? 'good' : 'bad'} />
+        <StatCard icon={Sigma} label="Profit Factor" value={fmtPF(profitFactor)} />
+      </div>
 
-      <section className="px-6 pb-6">
-        <div className="max-w-3xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard icon={Target} label="Trades" value={String(totalTrades)} />
-          <StatCard icon={Percent} label="Win Rate" value={`${winRate}%`} />
-          <StatCard icon={TrendingUp} label="Total R" value={`${totalR > 0 ? '+' : ''}${totalR}R`} tone={totalR >= 0 ? 'good' : 'bad'} />
-          <StatCard icon={Sigma} label="Profit Factor" value={fmtPF(profitFactor)} />
-        </div>
-      </section>
+      <Card className="mb-6">
+        <CardContent className="pt-5">
+          <p className="text-sm font-semibold mb-3">R-Multiple Equity Curve</p>
+          {equityCurve.length < 2 ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">
+              Not enough matching trades yet to plot a curve.
+            </div>
+          ) : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={equityCurve} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="idx" tick={{ fontSize: 10 }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10 }} width={36} />
+                  <Tooltip
+                    contentStyle={{ fontSize: 11 }}
+                    formatter={(v: number) => [`${v > 0 ? '+' : ''}${v}R`, 'Cumulative R']}
+                    labelFormatter={(l) => `Trade #${l}`}
+                  />
+                  <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
+                  <Line type="monotone" dataKey="r" stroke="hsl(var(--chart-3))" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <p className="text-[11px] text-muted-foreground mt-3">Avg {avgR > 0 ? '+' : ''}{avgR}R per trade</p>
+        </CardContent>
+      </Card>
 
-      <section className="px-6 pb-10">
-        <div className="max-w-3xl mx-auto">
-          <Card>
-            <CardContent className="pt-5">
-              <p className="text-sm font-semibold mb-3">R-Multiple Equity Curve</p>
-              {equityCurve.length < 2 ? (
-                <div className="p-8 text-center text-muted-foreground text-sm">
-                  Not enough matching trades yet to plot a curve.
-                </div>
-              ) : (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={equityCurve} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis dataKey="idx" tick={{ fontSize: 10 }} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10 }} width={36} />
-                      <Tooltip
-                        contentStyle={{ fontSize: 11 }}
-                        formatter={(v: number) => [`${v > 0 ? '+' : ''}${v}R`, 'Cumulative R']}
-                        labelFormatter={(l) => `Trade #${l}`}
-                      />
-                      <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
-                      <Line type="monotone" dataKey="r" stroke="hsl(var(--chart-3))" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-              <p className="text-[11px] text-muted-foreground mt-3">Avg {avgR > 0 ? '+' : ''}{avgR}R per trade</p>
-            </CardContent>
-          </Card>
-        </div>
-      </section>
+      <Card>
+        <CardContent className="pt-5 flex flex-col gap-4">
+          <p className="text-sm font-semibold">Setup Rules</p>
 
-      <section className="px-6 pb-16">
-        <div className="max-w-3xl mx-auto">
-          <Card>
-            <CardContent className="pt-5 flex flex-col gap-4">
-              <p className="text-sm font-semibold">Setup Rules</p>
-
-              <div>
-                <p className="text-xs text-muted-foreground font-medium mb-1.5">Filter Conditions</p>
-                {conditions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic">All trades qualify (no conditions)</p>
-                ) : (
-                  <div className="flex flex-wrap gap-1">
-                    {conditions.map((c, i) => (
-                      <Badge key={i} variant="secondary" className="text-xs font-mono">{condLabel(c)}</Badge>
-                    ))}
-                  </div>
-                )}
+          <div>
+            <p className="text-xs text-muted-foreground font-medium mb-1.5">Filter Conditions</p>
+            {conditions.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">All trades qualify (no conditions)</p>
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                {conditions.map((c, i) => (
+                  <Badge key={i} variant="secondary" className="text-xs font-mono">{condLabel(c)}</Badge>
+                ))}
               </div>
-
-              <div>
-                <p className="text-xs text-muted-foreground font-medium mb-1.5">Days Traded</p>
-                {days.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic">All days</p>
-                ) : (
-                  <div className="flex flex-wrap gap-1">
-                    {WEEKDAYS.filter(d => days.includes(d.value)).map(d => (
-                      <Badge key={d.value} variant="outline" className="text-xs">{d.label}</Badge>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {(timeStart || timeEnd) && (
-                <div>
-                  <p className="text-xs text-muted-foreground font-medium mb-1.5">Time Window</p>
-                  <Badge variant="outline" className="text-xs font-mono">
-                    {timeStart ?? '—'} – {timeEnd ?? '—'}
-                  </Badge>
-                </div>
-              )}
-
-              <div className="text-xs text-muted-foreground bg-muted/40 rounded p-2.5 leading-relaxed">
-                {tp2Rr != null && splitPercent != null ? (
-                  <>
-                    <strong>Win (both):</strong> {(splitPercent / 100 * tp1Rr + (1 - splitPercent / 100) * tp2Rr).toFixed(1)}R
-                    &nbsp;·&nbsp;
-                    <strong>Partial (TP1 only):</strong> {(splitPercent / 100 * tp1Rr).toFixed(1)}R
-                    &nbsp;·&nbsp;
-                    <strong>Loss:</strong> −1R
-                  </>
-                ) : (
-                  <>
-                    <strong>Win:</strong> +{tp1Rr}R &nbsp;·&nbsp; <strong>Loss:</strong> −1R
-                  </>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-8 rounded-lg border border-border bg-card p-6">
-            <p className="text-sm text-muted-foreground">
-              Track your own rules like this — free to start, no card required.
-            </p>
-            <Link to="/signup">
-              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 rounded-md px-4 py-2 transition-colors">
-                Get started free <ArrowRight className="w-3.5 h-3.5" />
-              </span>
-            </Link>
+            )}
           </div>
 
-          <p className="text-xs text-muted-foreground mt-6">
-            Published {new Date(publishedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}.
-            These are self-reported trading results tracked in PipEcho. Past performance does not guarantee future results.
-          </p>
-        </div>
-      </section>
+          <div>
+            <p className="text-xs text-muted-foreground font-medium mb-1.5">Days Traded</p>
+            {days.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">All days</p>
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                {WEEKDAYS.filter(d => days.includes(d.value)).map(d => (
+                  <Badge key={d.value} variant="outline" className="text-xs">{d.label}</Badge>
+                ))}
+              </div>
+            )}
+          </div>
 
-      <MarketingFooter />
+          {(timeStart || timeEnd) && (
+            <div>
+              <p className="text-xs text-muted-foreground font-medium mb-1.5">Time Window</p>
+              <Badge variant="outline" className="text-xs font-mono">
+                {timeStart ?? '—'} – {timeEnd ?? '—'}
+              </Badge>
+            </div>
+          )}
+
+          <div className="text-xs text-muted-foreground bg-muted/40 rounded p-2.5 leading-relaxed">
+            {tp2Rr != null && splitPercent != null ? (
+              <>
+                <strong>Win (both):</strong> {(splitPercent / 100 * tp1Rr + (1 - splitPercent / 100) * tp2Rr).toFixed(1)}R
+                &nbsp;·&nbsp;
+                <strong>Partial (TP1 only):</strong> {(splitPercent / 100 * tp1Rr).toFixed(1)}R
+                &nbsp;·&nbsp;
+                <strong>Loss:</strong> −1R
+              </>
+            ) : (
+              <>
+                <strong>Win:</strong> +{tp1Rr}R &nbsp;·&nbsp; <strong>Loss:</strong> −1R
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <p className="text-xs text-muted-foreground mt-6">
+        Published {new Date(publishedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}.
+        These are self-reported trading results tracked in PipEcho. Past performance does not guarantee future results.
+      </p>
     </div>
   );
 }

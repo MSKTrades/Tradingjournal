@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3, Pencil, Check, Trash2, Star, Smile } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, Timeframe, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
+import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, Timeframe, Instrument, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
 import { computeDrawdown, positionSizeLots, slPipsFromPrices } from '../data/risk';
 import { useAccount } from '../../lib/accounts';
 import { api, useFetch } from '../../lib/api';
@@ -251,6 +251,21 @@ export default function TradeDetailPanel({
   const tagGroups: TagGroup[] = rawTagGroups ?? [];
   const { data: rawTimeframes, refetch: refetchTimeframes } = useFetch<Timeframe[]>('/columns?resource=timeframes');
   const timeframes: Timeframe[] = rawTimeframes ?? [];
+  const { data: rawInstruments, refetch: refetchInstruments } = useFetch<Instrument[]>('/columns?resource=instruments');
+  // Merge the user's saved custom pairs in with the static presets, deduped
+  // case-insensitively, so a pair they've typed before shows up in the
+  // datalist right alongside EURUSD/GBPUSD/etc.
+  const instrumentOptions: string[] = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const name of [...INSTRUMENTS, ...(rawInstruments ?? []).map(i => i.name)]) {
+      const key = name.toUpperCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+    return out;
+  }, [rawInstruments]);
 
   // Guards the SL-distance auto-calc effect below against firing the moment
   // a trade loads: opening an existing trade (or switching between trades)
@@ -436,11 +451,23 @@ export default function TradeDetailPanel({
     };
   }
 
+  // If the pair the user typed isn't one we already know about (preset or
+  // previously saved), remember it - fire-and-forget, same as timeframes -
+  // so it shows up as a suggestion next time without ever blocking the save.
+  function saveNewInstrumentIfNeeded() {
+    const name = (form.coin_token ?? '').trim();
+    if (!name) return;
+    const known = instrumentOptions.some(i => i.toLowerCase() === name.toLowerCase());
+    if (known) return;
+    api.post('/columns', { resource: 'instruments', name }).then(() => refetchInstruments()).catch(() => {});
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaveError(null);
     try {
       await onSave(form);
+      saveNewInstrumentIfNeeded();
       onClose();
     } catch (e: any) {
       // Previously a failed save closed nothing but also said nothing — the
@@ -616,7 +643,7 @@ export default function TradeDetailPanel({
                 <>
                   <Input value={form.coin_token ?? ''} list="inst-list" placeholder="e.g. EURUSD"
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => set('coin_token', e.target.value || null)} />
-                  <datalist id="inst-list">{INSTRUMENTS.map(i => <option key={i} value={i} />)}</datalist>
+                  <datalist id="inst-list">{instrumentOptions.map(i => <option key={i} value={i} />)}</datalist>
                 </>
               </FieldRow>
               <FieldRow label="Side">
