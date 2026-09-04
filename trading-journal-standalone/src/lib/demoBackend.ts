@@ -451,7 +451,15 @@ function recalcCapital(trades: any[], startingBalance: number) {
     const startCap = running;
     const dollarRisk = startCap * (Number(t.position_size) || 0) / 100;
     const rrVal = t.rr != null ? Number(t.rr) : null;
-    const gainLoss = t.profit_loss === 'Breakeven' ? 0
+    // A trade synced from a real MT4/5 account (source='mt_sync') or
+    // imported from a broker CSV statement (source='csv_import') already
+    // carries its own real dollar P&L - position_size for those rows isn't
+    // "% of capital risked" the way a manually-logged trade's is, so running
+    // it through the %-risk formula below would produce a meaningless
+    // number. Trust the stored value instead, same as api/_db.js's
+    // recalcAccountCapital (the real backend this function mirrors).
+    const gainLoss = (t.source === 'mt_sync' || t.source === 'csv_import') ? Number(t.gain_loss ?? 0)
+      : t.profit_loss === 'Breakeven' ? 0
       : t.profit_loss === 'Loss' ? (rrVal != null ? -Math.abs(dollarRisk * rrVal) : -dollarRisk)
       : t.profit_loss === 'Profit' ? dollarRisk * (rrVal ?? 0)
       : 0;

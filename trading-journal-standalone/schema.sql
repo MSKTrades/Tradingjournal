@@ -1220,3 +1220,28 @@ CREATE TABLE IF NOT EXISTS instruments (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS instruments_user_name_idx ON instruments (user_id, lower(name));
+
+-- ============================================================================
+-- MIGRATION: CSV/Excel import of a real broker trade-history export (as
+-- opposed to re-importing your own manually-tracked spreadsheet, which is
+-- what ImportTradesDialog.tsx originally supported). Two things a broker
+-- export needs that a personal spreadsheet doesn't:
+--
+-- 1. A real dollar P&L per trade, not a Profit/Loss category - handled by
+--    reusing the trades.source column (already added below/above for MT4/5
+--    sync) with a new value 'csv_import'. recalcAccountCapital in api/_db.js
+--    now trusts the stored gain_loss directly for source='csv_import' rows
+--    the same way it already does for source='mt_sync', instead of running
+--    it back through the %-risk formula meant for hand-logged trades.
+--
+-- 2. Idempotent re-import - uploading last month's statement again next
+--    month should update existing trades it already knows about (matched by
+--    the broker's own ticket/order/position id, stored in trades.external_id,
+--    already added below/above for MT4/5 sync) rather than duplicate them.
+--    This is a second, separate partial unique index rather than widening
+--    the existing idx_trades_mt_sync_dedup one - partial index WHERE clauses
+--    aren't ALTERable in place, and a second index is simpler and safer than
+--    dropping/recreating the first.
+-- ============================================================================
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_csv_import_dedup
+  ON trades (account_id, source, external_id) WHERE source = 'csv_import';

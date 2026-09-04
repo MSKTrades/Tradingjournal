@@ -105,8 +105,10 @@ export async function recalcAccountCapital(sql, accountId) {
     // produce a meaningless number. Trust the stored value for those instead
     // of recomputing it - this UPDATE still writes it back below, just
     // unchanged, so the chain (start/end capital) still flows through it
-    // correctly.
-    const gainLoss = t.source === 'mt_sync' ? Number(t.existing_gain_loss ?? 0)
+    // correctly. A CSV-imported broker statement (source='csv_import', see
+    // ImportTradesDialog.tsx) carries the same kind of real dollar P&L per
+    // row rather than a %-risk category, so it gets the identical treatment.
+    const gainLoss = (t.source === 'mt_sync' || t.source === 'csv_import') ? Number(t.existing_gain_loss ?? 0)
                     : t.profit_loss === 'Breakeven' ? 0
                     : t.profit_loss === 'Loss' ? (rrVal != null ? -Math.abs(dollarRisk * rrVal) : -dollarRisk)
                     : t.profit_loss === 'Profit' ? dollarRisk * (rrVal ?? 0)

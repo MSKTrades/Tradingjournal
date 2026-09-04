@@ -45,6 +45,17 @@ export type ImportedTrade = {
   max_rr: number | null;
   comments: string | null;
   extra_data: Record<string, unknown>;
+  // Both broker-statement-only, not part of the original personal-template
+  // import: gain_loss is a real dollar P&L (as opposed to the profit_loss
+  // category above, which a broker export never has); external_id is the
+  // broker's own ticket/order/position id, used for idempotent re-import
+  // (see api/trades/bulk.ts's ON CONFLICT). source is computed once per row
+  // in rowToTrade below rather than mapped from a column — see there for
+  // why (it depends on whether gain_loss ended up populated, not on
+  // anything a spreadsheet column itself says).
+  gain_loss: number | null;
+  external_id: string | null;
+  source: 'manual' | 'csv_import';
 };
 
 const TRADE_FIELDS = [
@@ -83,9 +94,33 @@ const TRADE_FIELDS = [
   { key: 'reached_1r5',           label: '1:5 Reached' },
   { key: 'max_rr',                label: 'Max RR' },
   { key: 'comments',              label: 'Comments' },
+  { key: 'gain_loss',             label: 'Profit/Loss ($) — broker statement, not the Win/Loss above' },
+  { key: 'external_id',           label: 'Ticket / Order / Position ID' },
 ];
 
 const DETECT_RULES: [RegExp, string][] = [
+  // Broker-statement column names (MT4/5-style reports and similar) —
+  // placed ahead of the more general rules below, since the first match
+  // wins and these are narrower/more specific. "Open Time"/"Close Time"
+  // would otherwise fall through to the executed/closed *time* rules
+  // further down (open.*time, clos.*time) — prioritizing the date field
+  // instead matters more here, since trade_placed_at drives both the
+  // capital-chain ordering and the batch dedup key below. A broker's
+  // combined date+time value still parses fine into a plain date via
+  // parseDate; if you also want the time-of-day captured separately, map
+  // the same column a second time (re-upload, or map another column) to
+  // "Time Executed" / "Time Closed" by hand in the step below.
+  [/^ticket$|order.?id|position.?id|deal.?id/i, 'external_id'],
+  [/^open.?time$/i,                         'trade_placed_at'],
+  [/^close.?time$/i,                        'date_closed'],
+  // Deliberately NOT auto-detecting a raw dollar Profit/Loss column here
+  // (gain_loss) even though broker exports commonly call it "Profit" or
+  // "P/L" — those exact words already match the profit_loss rule below,
+  // which is what makes the *existing* personal-template re-import work
+  // (a hand-tracked spreadsheet's Win/Loss category, not a dollar figure).
+  // Auto-guessing wrong here would silently break that established flow.
+  // Map "Profit/Loss ($) — broker statement" by hand instead when
+  // importing a real broker export — see the map step's field dropdown.
   [/^trade.?number$|^trade$|^#$/i,          'trade_number'],
   [/pair|symbol|coin|token|instrument|market/i, 'coin_token'],
   [/buy.?sell|direction|side|long|short|type/i, 'direction'],
@@ -247,6 +282,7 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>, customCo
     closed_session: null, trade_duration: null, partial_1: null, partial_2: null,
     reached_1r2: false, reached_1r3: false, reached_1r4: false, reached_1r5: false,
     max_rr: null, comments: null, extra_data: {},
+    gain_loss: null, external_id: null, source: 'manual',
   };
   const colByKey = new Map(customColumns.map(c => [c.col_key, c]));
   Object.entries(mapping).forEach(([idxStr, field]) => {
@@ -291,8 +327,19 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>, customCo
       case 'reached_1r5':           t.reached_1r5           = parseBool(val); break;
       case 'max_rr':                t.max_rr                = parseNum(val); break;
       case 'comments':              t.comments              = parseStr(val); break;
+      case 'gain_loss':             t.gain_loss             = parseNum(val); break;
+      case 'external_id':           t.external_id           = parseStr(val); break;
     }
   });
+  // A row only counts as a broker-statement import (source='csv_import',
+  // bypasses the %-risk gain/loss formula server-side — see api/_db.js) if
+  // a real dollar figure actually got mapped in for it. Otherwise it's
+  // exactly the original personal-spreadsheet flow: 'manual' source, real
+  // gain/loss computed from position_size% + RR the same as a hand-typed
+  // trade. This is decided per row, not per import, so one column mapping
+  // choice in the step above behaves consistently across every row it
+  // touches.
+  if (t.gain_loss != null) t.source = 'csv_import';
   return t;
 }
 
@@ -376,7 +423,17 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
       sheet.rows.forEach(row => {
         const t = rowToTrade(row, hMap, customColumns);
         if (!t.trade_placed_at && !t.coin_token) return;
-        const key = `${t.trade_number}|${t.trade_placed_at}|${t.coin_token}|${t.direction}`;
+        // Prefer the broker's own ticket/order/position id for the
+        // within-batch dedup key when one was mapped — a broker export
+        // often has no sequential "trade #" the way the personal template
+        // does, so trade_number|date|pair|direction alone collides too
+        // easily for same-day trades on the same pair (e.g. two separate
+        // GBPUSD longs opened the same day). external_id is unique per
+        // broker trade by construction, so it's a strictly better key
+        // whenever it's there.
+        const key = t.external_id
+          ? `ext:${t.external_id}`
+          : `${t.trade_number}|${t.trade_placed_at}|${t.coin_token}|${t.direction}`;
         if (!seen.has(key)) { seen.add(key); trades.push(t); }
       });
     });
@@ -399,7 +456,7 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FileSpreadsheet className="w-5 h-5" /> Import from Excel
+            <FileSpreadsheet className="w-5 h-5" /> Import Trades
           </DialogTitle>
           <DialogClose onClose={handleClose} />
         </DialogHeader>
@@ -409,10 +466,10 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
             <div className="border-2 border-dashed border-border rounded-xl p-10 flex flex-col items-center gap-3 cursor-pointer hover:bg-accent/40 transition-colors w-full"
               onClick={() => fileRef.current?.click()}>
               <Upload className="w-10 h-10 text-muted-foreground" />
-              <p className="font-medium">Click to select your Excel file</p>
-              <p className="text-sm text-muted-foreground">.xlsx or .xls</p>
+              <p className="font-medium">Click to select your Excel or CSV file</p>
+              <p className="text-sm text-muted-foreground">.xlsx, .xls, or .csv — your own tracking spreadsheet, or a broker statement export</p>
             </div>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile} />
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFile} />
           </div>
         )}
 
@@ -457,7 +514,7 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
               <CheckCircle className="w-5 h-5 text-green-500" />
               <span className="font-medium">{valid.length} trades ready to import</span>
             </div>
-            <p className="text-xs text-muted-foreground">Duplicate trades (same trade# + date + pair) are merged.</p>
+            <p className="text-xs text-muted-foreground">Duplicate trades (same ticket/order ID, or same trade# + date + pair when there's no ID) are merged.</p>
             <div className="rounded border border-border overflow-x-auto max-h-64 overflow-y-auto">
               <Table>
                 <TableHeader>
@@ -476,8 +533,11 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
                       <TableCell className="text-xs py-1 px-2">{t.direction}</TableCell>
                       <TableCell className="text-xs py-1 px-2">{t.cisd_break ?? '—'}</TableCell>
                       <TableCell className="text-xs py-1 px-2">{t.inverse_candle_size ?? '—'}</TableCell>
-                      <TableCell className={`text-xs py-1 px-2 font-semibold ${t.profit_loss === 'Profit' ? 'text-green-600 dark:text-green-400' : t.profit_loss === 'Loss' ? 'text-red-500 dark:text-red-400' : ''}`}>
-                        {t.profit_loss ?? '—'}
+                      <TableCell className={`text-xs py-1 px-2 font-semibold ${
+                        t.gain_loss != null ? (t.gain_loss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')
+                        : t.profit_loss === 'Profit' ? 'text-green-600 dark:text-green-400' : t.profit_loss === 'Loss' ? 'text-red-500 dark:text-red-400' : ''
+                      }`}>
+                        {t.gain_loss != null ? `${t.gain_loss >= 0 ? '+' : ''}$${t.gain_loss.toFixed(2)}` : (t.profit_loss ?? '—')}
                       </TableCell>
                       <TableCell className="text-xs py-1 px-2">{t.rr ?? '—'}</TableCell>
                       <TableCell className="text-xs py-1 px-2">{t.max_rr ?? '—'}</TableCell>

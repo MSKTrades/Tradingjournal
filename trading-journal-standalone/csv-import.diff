@@ -1,0 +1,290 @@
+diff --git a/trading-journal-standalone/api/_db.js b/trading-journal-standalone/api/_db.js
+index 3d1d1c1..639b2a9 100644
+--- a/trading-journal-standalone/api/_db.js
++++ b/trading-journal-standalone/api/_db.js
+@@ -105,8 +105,10 @@ export async function recalcAccountCapital(sql, accountId) {
+     // produce a meaningless number. Trust the stored value for those instead
+     // of recomputing it - this UPDATE still writes it back below, just
+     // unchanged, so the chain (start/end capital) still flows through it
+-    // correctly.
+-    const gainLoss = t.source === 'mt_sync' ? Number(t.existing_gain_loss ?? 0)
++    // correctly. A CSV-imported broker statement (source='csv_import', see
++    // ImportTradesDialog.tsx) carries the same kind of real dollar P&L per
++    // row rather than a %-risk category, so it gets the identical treatment.
++    const gainLoss = (t.source === 'mt_sync' || t.source === 'csv_import') ? Number(t.existing_gain_loss ?? 0)
+                     : t.profit_loss === 'Breakeven' ? 0
+                     : t.profit_loss === 'Loss' ? (rrVal != null ? -Math.abs(dollarRisk * rrVal) : -dollarRisk)
+                     : t.profit_loss === 'Profit' ? dollarRisk * (rrVal ?? 0)
+diff --git a/trading-journal-standalone/api/trades/bulk.ts b/trading-journal-standalone/api/trades/bulk.ts
+index 8c6a5ed..b0af3e9 100644
+--- a/trading-journal-standalone/api/trades/bulk.ts
++++ b/trading-journal-standalone/api/trades/bulk.ts
+@@ -84,31 +84,58 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
+     const timeClosed      = sanitizeTime(p.time_closed);
+     const closedSession   = sanitizeText(p.closed_session);
+     const tradeDuration   = computeDuration(tradePlacedAt, tradeExecutedAt, dateClosed, timeClosed);
++    // 'csv_import' is the only other source this endpoint ever writes (see
++    // ImportTradesDialog.tsx) — a real broker statement carries an actual
++    // dollar P&L per row instead of the Profit/Loss category a hand-logged
++    // trade uses, and recalcAccountCapital (api/_db.js) trusts that stored
++    // gain_loss directly for this source instead of recomputing it from
++    // position_size%/RR, same as it already does for source='mt_sync'.
++    const source     = p.source === 'csv_import' ? 'csv_import' : 'manual';
++    const externalId = source === 'csv_import' ? (p.external_id ?? null) : null;
++    const gainLoss   = source === 'csv_import' && p.gain_loss != null ? Number(p.gain_loss) : null;
+ 
+     try {
+       await sql.unsafe(
+         `INSERT INTO trades (
+-          account_id,
++          account_id, source, external_id,
+           trade_number,
+           structure_15m, wr_1m, before_chart_1m, direction,
+           liquidity_swept, distance_from_asia, liquidity_swept_no,
+           cisd_break, total_inverse_candles, inverse_candle_size, sl_pips, position_size,
+-          profit_loss, rr, entry_price, tp_price, sl_price,
++          profit_loss, gain_loss, rr, entry_price, tp_price, sl_price,
+           coin_token, trade_placed_at, trade_executed_at, session_in,
+           date_closed, time_closed, closed_session, trade_duration,
+           partial_1, partial_2, reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr,
+           comments, extra_data
+         ) VALUES (
+-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
+-          $20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36::jsonb
+-        )`,
++          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
++          $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb
++        )
++        -- Only ever matches a prior row when source='csv_import' AND both
++        -- rows share a broker-provided external_id (the partial unique
++        -- index this targets is scoped to source='csv_import' — see
++        -- schema.sql). A 'manual' row, or a csv_import row whose source
++        -- CSV had no ticket/order-id column to map, never conflicts and
++        -- always inserts fresh, same as before this change. Deliberately
++        -- doesn't touch comments/screenshots/notes/tags/checklist results
++        -- on conflict, so re-uploading a statement can't clobber anything
++        -- you've added by hand since the last import — mirrors the same
++        -- restraint api/accounts.ts's MT4/5 sync upsert already uses.
++        ON CONFLICT (account_id, source, external_id) WHERE source = 'csv_import' DO UPDATE SET
++          coin_token = EXCLUDED.coin_token, direction = EXCLUDED.direction,
++          entry_price = EXCLUDED.entry_price, sl_price = EXCLUDED.sl_price, tp_price = EXCLUDED.tp_price,
++          trade_placed_at = EXCLUDED.trade_placed_at, trade_executed_at = EXCLUDED.trade_executed_at,
++          date_closed = EXCLUDED.date_closed, time_closed = EXCLUDED.time_closed,
++          trade_duration = EXCLUDED.trade_duration,
++          profit_loss = EXCLUDED.profit_loss, gain_loss = EXCLUDED.gain_loss,
++          rr = EXCLUDED.rr, extra_data = EXCLUDED.extra_data`,
+         [
+-          accountId,
++          accountId, source, externalId,
+           p.trade_number,
+           p.structure_15m, p.wr_1m, p.before_chart_1m ?? null, p.direction ?? 'Long',
+           p.liquidity_swept, p.distance_from_asia, p.liquidity_swept_no,
+           p.cisd_break, p.total_inverse_candles, p.inverse_candle_size, p.sl_pips, p.position_size,
+-          p.profit_loss, p.rr, p.entry_price ?? null, p.tp_price ?? null, p.sl_price ?? null,
++          p.profit_loss, gainLoss, p.rr, p.entry_price ?? null, p.tp_price ?? null, p.sl_price ?? null,
+           p.coin_token, tradePlacedAt, tradeExecutedAt, sessionIn,
+           dateClosed, timeClosed, closedSession, tradeDuration,
+           p.partial_1, p.partial_2,
+diff --git a/trading-journal-standalone/schema.sql b/trading-journal-standalone/schema.sql
+index bfbe9f3..bed55a6 100644
+--- a/trading-journal-standalone/schema.sql
++++ b/trading-journal-standalone/schema.sql
+@@ -1220,3 +1220,28 @@ CREATE TABLE IF NOT EXISTS instruments (
+ );
+ 
+ CREATE UNIQUE INDEX IF NOT EXISTS instruments_user_name_idx ON instruments (user_id, lower(name));
++
++-- ============================================================================
++-- MIGRATION: CSV/Excel import of a real broker trade-history export (as
++-- opposed to re-importing your own manually-tracked spreadsheet, which is
++-- what ImportTradesDialog.tsx originally supported). Two things a broker
++-- export needs that a personal spreadsheet doesn't:
++--
++-- 1. A real dollar P&L per trade, not a Profit/Loss category - handled by
++--    reusing the trades.source column (already added below/above for MT4/5
++--    sync) with a new value 'csv_import'. recalcAccountCapital in api/_db.js
++--    now trusts the stored gain_loss directly for source='csv_import' rows
++--    the same way it already does for source='mt_sync', instead of running
++--    it back through the %-risk formula meant for hand-logged trades.
++--
++-- 2. Idempotent re-import - uploading last month's statement again next
++--    month should update existing trades it already knows about (matched by
++--    the broker's own ticket/order/position id, stored in trades.external_id,
++--    already added below/above for MT4/5 sync) rather than duplicate them.
++--    This is a second, separate partial unique index rather than widening
++--    the existing idx_trades_mt_sync_dedup one - partial index WHERE clauses
++--    aren't ALTERable in place, and a second index is simpler and safer than
++--    dropping/recreating the first.
++-- ============================================================================
++CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_csv_import_dedup
++  ON trades (account_id, source, external_id) WHERE source = 'csv_import';
+diff --git a/trading-journal-standalone/src/lib/demoBackend.ts b/trading-journal-standalone/src/lib/demoBackend.ts
+index 565c1dc..91935ed 100644
+--- a/trading-journal-standalone/src/lib/demoBackend.ts
++++ b/trading-journal-standalone/src/lib/demoBackend.ts
+@@ -451,7 +451,15 @@ function recalcCapital(trades: any[], startingBalance: number) {
+     const startCap = running;
+     const dollarRisk = startCap * (Number(t.position_size) || 0) / 100;
+     const rrVal = t.rr != null ? Number(t.rr) : null;
+-    const gainLoss = t.profit_loss === 'Breakeven' ? 0
++    // A trade synced from a real MT4/5 account (source='mt_sync') or
++    // imported from a broker CSV statement (source='csv_import') already
++    // carries its own real dollar P&L - position_size for those rows isn't
++    // "% of capital risked" the way a manually-logged trade's is, so running
++    // it through the %-risk formula below would produce a meaningless
++    // number. Trust the stored value instead, same as api/_db.js's
++    // recalcAccountCapital (the real backend this function mirrors).
++    const gainLoss = (t.source === 'mt_sync' || t.source === 'csv_import') ? Number(t.gain_loss ?? 0)
++      : t.profit_loss === 'Breakeven' ? 0
+       : t.profit_loss === 'Loss' ? (rrVal != null ? -Math.abs(dollarRisk * rrVal) : -dollarRisk)
+       : t.profit_loss === 'Profit' ? dollarRisk * (rrVal ?? 0)
+       : 0;
+diff --git a/trading-journal-standalone/src/pages/ui/ImportTradesDialog.tsx b/trading-journal-standalone/src/pages/ui/ImportTradesDialog.tsx
+index 4cd5a44..ed886cb 100644
+--- a/trading-journal-standalone/src/pages/ui/ImportTradesDialog.tsx
++++ b/trading-journal-standalone/src/pages/ui/ImportTradesDialog.tsx
+@@ -45,6 +45,17 @@ export type ImportedTrade = {
+   max_rr: number | null;
+   comments: string | null;
+   extra_data: Record<string, unknown>;
++  // Both broker-statement-only, not part of the original personal-template
++  // import: gain_loss is a real dollar P&L (as opposed to the profit_loss
++  // category above, which a broker export never has); external_id is the
++  // broker's own ticket/order/position id, used for idempotent re-import
++  // (see api/trades/bulk.ts's ON CONFLICT). source is computed once per row
++  // in rowToTrade below rather than mapped from a column — see there for
++  // why (it depends on whether gain_loss ended up populated, not on
++  // anything a spreadsheet column itself says).
++  gain_loss: number | null;
++  external_id: string | null;
++  source: 'manual' | 'csv_import';
+ };
+ 
+ const TRADE_FIELDS = [
+@@ -83,9 +94,33 @@ const TRADE_FIELDS = [
+   { key: 'reached_1r5',           label: '1:5 Reached' },
+   { key: 'max_rr',                label: 'Max RR' },
+   { key: 'comments',              label: 'Comments' },
++  { key: 'gain_loss',             label: 'Profit/Loss ($) — broker statement, not the Win/Loss above' },
++  { key: 'external_id',           label: 'Ticket / Order / Position ID' },
+ ];
+ 
+ const DETECT_RULES: [RegExp, string][] = [
++  // Broker-statement column names (MT4/5-style reports and similar) —
++  // placed ahead of the more general rules below, since the first match
++  // wins and these are narrower/more specific. "Open Time"/"Close Time"
++  // would otherwise fall through to the executed/closed *time* rules
++  // further down (open.*time, clos.*time) — prioritizing the date field
++  // instead matters more here, since trade_placed_at drives both the
++  // capital-chain ordering and the batch dedup key below. A broker's
++  // combined date+time value still parses fine into a plain date via
++  // parseDate; if you also want the time-of-day captured separately, map
++  // the same column a second time (re-upload, or map another column) to
++  // "Time Executed" / "Time Closed" by hand in the step below.
++  [/^ticket$|order.?id|position.?id|deal.?id/i, 'external_id'],
++  [/^open.?time$/i,                         'trade_placed_at'],
++  [/^close.?time$/i,                        'date_closed'],
++  // Deliberately NOT auto-detecting a raw dollar Profit/Loss column here
++  // (gain_loss) even though broker exports commonly call it "Profit" or
++  // "P/L" — those exact words already match the profit_loss rule below,
++  // which is what makes the *existing* personal-template re-import work
++  // (a hand-tracked spreadsheet's Win/Loss category, not a dollar figure).
++  // Auto-guessing wrong here would silently break that established flow.
++  // Map "Profit/Loss ($) — broker statement" by hand instead when
++  // importing a real broker export — see the map step's field dropdown.
+   [/^trade.?number$|^trade$|^#$/i,          'trade_number'],
+   [/pair|symbol|coin|token|instrument|market/i, 'coin_token'],
+   [/buy.?sell|direction|side|long|short|type/i, 'direction'],
+@@ -247,6 +282,7 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>, customCo
+     closed_session: null, trade_duration: null, partial_1: null, partial_2: null,
+     reached_1r2: false, reached_1r3: false, reached_1r4: false, reached_1r5: false,
+     max_rr: null, comments: null, extra_data: {},
++    gain_loss: null, external_id: null, source: 'manual',
+   };
+   const colByKey = new Map(customColumns.map(c => [c.col_key, c]));
+   Object.entries(mapping).forEach(([idxStr, field]) => {
+@@ -291,8 +327,19 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>, customCo
+       case 'reached_1r5':           t.reached_1r5           = parseBool(val); break;
+       case 'max_rr':                t.max_rr                = parseNum(val); break;
+       case 'comments':              t.comments              = parseStr(val); break;
++      case 'gain_loss':             t.gain_loss             = parseNum(val); break;
++      case 'external_id':           t.external_id           = parseStr(val); break;
+     }
+   });
++  // A row only counts as a broker-statement import (source='csv_import',
++  // bypasses the %-risk gain/loss formula server-side — see api/_db.js) if
++  // a real dollar figure actually got mapped in for it. Otherwise it's
++  // exactly the original personal-spreadsheet flow: 'manual' source, real
++  // gain/loss computed from position_size% + RR the same as a hand-typed
++  // trade. This is decided per row, not per import, so one column mapping
++  // choice in the step above behaves consistently across every row it
++  // touches.
++  if (t.gain_loss != null) t.source = 'csv_import';
+   return t;
+ }
+ 
+@@ -376,7 +423,17 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+       sheet.rows.forEach(row => {
+         const t = rowToTrade(row, hMap, customColumns);
+         if (!t.trade_placed_at && !t.coin_token) return;
+-        const key = `${t.trade_number}|${t.trade_placed_at}|${t.coin_token}|${t.direction}`;
++        // Prefer the broker's own ticket/order/position id for the
++        // within-batch dedup key when one was mapped — a broker export
++        // often has no sequential "trade #" the way the personal template
++        // does, so trade_number|date|pair|direction alone collides too
++        // easily for same-day trades on the same pair (e.g. two separate
++        // GBPUSD longs opened the same day). external_id is unique per
++        // broker trade by construction, so it's a strictly better key
++        // whenever it's there.
++        const key = t.external_id
++          ? `ext:${t.external_id}`
++          : `${t.trade_number}|${t.trade_placed_at}|${t.coin_token}|${t.direction}`;
+         if (!seen.has(key)) { seen.add(key); trades.push(t); }
+       });
+     });
+@@ -399,7 +456,7 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+         <DialogHeader>
+           <DialogTitle className="flex items-center gap-2">
+-            <FileSpreadsheet className="w-5 h-5" /> Import from Excel
++            <FileSpreadsheet className="w-5 h-5" /> Import Trades
+           </DialogTitle>
+           <DialogClose onClose={handleClose} />
+         </DialogHeader>
+@@ -409,10 +466,10 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+             <div className="border-2 border-dashed border-border rounded-xl p-10 flex flex-col items-center gap-3 cursor-pointer hover:bg-accent/40 transition-colors w-full"
+               onClick={() => fileRef.current?.click()}>
+               <Upload className="w-10 h-10 text-muted-foreground" />
+-              <p className="font-medium">Click to select your Excel file</p>
+-              <p className="text-sm text-muted-foreground">.xlsx or .xls</p>
++              <p className="font-medium">Click to select your Excel or CSV file</p>
++              <p className="text-sm text-muted-foreground">.xlsx, .xls, or .csv — your own tracking spreadsheet, or a broker statement export</p>
+             </div>
+-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile} />
++            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFile} />
+           </div>
+         )}
+ 
+@@ -457,7 +514,7 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+               <CheckCircle className="w-5 h-5 text-green-500" />
+               <span className="font-medium">{valid.length} trades ready to import</span>
+             </div>
+-            <p className="text-xs text-muted-foreground">Duplicate trades (same trade# + date + pair) are merged.</p>
++            <p className="text-xs text-muted-foreground">Duplicate trades (same ticket/order ID, or same trade# + date + pair when there's no ID) are merged.</p>
+             <div className="rounded border border-border overflow-x-auto max-h-64 overflow-y-auto">
+               <Table>
+                 <TableHeader>
+@@ -476,8 +533,11 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+                       <TableCell className="text-xs py-1 px-2">{t.direction}</TableCell>
+                       <TableCell className="text-xs py-1 px-2">{t.cisd_break ?? '—'}</TableCell>
+                       <TableCell className="text-xs py-1 px-2">{t.inverse_candle_size ?? '—'}</TableCell>
+-                      <TableCell className={`text-xs py-1 px-2 font-semibold ${t.profit_loss === 'Profit' ? 'text-green-600 dark:text-green-400' : t.profit_loss === 'Loss' ? 'text-red-500 dark:text-red-400' : ''}`}>
+-                        {t.profit_loss ?? '—'}
++                      <TableCell className={`text-xs py-1 px-2 font-semibold ${
++                        t.gain_loss != null ? (t.gain_loss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')
++                        : t.profit_loss === 'Profit' ? 'text-green-600 dark:text-green-400' : t.profit_loss === 'Loss' ? 'text-red-500 dark:text-red-400' : ''
++                      }`}>
++                        {t.gain_loss != null ? `${t.gain_loss >= 0 ? '+' : ''}$${t.gain_loss.toFixed(2)}` : (t.profit_loss ?? '—')}
+                       </TableCell>
+                       <TableCell className="text-xs py-1 px-2">{t.rr ?? '—'}</TableCell>
+                       <TableCell className="text-xs py-1 px-2">{t.max_rr ?? '—'}</TableCell>

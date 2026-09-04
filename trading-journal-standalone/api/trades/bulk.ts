@@ -84,31 +84,58 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
     const timeClosed      = sanitizeTime(p.time_closed);
     const closedSession   = sanitizeText(p.closed_session);
     const tradeDuration   = computeDuration(tradePlacedAt, tradeExecutedAt, dateClosed, timeClosed);
+    // 'csv_import' is the only other source this endpoint ever writes (see
+    // ImportTradesDialog.tsx) — a real broker statement carries an actual
+    // dollar P&L per row instead of the Profit/Loss category a hand-logged
+    // trade uses, and recalcAccountCapital (api/_db.js) trusts that stored
+    // gain_loss directly for this source instead of recomputing it from
+    // position_size%/RR, same as it already does for source='mt_sync'.
+    const source     = p.source === 'csv_import' ? 'csv_import' : 'manual';
+    const externalId = source === 'csv_import' ? (p.external_id ?? null) : null;
+    const gainLoss   = source === 'csv_import' && p.gain_loss != null ? Number(p.gain_loss) : null;
 
     try {
       await sql.unsafe(
         `INSERT INTO trades (
-          account_id,
+          account_id, source, external_id,
           trade_number,
           structure_15m, wr_1m, before_chart_1m, direction,
           liquidity_swept, distance_from_asia, liquidity_swept_no,
           cisd_break, total_inverse_candles, inverse_candle_size, sl_pips, position_size,
-          profit_loss, rr, entry_price, tp_price, sl_price,
+          profit_loss, gain_loss, rr, entry_price, tp_price, sl_price,
           coin_token, trade_placed_at, trade_executed_at, session_in,
           date_closed, time_closed, closed_session, trade_duration,
           partial_1, partial_2, reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr,
           comments, extra_data
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-          $20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36::jsonb
-        )`,
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+          $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb
+        )
+        -- Only ever matches a prior row when source='csv_import' AND both
+        -- rows share a broker-provided external_id (the partial unique
+        -- index this targets is scoped to source='csv_import' — see
+        -- schema.sql). A 'manual' row, or a csv_import row whose source
+        -- CSV had no ticket/order-id column to map, never conflicts and
+        -- always inserts fresh, same as before this change. Deliberately
+        -- doesn't touch comments/screenshots/notes/tags/checklist results
+        -- on conflict, so re-uploading a statement can't clobber anything
+        -- you've added by hand since the last import — mirrors the same
+        -- restraint api/accounts.ts's MT4/5 sync upsert already uses.
+        ON CONFLICT (account_id, source, external_id) WHERE source = 'csv_import' DO UPDATE SET
+          coin_token = EXCLUDED.coin_token, direction = EXCLUDED.direction,
+          entry_price = EXCLUDED.entry_price, sl_price = EXCLUDED.sl_price, tp_price = EXCLUDED.tp_price,
+          trade_placed_at = EXCLUDED.trade_placed_at, trade_executed_at = EXCLUDED.trade_executed_at,
+          date_closed = EXCLUDED.date_closed, time_closed = EXCLUDED.time_closed,
+          trade_duration = EXCLUDED.trade_duration,
+          profit_loss = EXCLUDED.profit_loss, gain_loss = EXCLUDED.gain_loss,
+          rr = EXCLUDED.rr, extra_data = EXCLUDED.extra_data`,
         [
-          accountId,
+          accountId, source, externalId,
           p.trade_number,
           p.structure_15m, p.wr_1m, p.before_chart_1m ?? null, p.direction ?? 'Long',
           p.liquidity_swept, p.distance_from_asia, p.liquidity_swept_no,
           p.cisd_break, p.total_inverse_candles, p.inverse_candle_size, p.sl_pips, p.position_size,
-          p.profit_loss, p.rr, p.entry_price ?? null, p.tp_price ?? null, p.sl_price ?? null,
+          p.profit_loss, gainLoss, p.rr, p.entry_price ?? null, p.tp_price ?? null, p.sl_price ?? null,
           p.coin_token, tradePlacedAt, tradeExecutedAt, sessionIn,
           dateClosed, timeClosed, closedSession, tradeDuration,
           p.partial_1, p.partial_2,

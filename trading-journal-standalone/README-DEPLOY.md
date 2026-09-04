@@ -1,53 +1,101 @@
-# delivery50 — Silk-ribbon wave, matching your reference photo
+# CSV Import — deploy notes
 
-You sent a reference photo (glowing orange ribbon, silky flowing curve on
-black) and said "I need something of this sort" — this replaces the simple
-two-arc wave from delivery49 with something built the same way: a tapering
-ribbon shape (not a fixed-width line) with a soft blurred glow underneath
-and a bright highlight thread along its spine, so it actually reads like
-silk catching light rather than a flat decorative stripe.
+Scope: widen the existing "Import from Excel" flow so it also accepts real
+broker CSV statement exports, not just your own hand-tracked spreadsheet.
+Auto-sync (MT4/5, TradeLocker, cTrader) is intentionally untouched — that
+stays parked per your call to prioritize CSV import first.
 
-## What changed
+## What changed (5 files)
 
-**`src/pages/Landing.tsx`** — `SectionWave` rebuilt from scratch:
+- `schema.sql` — new partial unique index `idx_trades_csv_import_dedup` on
+  `(account_id, source, external_id) WHERE source = 'csv_import'`. Mirrors
+  the existing MT4/5 sync dedup index, just for CSV imports.
+- `api/_db.js` — `recalcAccountCapital` now trusts the stored `gain_loss`
+  directly for `source = 'csv_import'` rows (same treatment already given to
+  `mt_sync` rows), instead of running it back through the %-risk formula
+  meant for hand-logged trades.
+- `api/trades/bulk.ts` — the bulk-add endpoint now accepts `source`,
+  `external_id`, and `gain_loss` per row, and upserts on
+  `(account_id, source, external_id)` when `source = 'csv_import'` so
+  re-uploading next month's statement updates existing trades instead of
+  duplicating them. Deliberately does not overwrite comments, screenshots,
+  tags, notes, or checklist results on conflict — your own annotations
+  survive a re-import.
+- `src/lib/demoBackend.ts` — mirrors the same `csv_import` bypass into the
+  demo-mode `recalcCapital` so the in-browser demo behaves consistently with
+  the real backend.
+- `src/pages/ui/ImportTradesDialog.tsx` — the actual UI work:
+  - File picker now accepts `.csv` in addition to `.xlsx`/`.xls`.
+  - New "Profit/Loss ($)" field for the real broker dollar P&L, kept
+    separate from the existing categorical Profit/Loss/Breakeven field so
+    your own template import flow is untouched.
+  - New "Ticket / Order / Position ID" field, auto-detected from common
+    broker column headers (`Ticket`, `Order ID`, `Position ID`, `Deal ID`),
+    used as the dedup key when present.
+  - Preview table shows the real `+$X.XX` / `-$X.XX` figure when a $P&L
+    column was mapped, falling back to the categorical badge otherwise.
+  - Dialog renamed "Import Trades" to reflect the wider scope.
 
-- **Two intertwined ribbon strands** — a bright main strand and a dimmer
-  twin — each drawn as a variable-width filled shape that tapers to a
-  point at both ends (computed from a smooth centerline + a width
-  envelope, not a fixed stroke), which is what gives it that
-  silk-catching-light look instead of a uniform wavy stripe.
-- **Layered glow** — each strand has its own big, heavily-blurred glow
-  shape sitting underneath the crisper ribbon fill, same trick as the
-  ambient blur in your reference photo.
-- **A bright highlight thread** — a thin near-white line traced along the
-  main strand's spine, for the sheen along the ribbon's brightest edge.
-- Same warm palette as before (`#f97316`/`#ea580c`/`#fed7aa`), just used
-  with a real gradient wash along the ribbon's length instead of flat
-  fills.
-- Now spans the full section (`absolute inset-0` instead of a thin strip
-  pinned to the bottom), so it flows behind the whole "Watch a rule change
-  the numbers" block — headline, demo card, and the "Try it yourself"
-  link all sit on top of it, unaffected.
-- Opacity is `0.55` (light) / `0.42` (dark) — bold enough to actually read
-  as the wave in your reference, while everything on top of it (white
-  headline text, the demo card's own background) still has plenty of
-  contrast. Checked in the screenshot below.
+  Auto-detection deliberately does NOT guess the $P&L column — broker
+  headers like "Profit" or "P/L" would collide with the existing
+  categorical-P&L detection regex that your own spreadsheet template relies
+  on. You map that column by hand from the dropdown; everything else
+  auto-detects as before.
 
-## Where this shows up
+## Verification performed in this session
 
-Same spot as before — the section right after the hero, above "See it
-before you sign up." Nothing else on the landing page changed.
+- `git status`/`git ls-files` confirmed this workspace was already synced to
+  the current `origin/main` (commit `56dec01`) before these edits — no stale
+  base.
+- Ran the actual production build path Vercel uses (`vite build`, not the
+  local `npm run build` script) — succeeds cleanly.
+- Scoped `tsc --noEmit` (excluding 3 pre-existing orphaned files unrelated
+  to this change, see note below) — 0 errors.
+- Scoped `tsc --noEmit` over `api/` — 0 errors.
+- Confirmed still exactly 12 routed serverless functions (Vercel Hobby cap)
+  — no new API file was added.
 
-## Deploy steps
+### Note: unrelated pre-existing build quirk found & explained
 
-Copy this 1 file into your repo at the same path, commit, push. No new
-files, no schema/env changes, no function-count impact (0 files in `api/`
-touched — pure frontend/UI).
+While verifying, `npm run build`'s `tsc -b` step failed — but on 3 files
+that have nothing to do with this change: `src/Summary.tsx`,
+`src/pages/HtfBiasAlignment.tsx`, `src/pages/TagGroupsPicker.tsx`. These are
+orphaned duplicates of the real files (`src/pages/Summary.tsx`,
+`src/pages/ui/HtfBiasAlignment.tsx`, `src/pages/ui/TagGroupsPicker.tsx`)
+left over from earlier refactor work — nothing imports them, and their
+relative imports don't resolve from where they sit.
 
-## Verified
+This looked alarming at first (a broken build already on `origin/main`?)
+but it's harmless in practice: Vercel's actual build for this project runs
+`vite build` directly (via its own Vite framework auto-detection), not the
+`npm run build` script in `package.json` — confirmed straight from the
+build logs of the live production deployment for this exact commit. `vite
+build` only bundles files actually reachable from the app's entry point, so
+these 3 dead files are never touched and never block a real deploy. `tsc
+-b`, on the other hand, type-checks everything matched by `tsconfig.json`'s
+`include: ["src"]` regardless of whether it's reachable, which is why it
+trips on them.
 
-- `tsc --noEmit` — clean
-- `npm run build` — succeeds
-- Playwright screenshot of the live section — wave reads clearly behind
-  the demo card and headline, no text legibility issues, no overlap with
-  interactive elements
+Net effect: not a live bug, but `npm run build` is currently misleading
+locally (looks broken, isn't) and these 3 files are dead weight. Not
+touched in this delivery since they're outside the CSV-import scope and
+likely mid-use by whatever refactor left them there — flagging for you to
+delete when convenient, not fixing unprompted.
+
+## Applying this
+
+This workspace is a clone of `github.com/MSKTrades/Tradingjournal` synced to
+`origin/main` at commit `56dec01`, with only the 5 files above modified on
+top of it (nothing else touched, nothing else pending). Two ways to apply:
+
+1. **Patch**: apply `csv-import.diff` (included in this zip) against a
+   checkout at commit `56dec01` or later (as long as these 5 files haven't
+   changed further upstream).
+2. **Copy over**: the zip mirrors the repo's folder structure — copy the 5
+   files straight into place.
+
+### After deploying
+
+Run the new `schema.sql` migration against the production database (same as
+any other schema change here) — the new partial unique index is additive
+and safe to apply without downtime.
