@@ -839,7 +839,20 @@ export default function Journal() {
         onClose={() => setImportOpen(false)}
         customColumns={customCols}
         onImport={async (rows: ImportedTrade[]) => {
-          await api.post('/trades/bulk?resource=add', { trades: rows, account_id: activeAccountId });
+          // The dialog previously discarded this response entirely, so a
+          // whole-import failure (e.g. every row rejected server-side by a
+          // DB constraint) looked exactly like success from here - the
+          // dialog closed, nothing appeared in the Journal, and there was
+          // no indication anywhere of what went wrong. inserted/skipped are
+          // always in the response (see api/trades/bulk.ts) - surfacing
+          // them here means a bad import is visible immediately instead of
+          // silently doing nothing.
+          const result = await api.post('/trades/bulk?resource=add', { trades: rows, account_id: activeAccountId });
+          if ((result?.inserted ?? 0) === 0 && rows.length > 0) {
+            alert(`Import failed: 0 of ${rows.length} trades were saved. Check that your database schema is up to date (see schema.sql) - this usually means a migration hasn't been applied yet.`);
+          } else if ((result?.skipped ?? 0) > 0) {
+            alert(`Imported ${result.inserted} trade(s). ${result.skipped} row(s) were skipped (invalid data or a save error) - see the server logs for details.`);
+          }
           refetchTrades();
         }}
       />

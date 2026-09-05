@@ -164,7 +164,15 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
         ]
       );
       inserted++;
-    } catch (_err) {
+    } catch (err) {
+      // This used to swallow the error completely (just `skipped++`), which
+      // meant a whole-import failure - e.g. a schema migration that hadn't
+      // actually been run against this database yet, so the ON CONFLICT
+      // target below doesn't exist - looked identical to "nothing in this
+      // row matched anything," with zero trace of *why* anywhere, including
+      // here in the server logs. Logging it costs nothing and turns an
+      // invisible failure into one line in Vercel's runtime logs.
+      console.error('bulkAdd: row insert failed', err);
       skipped++;
     }
   }
