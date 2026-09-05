@@ -16,10 +16,10 @@ index 3d1d1c1..639b2a9 100644
                      : t.profit_loss === 'Loss' ? (rrVal != null ? -Math.abs(dollarRisk * rrVal) : -dollarRisk)
                      : t.profit_loss === 'Profit' ? dollarRisk * (rrVal ?? 0)
 diff --git a/trading-journal-standalone/api/trades/bulk.ts b/trading-journal-standalone/api/trades/bulk.ts
-index 8c6a5ed..b0af3e9 100644
+index 8c6a5ed..86bddb8 100644
 --- a/trading-journal-standalone/api/trades/bulk.ts
 +++ b/trading-journal-standalone/api/trades/bulk.ts
-@@ -84,31 +84,58 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
+@@ -84,31 +84,74 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
      const timeClosed      = sanitizeTime(p.time_closed);
      const closedSession   = sanitizeText(p.closed_session);
      const tradeDuration   = computeDuration(tradePlacedAt, tradeExecutedAt, dateClosed, timeClosed);
@@ -31,7 +31,21 @@ index 8c6a5ed..b0af3e9 100644
 +    // position_size%/RR, same as it already does for source='mt_sync'.
 +    const source     = p.source === 'csv_import' ? 'csv_import' : 'manual';
 +    const externalId = source === 'csv_import' ? (p.external_id ?? null) : null;
-+    const gainLoss   = source === 'csv_import' && p.gain_loss != null ? Number(p.gain_loss) : null;
++    // net_profit is computed here, never trusted from the client — same
++    // reasoning as addTrade in api/trades/index.ts (it's a derived number,
++    // gross_profit - commission, not a fact being reported). This is the
++    // Gross/Commission path a broker statement that splits out costs uses
++    // (FTMO/MT4/5-style — see ImportTradesDialog.tsx); a broker that
++    // already reports one net figure maps straight into gain_loss instead
++    // and skips gross_profit/commission/net_profit entirely (all stay
++    // null). Whichever path a row took, gain_loss ends up the same real $
++    // number recalcAccountCapital trusts directly for source='csv_import'.
++    const grossProfit = source === 'csv_import' && p.gross_profit != null ? Number(p.gross_profit) : null;
++    const commission  = source === 'csv_import' && p.commission != null ? Number(p.commission) : null;
++    const netProfit   = grossProfit != null ? Math.round((grossProfit - (commission ?? 0)) * 100) / 100 : null;
++    const gainLoss    = source === 'csv_import'
++      ? (p.gain_loss != null ? Number(p.gain_loss) : netProfit)
++      : null;
  
      try {
        await sql.unsafe(
@@ -47,13 +61,14 @@ index 8c6a5ed..b0af3e9 100644
            coin_token, trade_placed_at, trade_executed_at, session_in,
            date_closed, time_closed, closed_session, trade_duration,
            partial_1, partial_2, reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr,
-           comments, extra_data
+-          comments, extra_data
++          comments, extra_data, gross_profit, commission, net_profit
          ) VALUES (
 -          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
 -          $20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36::jsonb
 -        )`,
 +          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-+          $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb
++          $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39,$40,$41
 +        )
 +        -- Only ever matches a prior row when source='csv_import' AND both
 +        -- rows share a broker-provided external_id (the partial unique
@@ -72,7 +87,9 @@ index 8c6a5ed..b0af3e9 100644
 +          date_closed = EXCLUDED.date_closed, time_closed = EXCLUDED.time_closed,
 +          trade_duration = EXCLUDED.trade_duration,
 +          profit_loss = EXCLUDED.profit_loss, gain_loss = EXCLUDED.gain_loss,
-+          rr = EXCLUDED.rr, extra_data = EXCLUDED.extra_data`,
++          rr = EXCLUDED.rr, extra_data = EXCLUDED.extra_data,
++          gross_profit = EXCLUDED.gross_profit, commission = EXCLUDED.commission,
++          net_profit = EXCLUDED.net_profit`,
          [
 -          accountId,
 +          accountId, source, externalId,
@@ -85,6 +102,14 @@ index 8c6a5ed..b0af3e9 100644
            p.coin_token, tradePlacedAt, tradeExecutedAt, sessionIn,
            dateClosed, timeClosed, closedSession, tradeDuration,
            p.partial_1, p.partial_2,
+@@ -117,6 +160,7 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
+           // why pre-stringifying a value bound to a `::jsonb` cast
+           // double-encodes it.
+           p.max_rr, p.comments, p.extra_data ?? {},
++          grossProfit, commission, netProfit,
+         ]
+       );
+       inserted++;
 diff --git a/trading-journal-standalone/schema.sql b/trading-journal-standalone/schema.sql
 index bfbe9f3..bed55a6 100644
 --- a/trading-journal-standalone/schema.sql
@@ -119,7 +144,7 @@ index bfbe9f3..bed55a6 100644
 +CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_csv_import_dedup
 +  ON trades (account_id, source, external_id) WHERE source = 'csv_import';
 diff --git a/trading-journal-standalone/src/lib/demoBackend.ts b/trading-journal-standalone/src/lib/demoBackend.ts
-index 565c1dc..91935ed 100644
+index 565c1dc..8e689e2 100644
 --- a/trading-journal-standalone/src/lib/demoBackend.ts
 +++ b/trading-journal-standalone/src/lib/demoBackend.ts
 @@ -451,7 +451,15 @@ function recalcCapital(trades: any[], startingBalance: number) {
@@ -139,11 +164,33 @@ index 565c1dc..91935ed 100644
        : t.profit_loss === 'Loss' ? (rrVal != null ? -Math.abs(dollarRisk * rrVal) : -dollarRisk)
        : t.profit_loss === 'Profit' ? dollarRisk * (rrVal ?? 0)
        : 0;
+@@ -907,8 +915,20 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
+     }
+     store.added.trades = (store.added.trades ?? 0) + rows.length;
+     for (const row of rows) {
++      // Mirrors api/trades/bulk.ts's own bulkAdd: a CSV import mapped
++      // through the Gross Profit/Commission split (the FTMO/MT4/5-style
++      // path - see ImportTradesDialog.tsx) arrives with gross_profit set
++      // but no gain_loss, since the real backend is what computes that
++      // net figure. The demo mode has no real backend to defer to, so it
++      // has to do that same computation itself here - otherwise
++      // recalcCapital's source='csv_import' bypass below would trust a
++      // gain_loss that was never actually filled in and silently zero out
++      // every such trade's P&L in the demo.
++      const gainLoss = row.source === 'csv_import'
++        ? (row.gain_loss != null ? row.gain_loss : (row.gross_profit != null ? Math.round((row.gross_profit - (row.commission ?? 0)) * 100) / 100 : null))
++        : row.gain_loss;
+       const trade: any = {
+-        ...row, id: nextId(), account_id: accountId,
++        ...row, id: nextId(), account_id: accountId, gain_loss: gainLoss,
+         trade_number: store.trades.filter(t => t.account_id === accountId).length + 1,
+         tags: row.tags ?? [], tag_selections: row.tag_selections ?? {}, extra_data: row.extra_data ?? {},
+         screenshots: [], notes_blocks: [], checklist_results: {}, emotions: [],
 diff --git a/trading-journal-standalone/src/pages/ui/ImportTradesDialog.tsx b/trading-journal-standalone/src/pages/ui/ImportTradesDialog.tsx
-index 4cd5a44..ed886cb 100644
+index 4cd5a44..3a99d57 100644
 --- a/trading-journal-standalone/src/pages/ui/ImportTradesDialog.tsx
 +++ b/trading-journal-standalone/src/pages/ui/ImportTradesDialog.tsx
-@@ -45,6 +45,17 @@ export type ImportedTrade = {
+@@ -45,6 +45,31 @@ export type ImportedTrade = {
    max_rr: number | null;
    comments: string | null;
    extra_data: Record<string, unknown>;
@@ -158,15 +205,32 @@ index 4cd5a44..ed886cb 100644
 +  gain_loss: number | null;
 +  external_id: string | null;
 +  source: 'manual' | 'csv_import';
++  // Alternative to mapping straight into gain_loss above, for a broker
++  // statement (FTMO/MT4/5-style) that reports gross price P&L and costs as
++  // separate columns instead of one net figure. Mirrors the existing manual
++  // "Result" section's Gross Profit / Commission / Net Profit split (see
++  // TradeDetailPanel.tsx and api/trades/index.ts) rather than inventing a
++  // new shape - the server computes net_profit the same way it already does
++  // for a hand-typed trade (net_profit = gross_profit - commission), and
++  // uses that same number as gain_loss for the capital chain, same as it
++  // does for gain_loss-mapped rows. A broker's separate Swap column (also
++  // common on these exports) has no column of its own here — it's folded
++  // into `commission` during parsing (see rowToTrade below) since swap is
++  // just another cost the net result needs to account for.
++  gross_profit: number | null;
++  commission: number | null;
  };
  
  const TRADE_FIELDS = [
-@@ -83,9 +94,33 @@ const TRADE_FIELDS = [
+@@ -83,9 +108,52 @@ const TRADE_FIELDS = [
    { key: 'reached_1r5',           label: '1:5 Reached' },
    { key: 'max_rr',                label: 'Max RR' },
    { key: 'comments',              label: 'Comments' },
-+  { key: 'gain_loss',             label: 'Profit/Loss ($) — broker statement, not the Win/Loss above' },
++  { key: 'gain_loss',             label: 'Profit/Loss ($) — net, broker statement, not the Win/Loss above' },
 +  { key: 'external_id',           label: 'Ticket / Order / Position ID' },
++  { key: 'gross_profit',          label: 'Gross Profit/Loss ($) — before commission/swap' },
++  { key: 'commission',            label: 'Commission ($)' },
++  { key: 'swap',                  label: 'Swap ($) — folded into Commission automatically' },
  ];
  
  const DETECT_RULES: [RegExp, string][] = [
@@ -184,46 +248,123 @@ index 4cd5a44..ed886cb 100644
 +  [/^ticket$|order.?id|position.?id|deal.?id/i, 'external_id'],
 +  [/^open.?time$/i,                         'trade_placed_at'],
 +  [/^close.?time$/i,                        'date_closed'],
-+  // Deliberately NOT auto-detecting a raw dollar Profit/Loss column here
-+  // (gain_loss) even though broker exports commonly call it "Profit" or
-+  // "P/L" — those exact words already match the profit_loss rule below,
-+  // which is what makes the *existing* personal-template re-import work
-+  // (a hand-tracked spreadsheet's Win/Loss category, not a dollar figure).
-+  // Auto-guessing wrong here would silently break that established flow.
-+  // Map "Profit/Loss ($) — broker statement" by hand instead when
-+  // importing a real broker export — see the map step's field dropdown.
++  // MT4/5-family exports (FTMO and most other prop-firm statements included)
++  // commonly title the open/close columns just "Open"/"Close" (a combined
++  // date+time value, e.g. "2026-06-04 02:16:51") rather than "Open Time" —
++  // anchored bare-word rules so they don't swallow anything else that
++  // merely contains "open"/"close" (e.g. a hypothetical "Position Open?"
++  // column stays unmapped rather than being guessed wrong).
++  [/^open$/i,                               'trade_placed_at'],
++  [/^close$/i,                              'date_closed'],
++  // A bare "Profit" column (FTMO/MT4/5-style) maps to gross_profit, not
++  // gain_loss — it's the price-driven P&L *before* commission/swap on
++  // these exports, and gross_profit is exactly that field (see the
++  // ImportedTrade type above). This is deliberately narrow (anchored, not
++  // a substring match) so it can't collide with the profit_loss rule
++  // further down (which needs "profit...loss" or "P/L", not bare
++  // "Profit") — that rule is what makes the *existing* personal-template
++  // re-import work (a hand-tracked spreadsheet's Win/Loss category, not a
++  // dollar figure), and must keep winning for headers like "P/L" or
++  // "Profit/Loss". A broker that reports one net $ figure instead of
++  // gross+commission still needs "Profit/Loss ($) — net" mapped by hand —
++  // there's no safe generic word for "this single column is already net"
++  // to auto-detect on.
++  [/^profit$/i,                             'gross_profit'],
++  [/^commission(s)?$/i,                     'commission'],
++  [/^swap$/i,                               'swap'],
    [/^trade.?number$|^trade$|^#$/i,          'trade_number'],
    [/pair|symbol|coin|token|instrument|market/i, 'coin_token'],
    [/buy.?sell|direction|side|long|short|type/i, 'direction'],
-@@ -247,6 +282,7 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>, customCo
+@@ -107,7 +175,13 @@ const DETECT_RULES: [RegExp, string][] = [
+   [/dist.*asia|asia.*dist|gap.*asia|asia.*gap/i, 'distance_from_asia'],
+   [/liq.*swept?\s*no|swept?\s*no/i,         'liquidity_swept_no'],
+   [/liq.*swept?|swept?/i,                   'liquidity_swept'],
+-  [/sl.?pip|stop.?pip|pip/i,               'sl_pips'],
++  // Deliberately no bare "pip" fallback here — a broker's own "Pips" column
++  // is the trade's *result* in pips, not the SL distance this field means;
++  // matching it into sl_pips would silently mislabel every imported trade's
++  // stop distance as its pip outcome. Narrowed to require "sl"/"stop"
++  // context, so a bare "Pips" column now falls through unmapped instead
++  // (safe default — nothing currently tracks a per-trade pip result).
++  [/sl.?pip|stop.?pip/i,                   'sl_pips'],
+   [/pos.*size|size.*pos|position/i,         'position_size'],
+   [/start.*cap|cap.*start|initial.*cap/i,   'start_capital'],
+   [/profit.?loss|p.?[/\\]?l\b/i,           'profit_loss'],
+@@ -247,7 +321,16 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>, customCo
      closed_session: null, trade_duration: null, partial_1: null, partial_2: null,
      reached_1r2: false, reached_1r3: false, reached_1r4: false, reached_1r5: false,
      max_rr: null, comments: null, extra_data: {},
 +    gain_loss: null, external_id: null, source: 'manual',
++    gross_profit: null, commission: null,
    };
++  // Raw commission/swap as mapped, before folding — kept out of the
++  // ImportedTrade object itself since only their combination (below) is
++  // ever persisted. Both use the broker's own sign convention (a cost is
++  // negative, e.g. FTMO's Commissions/Swap columns), matching how they
++  // arrive in the source file untouched.
++  let commissionRaw: number | null = null;
++  let swapRaw: number | null = null;
    const colByKey = new Map(customColumns.map(c => [c.col_key, c]));
    Object.entries(mapping).forEach(([idxStr, field]) => {
-@@ -291,8 +327,19 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>, customCo
+     const val = values[Number(idxStr)];
+@@ -291,11 +374,56 @@ function rowToTrade(values: unknown[], mapping: Record<number, string>, customCo
        case 'reached_1r5':           t.reached_1r5           = parseBool(val); break;
        case 'max_rr':                t.max_rr                = parseNum(val); break;
        case 'comments':              t.comments              = parseStr(val); break;
 +      case 'gain_loss':             t.gain_loss             = parseNum(val); break;
 +      case 'external_id':           t.external_id           = parseStr(val); break;
++      case 'gross_profit':          t.gross_profit          = parseNum(val); break;
++      case 'commission':            commissionRaw           = parseNum(val); break;
++      case 'swap':                  swapRaw                 = parseNum(val); break;
      }
    });
++  // Fold Swap into Commission — the server's Gross/Commission split (see
++  // api/trades/index.ts) only has a slot for one cost figure, and swap is
++  // just another cost the net result needs to account for. Both raw values
++  // keep the broker's own sign (a cost is negative), so summing them and
++  // flipping the sign gives the positive $ cost `commission` expects —
++  // this also correctly handles the rarer case of a positive (credit) swap
++  // netting *against* the commission cost instead of adding to it. Only
++  // set at all if at least one of the two was actually mapped, so an import
++  // that doesn't touch either column leaves commission untouched (null),
++  // not a spurious $0.
++  if (commissionRaw != null || swapRaw != null) {
++    t.commission = Math.round(-((commissionRaw ?? 0) + (swapRaw ?? 0)) * 100) / 100;
++  }
 +  // A row only counts as a broker-statement import (source='csv_import',
 +  // bypasses the %-risk gain/loss formula server-side — see api/_db.js) if
-+  // a real dollar figure actually got mapped in for it. Otherwise it's
-+  // exactly the original personal-spreadsheet flow: 'manual' source, real
-+  // gain/loss computed from position_size% + RR the same as a hand-typed
-+  // trade. This is decided per row, not per import, so one column mapping
-+  // choice in the step above behaves consistently across every row it
-+  // touches.
-+  if (t.gain_loss != null) t.source = 'csv_import';
++  // a real dollar figure actually got mapped in for it, either as a single
++  // net gain_loss column or as gross_profit (with or without a commission
++  // column alongside it — the server computes the net from whichever of
++  // the two showed up, same as it does for a hand-typed trade's Result
++  // section). Otherwise it's exactly the original personal-spreadsheet
++  // flow: 'manual' source, real gain/loss computed from position_size% +
++  // RR the same as a hand-typed trade. This is decided per row, not per
++  // import, so one column mapping choice in the step above behaves
++  // consistently across every row it touches.
++  if (t.gain_loss != null || t.gross_profit != null) t.source = 'csv_import';
    return t;
  }
  
-@@ -376,7 +423,17 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
++// Preview-only projection of what the server will compute as this row's net
++// $ result — mirrors api/trades/index.ts's own
++// `gross_profit - (commission ?? 0)` formula exactly, but is never sent to
++// the server or persisted; the server remains the sole source of truth for
++// the real net_profit/gain_loss values, same reasoning as every other
++// server-computed field in this app. Without this, a gross_profit-mapped
++// import (the FTMO-style path) would show a blank P/L column in the preview
++// table even though the import is about to succeed and compute a real
++// number - purely a "does this look right before I commit" convenience.
++function previewGainLoss(t: ImportedTrade): number | null {
++  if (t.gain_loss != null) return t.gain_loss;
++  if (t.gross_profit != null) return Math.round((t.gross_profit - (t.commission ?? 0)) * 100) / 100;
++  return null;
++}
++
+ type Props = { open: boolean; onClose: () => void; onImport: (trades: ImportedTrade[]) => Promise<void>; customColumns: CustomColumn[] };
+ type Step  = 'upload' | 'map' | 'preview';
+ type SheetInfo = { name: string; rowCount: number };
+@@ -376,7 +504,17 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
        sheet.rows.forEach(row => {
          const t = rowToTrade(row, hMap, customColumns);
          if (!t.trade_placed_at && !t.coin_token) return;
@@ -242,7 +383,7 @@ index 4cd5a44..ed886cb 100644
          if (!seen.has(key)) { seen.add(key); trades.push(t); }
        });
      });
-@@ -399,7 +456,7 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+@@ -399,7 +537,7 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
          <DialogHeader>
            <DialogTitle className="flex items-center gap-2">
@@ -251,7 +392,7 @@ index 4cd5a44..ed886cb 100644
            </DialogTitle>
            <DialogClose onClose={handleClose} />
          </DialogHeader>
-@@ -409,10 +466,10 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+@@ -409,10 +547,10 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
              <div className="border-2 border-dashed border-border rounded-xl p-10 flex flex-col items-center gap-3 cursor-pointer hover:bg-accent/40 transition-colors w-full"
                onClick={() => fileRef.current?.click()}>
                <Upload className="w-10 h-10 text-muted-foreground" />
@@ -265,7 +406,7 @@ index 4cd5a44..ed886cb 100644
            </div>
          )}
  
-@@ -457,7 +514,7 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+@@ -457,7 +595,7 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
                <CheckCircle className="w-5 h-5 text-green-500" />
                <span className="font-medium">{valid.length} trades ready to import</span>
              </div>
@@ -274,17 +415,38 @@ index 4cd5a44..ed886cb 100644
              <div className="rounded border border-border overflow-x-auto max-h-64 overflow-y-auto">
                <Table>
                  <TableHeader>
-@@ -476,8 +533,11 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+@@ -468,7 +606,9 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+                   </TableRow>
+                 </TableHeader>
+                 <TableBody>
+-                  {valid.slice(0, 50).map((t, i) => (
++                  {valid.slice(0, 50).map((t, i) => {
++                    const pl = previewGainLoss(t);
++                    return (
+                     <TableRow key={i}>
+                       <TableCell className="text-xs py-1 px-2">{t.trade_number ?? '—'}</TableCell>
+                       <TableCell className="text-xs py-1 px-2 font-mono">{t.trade_placed_at ?? '—'}</TableCell>
+@@ -476,8 +616,11 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
                        <TableCell className="text-xs py-1 px-2">{t.direction}</TableCell>
                        <TableCell className="text-xs py-1 px-2">{t.cisd_break ?? '—'}</TableCell>
                        <TableCell className="text-xs py-1 px-2">{t.inverse_candle_size ?? '—'}</TableCell>
 -                      <TableCell className={`text-xs py-1 px-2 font-semibold ${t.profit_loss === 'Profit' ? 'text-green-600 dark:text-green-400' : t.profit_loss === 'Loss' ? 'text-red-500 dark:text-red-400' : ''}`}>
 -                        {t.profit_loss ?? '—'}
 +                      <TableCell className={`text-xs py-1 px-2 font-semibold ${
-+                        t.gain_loss != null ? (t.gain_loss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')
++                        pl != null ? (pl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')
 +                        : t.profit_loss === 'Profit' ? 'text-green-600 dark:text-green-400' : t.profit_loss === 'Loss' ? 'text-red-500 dark:text-red-400' : ''
 +                      }`}>
-+                        {t.gain_loss != null ? `${t.gain_loss >= 0 ? '+' : ''}$${t.gain_loss.toFixed(2)}` : (t.profit_loss ?? '—')}
++                        {pl != null ? `${pl >= 0 ? '+' : ''}$${pl.toFixed(2)}` : (t.profit_loss ?? '—')}
                        </TableCell>
                        <TableCell className="text-xs py-1 px-2">{t.rr ?? '—'}</TableCell>
                        <TableCell className="text-xs py-1 px-2">{t.max_rr ?? '—'}</TableCell>
+@@ -485,7 +628,8 @@ export default function ImportTradesDialog({ open, onClose, onImport, customColu
+                         <TableCell key={ri} className="text-xs py-1 px-2 text-center">{r ? '✓' : '—'}</TableCell>
+                       ))}
+                     </TableRow>
+-                  ))}
++                    );
++                  })}
+                   {valid.length > 50 && (
+                     <TableRow><TableCell colSpan={13} className="text-center text-xs text-muted-foreground py-2">…and {valid.length - 50} more</TableCell></TableRow>
+                   )}

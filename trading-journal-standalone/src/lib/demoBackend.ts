@@ -915,8 +915,20 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
     }
     store.added.trades = (store.added.trades ?? 0) + rows.length;
     for (const row of rows) {
+      // Mirrors api/trades/bulk.ts's own bulkAdd: a CSV import mapped
+      // through the Gross Profit/Commission split (the FTMO/MT4/5-style
+      // path - see ImportTradesDialog.tsx) arrives with gross_profit set
+      // but no gain_loss, since the real backend is what computes that
+      // net figure. The demo mode has no real backend to defer to, so it
+      // has to do that same computation itself here - otherwise
+      // recalcCapital's source='csv_import' bypass below would trust a
+      // gain_loss that was never actually filled in and silently zero out
+      // every such trade's P&L in the demo.
+      const gainLoss = row.source === 'csv_import'
+        ? (row.gain_loss != null ? row.gain_loss : (row.gross_profit != null ? Math.round((row.gross_profit - (row.commission ?? 0)) * 100) / 100 : null))
+        : row.gain_loss;
       const trade: any = {
-        ...row, id: nextId(), account_id: accountId,
+        ...row, id: nextId(), account_id: accountId, gain_loss: gainLoss,
         trade_number: store.trades.filter(t => t.account_id === accountId).length + 1,
         tags: row.tags ?? [], tag_selections: row.tag_selections ?? {}, extra_data: row.extra_data ?? {},
         screenshots: [], notes_blocks: [], checklist_results: {}, emotions: [],

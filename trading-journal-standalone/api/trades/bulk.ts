@@ -92,7 +92,21 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
     // position_size%/RR, same as it already does for source='mt_sync'.
     const source     = p.source === 'csv_import' ? 'csv_import' : 'manual';
     const externalId = source === 'csv_import' ? (p.external_id ?? null) : null;
-    const gainLoss   = source === 'csv_import' && p.gain_loss != null ? Number(p.gain_loss) : null;
+    // net_profit is computed here, never trusted from the client — same
+    // reasoning as addTrade in api/trades/index.ts (it's a derived number,
+    // gross_profit - commission, not a fact being reported). This is the
+    // Gross/Commission path a broker statement that splits out costs uses
+    // (FTMO/MT4/5-style — see ImportTradesDialog.tsx); a broker that
+    // already reports one net figure maps straight into gain_loss instead
+    // and skips gross_profit/commission/net_profit entirely (all stay
+    // null). Whichever path a row took, gain_loss ends up the same real $
+    // number recalcAccountCapital trusts directly for source='csv_import'.
+    const grossProfit = source === 'csv_import' && p.gross_profit != null ? Number(p.gross_profit) : null;
+    const commission  = source === 'csv_import' && p.commission != null ? Number(p.commission) : null;
+    const netProfit   = grossProfit != null ? Math.round((grossProfit - (commission ?? 0)) * 100) / 100 : null;
+    const gainLoss    = source === 'csv_import'
+      ? (p.gain_loss != null ? Number(p.gain_loss) : netProfit)
+      : null;
 
     try {
       await sql.unsafe(
@@ -106,10 +120,10 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
           coin_token, trade_placed_at, trade_executed_at, session_in,
           date_closed, time_closed, closed_session, trade_duration,
           partial_1, partial_2, reached_1r2, reached_1r3, reached_1r4, reached_1r5, max_rr,
-          comments, extra_data
+          comments, extra_data, gross_profit, commission, net_profit
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-          $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb
+          $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39,$40,$41
         )
         -- Only ever matches a prior row when source='csv_import' AND both
         -- rows share a broker-provided external_id (the partial unique
@@ -128,7 +142,9 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
           date_closed = EXCLUDED.date_closed, time_closed = EXCLUDED.time_closed,
           trade_duration = EXCLUDED.trade_duration,
           profit_loss = EXCLUDED.profit_loss, gain_loss = EXCLUDED.gain_loss,
-          rr = EXCLUDED.rr, extra_data = EXCLUDED.extra_data`,
+          rr = EXCLUDED.rr, extra_data = EXCLUDED.extra_data,
+          gross_profit = EXCLUDED.gross_profit, commission = EXCLUDED.commission,
+          net_profit = EXCLUDED.net_profit`,
         [
           accountId, source, externalId,
           p.trade_number,
@@ -144,6 +160,7 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
           // why pre-stringifying a value bound to a `::jsonb` cast
           // double-encodes it.
           p.max_rr, p.comments, p.extra_data ?? {},
+          grossProfit, commission, netProfit,
         ]
       );
       inserted++;
