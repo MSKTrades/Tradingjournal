@@ -1,47 +1,13 @@
 diff --git a/trading-journal-standalone/api/trades/bulk.ts b/trading-journal-standalone/api/trades/bulk.ts
-index 86bddb8..dfbe5f7 100644
+index dfbe5f7..b450fab 100644
 --- a/trading-journal-standalone/api/trades/bulk.ts
 +++ b/trading-journal-standalone/api/trades/bulk.ts
-@@ -164,7 +164,15 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
-         ]
-       );
-       inserted++;
--    } catch (_err) {
-+    } catch (err) {
-+      // This used to swallow the error completely (just `skipped++`), which
-+      // meant a whole-import failure - e.g. a schema migration that hadn't
-+      // actually been run against this database yet, so the ON CONFLICT
-+      // target below doesn't exist - looked identical to "nothing in this
-+      // row matched anything," with zero trace of *why* anywhere, including
-+      // here in the server logs. Logging it costs nothing and turns an
-+      // invisible failure into one line in Vercel's runtime logs.
-+      console.error('bulkAdd: row insert failed', err);
-       skipped++;
-     }
-   }
-diff --git a/trading-journal-standalone/src/pages/Journal.tsx b/trading-journal-standalone/src/pages/Journal.tsx
-index 6851ba9..1f1f7bf 100644
---- a/trading-journal-standalone/src/pages/Journal.tsx
-+++ b/trading-journal-standalone/src/pages/Journal.tsx
-@@ -839,7 +839,20 @@ export default function Journal() {
-         onClose={() => setImportOpen(false)}
-         customColumns={customCols}
-         onImport={async (rows: ImportedTrade[]) => {
--          await api.post('/trades/bulk?resource=add', { trades: rows, account_id: activeAccountId });
-+          // The dialog previously discarded this response entirely, so a
-+          // whole-import failure (e.g. every row rejected server-side by a
-+          // DB constraint) looked exactly like success from here - the
-+          // dialog closed, nothing appeared in the Journal, and there was
-+          // no indication anywhere of what went wrong. inserted/skipped are
-+          // always in the response (see api/trades/bulk.ts) - surfacing
-+          // them here means a bad import is visible immediately instead of
-+          // silently doing nothing.
-+          const result = await api.post('/trades/bulk?resource=add', { trades: rows, account_id: activeAccountId });
-+          if ((result?.inserted ?? 0) === 0 && rows.length > 0) {
-+            alert(`Import failed: 0 of ${rows.length} trades were saved. Check that your database schema is up to date (see schema.sql) - this usually means a migration hasn't been applied yet.`);
-+          } else if ((result?.skipped ?? 0) > 0) {
-+            alert(`Imported ${result.inserted} trade(s). ${result.skipped} row(s) were skipped (invalid data or a save error) - see the server logs for details.`);
-+          }
-           refetchTrades();
-         }}
-       />
+@@ -123,7 +123,7 @@ async function bulkAdd(req: VercelRequest, res: VercelResponse, sql: ReturnType<
+           comments, extra_data, gross_profit, commission, net_profit
+         ) VALUES (
+           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+-          $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39,$40,$41
++          $22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39::jsonb,$40,$41,$42
+         )
+         -- Only ever matches a prior row when source='csv_import' AND both
+         -- rows share a broker-provided external_id (the partial unique
