@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
-import { Bold, Clock3, Italic, List, ListOrdered, Loader2, MessageSquare, Plus, Trash2, Underline, X, ZoomIn } from 'lucide-react';
-import { NoteBlock, Timeframe, TIMEFRAME_PRESETS } from '../data/types';
+import { Bold, Check, Clock3, Italic, List, ListChecks, ListOrdered, Loader2, MessageSquare, Plus, Trash2, Underline, X, ZoomIn } from 'lucide-react';
+import { ChecklistItem, NoteBlock, Timeframe, TIMEFRAME_PRESETS } from '../data/types';
 import { isDemoMode } from '../../lib/demoMode';
 
 // Comments are stored as a small allowlisted subset of HTML (bold/italic/
@@ -63,6 +63,13 @@ type Props = {
   // each screenshot just won't render without `timeframes` passed.
   timeframes?: Timeframe[];
   onAddTimeframe?: (name: string) => void;
+  // The trade's own active checklist items (see checklistItemIds on the
+  // NoteBlock image variant, in types.ts, for why this points at the
+  // trade's checklist rather than being its own independent list). Optional
+  // and defaults to empty - the checklist row on each screenshot only
+  // renders when there's actually something to mark, i.e. the caller has a
+  // checklist enabled and turned on for this trade.
+  checklistItems?: ChecklistItem[];
 };
 
 // Small popover shown on each screenshot to record which chart timeframe it
@@ -133,6 +140,65 @@ function TimeframePicker({ value, options, onPick, onClose }: {
         >
           <Plus className="w-3 h-3" />
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Popover for marking which of the trade's checklist rules this specific
+// screenshot is evidence for - "this chart is what shows the CISD break",
+// "this one is the liquidity sweep" - so proof for a rule can live right
+// next to the chart that shows it, rather than the trade-level checklist
+// grading staying one flat yes/no per rule with nothing pointing at why.
+// Multi-select (unlike TimeframePicker, which is one-of-many) since a
+// single screenshot can easily be evidence for more than one rule at once,
+// so each item toggles independently rather than picking one and closing.
+// Same click-outside-to-close shape as TimeframePicker/CommentPopover above.
+function ChecklistPicker({ items, selected, onToggle, onClose }: {
+  items: ChecklistItem[];
+  selected: number[];
+  onToggle: (itemId: number) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute top-full left-0 mt-1 z-10 w-full max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg p-2"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <p className="text-[11px] font-medium text-muted-foreground px-1 pb-1.5">Which rules does this chart show?</p>
+      <div className="flex flex-col gap-0.5">
+        {items.map(item => {
+          const checked = selected.includes(item.id);
+          return (
+            <button
+              key={item.id}
+              onClick={() => onToggle(item.id)}
+              className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left transition-colors ${
+                checked ? 'bg-primary/15 text-foreground' : 'hover:bg-muted text-foreground'
+              }`}
+            >
+              <span
+                className={`h-4 w-4 shrink-0 rounded flex items-center justify-center border transition-colors ${
+                  checked ? 'bg-primary border-primary text-primary-foreground' : 'border-border'
+                }`}
+              >
+                {checked && <Check className="w-3 h-3" />}
+              </span>
+              <span className="truncate">{item.text}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -297,7 +363,7 @@ function AutoTextarea({ value, onChange, onPasteImage, placeholder, focused }: {
 // an "Add Screenshot" file-picker button here, but paste already covers the
 // same job with less UI to scan past, so it was dropped in favor of just
 // the placeholder text telling you paste works.
-export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTimeframe }: Props) {
+export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTimeframe, checklistItems = [] }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -311,6 +377,10 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
   // openTfFor but never set automatically (see CommentPopover's comment on
   // why it doesn't auto-open on paste).
   const [openCommentFor, setOpenCommentFor] = useState<number | null>(null);
+  // Which image block's checklist popover is open, if any - never
+  // auto-opens (marking rules is a deliberate, considered action, same
+  // reasoning as the comment popover not auto-opening on paste).
+  const [openChecklistFor, setOpenChecklistFor] = useState<number | null>(null);
   // The comment popover is sized to roughly match the screenshot it's
   // attached to (see CommentPopover's comment) - this is the measured
   // height of that specific image, captured the moment its comment row is
@@ -426,6 +496,13 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
 
   function setImageComment(i: number, rawHtml: string) {
     setBlock(i, { ...(normalized[i] as { type: 'image'; url: string; timeframe?: string; comment?: string }), comment: sanitizeCommentHtml(rawHtml) });
+  }
+
+  function toggleImageChecklistItem(i: number, itemId: number) {
+    const block = normalized[i] as { type: 'image'; url: string; timeframe?: string; comment?: string; checklistItemIds?: number[] };
+    const current = block.checklistItemIds ?? [];
+    const next = current.includes(itemId) ? current.filter(id => id !== itemId) : [...current, itemId];
+    setBlock(i, { ...block, checklistItemIds: next });
   }
 
   return (
@@ -548,6 +625,36 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
                 />
               )}
             </div>
+            {/* Checklist row - only shown when the trade actually has
+                checklist items to mark against (checklistItems is empty
+                whenever the caller has no checklist enabled for this
+                trade), same always-visible treatment as the comment row
+                right above it. */}
+            {checklistItems.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setOpenChecklistFor(openChecklistFor === i ? null : i)}
+                  className={`w-full flex items-center gap-1.5 px-2.5 py-2 text-xs text-left border-t border-border transition-colors ${
+                    (block.checklistItemIds?.length ?? 0) > 0 ? 'bg-primary/15 hover:bg-primary/20' : 'bg-muted/40 hover:bg-muted text-muted-foreground'
+                  }`}
+                >
+                  <ListChecks className={`w-3.5 h-3.5 shrink-0 ${(block.checklistItemIds?.length ?? 0) > 0 ? 'text-primary' : ''}`} />
+                  <span className={`truncate ${(block.checklistItemIds?.length ?? 0) > 0 ? 'text-foreground font-semibold' : ''}`}>
+                    {(block.checklistItemIds?.length ?? 0) > 0
+                      ? `${block.checklistItemIds!.length} rule${block.checklistItemIds!.length === 1 ? '' : 's'} marked`
+                      : 'Mark checklist rules shown here…'}
+                  </span>
+                </button>
+                {openChecklistFor === i && (
+                  <ChecklistPicker
+                    items={checklistItems}
+                    selected={block.checklistItemIds ?? []}
+                    onToggle={(itemId) => toggleImageChecklistItem(i, itemId)}
+                    onClose={() => setOpenChecklistFor(null)}
+                  />
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

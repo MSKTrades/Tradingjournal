@@ -1279,6 +1279,7 @@ export default function TradeDetailPanel({
               onChange={(blocks) => set('notes_blocks', blocks)}
               timeframes={timeframes}
               onAddTimeframe={handleAddTimeframe}
+              checklistItems={form.checklist_enabled ? (activeChecklist?.items.filter(i => i.active) ?? []) : []}
             />
           </div>
         </div>

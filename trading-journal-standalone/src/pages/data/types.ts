@@ -136,9 +136,22 @@ export type Trade = {
 // - see NotesEditor.tsx's sanitizeCommentHtml (applied before it's ever
 // stored) and stripCommentHtml (used anywhere it needs to show up as a
 // single-line plain-text preview, e.g. Vision Board's trade cards).
+//
+// `checklistItemIds` lets a specific screenshot carry evidence for specific
+// checklist rules - "this chart is what shows the CISD break", "this one is
+// the liquidity sweep" - rather than the trade's checklist grading (see
+// checklist_results on Trade) staying one flat yes/no per rule with nothing
+// pointing at proof. References ChecklistItem ids from whichever checklist
+// the trade itself is graded against (Trade.checklist_id) - it isn't its
+// own independent list, so ticking a rule here doesn't set/unset that same
+// rule's checklist_results value on the trade (that stays a deliberate,
+// separate action) and a rule this points at can still vanish from under it
+// if the checklist is edited later, same as checklist_results already can.
+// Optional/no-default, same treatment as timeframe and comment - most
+// screenshots won't use this.
 export type NoteBlock =
   | { type: 'text'; value: string }
-  | { type: 'image'; url: string; timeframe?: string; comment?: string };
+  | { type: 'image'; url: string; timeframe?: string; comment?: string; checklistItemIds?: number[] };
 
 // `value` is a plain number for every ordinary numeric field condition
 // (rr < 2, entry_price >= 1.27, etc). The one exception is the reserved
