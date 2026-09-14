@@ -246,14 +246,19 @@ const LEGACY_EXTRA_DATA_ALIASES: Record<string, string> = {
   gap_from_asia_h: 'distance_from_asia',
 };
 
-function getFieldValue(trade: Trade, field: string): number | null {
+// Returns whatever's actually stored for this field, untouched - a real
+// column value, or the raw extra_data value for a custom field, which could
+// just as easily be "3.5" as "Bullish" or "Yes". getFieldValue below is the
+// one that decides whether that's usable as a number.
+function getRawFieldValue(trade: Trade, field: string): unknown {
   const rawKey = RAW_NUMERIC_FIELDS[field];
-  if (rawKey) {
-    const v = trade[rawKey];
-    return v != null ? Number(v as any) : null;
-  }
+  if (rawKey) return trade[rawKey];
   const extraKey = LEGACY_EXTRA_DATA_ALIASES[field] ?? field;
-  const v = trade.extra_data?.[extraKey];
+  return trade.extra_data?.[extraKey];
+}
+
+function getFieldValue(trade: Trade, field: string): number | null {
+  const v = getRawFieldValue(trade, field);
   return v != null && v !== '' && !isNaN(Number(v)) ? Number(v) : null;
 }
 
@@ -268,6 +273,24 @@ function evalCondition(val: number | null, op: string, threshold: number): boole
     case '!=': return val !== threshold;
     default: return false;
   }
+}
+
+// A condition on a Text or Yes/No custom field ("Aligned with Daily = Yes")
+// never has a numeric value to compare - getFieldValue returns null for it,
+// same as a genuinely missing field, so evalCondition alone can't tell "not
+// a number" apart from "not set" and would always say false either way.
+// This is the equality-only fallback matchesCondition reaches for once the
+// numeric path comes up empty: compare the raw stored value against the
+// condition's value as trimmed, case-insensitive text, so "Yes" matches
+// "yes" or " Yes " exactly as someone would expect, without needing to know
+// up front which custom fields are declared Number vs Text vs Yes/No -
+// it just goes by whatever's actually stored on the trade.
+function evalTextCondition(raw: unknown, op: string, target: unknown): boolean {
+  if (raw == null || raw === '') return false;
+  if (op !== '=' && op !== '!=') return false;
+  const a = String(raw).trim().toLowerCase();
+  const b = String(target).trim().toLowerCase();
+  return op === '=' ? a === b : a !== b;
 }
 
 // A strategy condition can also require a trade to (not) carry a specific
@@ -300,7 +323,18 @@ function matchesTagCondition(trade: Trade, op: string, tagName: string, group?: 
 
 function matchesCondition(trade: Trade, cond: Condition): boolean {
   if (cond.field === TAG_CONDITION_FIELD) return matchesTagCondition(trade, cond.op, String(cond.value), cond.group);
-  return evalCondition(getFieldValue(trade, cond.field), cond.op, Number(cond.value));
+  const numVal = getFieldValue(trade, cond.field);
+  const numTarget = cond.value !== '' ? Number(cond.value) : NaN;
+  // Both sides have to actually look like numbers to use the numeric path -
+  // a trade whose Text field happens to hold a numeric-looking value (e.g.
+  // someone typed "10") shouldn't get compared numerically against a
+  // condition that's targeting "Yes" (Number("Yes") is NaN), or `!=` would
+  // wrongly match every trade regardless of its real value.
+  if (numVal !== null && !isNaN(numTarget)) return evalCondition(numVal, cond.op, numTarget);
+  // Not numeric (a Text/Yes-No custom field, or a condition value that
+  // isn't a number) - fall back to text equality rather than treating this
+  // the same as "field not set on this trade".
+  return evalTextCondition(getRawFieldValue(trade, cond.field), cond.op, cond.value);
 }
 
 function getReached(trade: Trade, tp: number): boolean {

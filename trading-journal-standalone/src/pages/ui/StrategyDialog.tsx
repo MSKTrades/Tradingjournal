@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Button } from '../../lib/ui/button';
 import { Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trash2, Plus } from 'lucide-react';
-import { Strategy, Condition, CustomColumn, Tag, TagGroup, CONDITION_FIELDS, OPS, WEEKDAYS, TAG_CONDITION_FIELD, TAG_OPS, FIELD_LABELS } from '../data/types';
+import { Strategy, Condition, CustomColumn, Tag, TagGroup, CONDITION_FIELDS, OPS, TEXT_OPS, WEEKDAYS, TAG_CONDITION_FIELD, TAG_OPS, FIELD_LABELS } from '../data/types';
 import { useFetch } from '../../lib/api';
 import { useAccount } from '../../lib/accounts';
 
@@ -95,17 +95,27 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   // fields (account_id=all - still scoped to this user's own accounts
   // server-side) and deduping by col_key fixes that regardless of which
   // account is active or which account(s) the strategy applies to.
+  // Every custom field is offered here now, not just numeric ones - a Text
+  // or Yes/No field (e.g. "15M Bias", "Aligned with Daily") used to be
+  // silently dropped from this list entirely, because condition rows only
+  // knew how to render a numeric op (<, <=, >, >=) + number input. Each
+  // entry now carries its own `type` so the condition row below can switch
+  // between that numeric UI (built-ins, and any custom field someone typed
+  // numbers into) and an equality-only UI (=, != plus a text value) for
+  // anything else - see TEXT_OPS's comment in types.ts for why boolean
+  // fields go through the same text path rather than a hardcoded Yes/No
+  // picker.
   const { accounts } = useAccount();
   const { data: rawCols } = useFetch<CustomColumn[]>('/columns?account_id=all');
   const allFields = useMemo(() => {
     const seen = new Set<string>();
-    const custom: { key: string; label: string }[] = [];
+    const custom: { key: string; label: string; type: string }[] = [];
     for (const c of rawCols ?? []) {
-      if (c.data_type !== 'number' || seen.has(c.col_key)) continue;
+      if (seen.has(c.col_key)) continue;
       seen.add(c.col_key);
-      custom.push({ key: c.col_key, label: c.name });
+      custom.push({ key: c.col_key, label: c.name, type: c.data_type });
     }
-    return [...CONDITION_FIELDS, ...custom];
+    return [...CONDITION_FIELDS.map(f => ({ ...f, type: 'number' })), ...custom];
   }, [rawCols]);
 
   // Tags aren't a number to compare against - a strategy condition on a tag
@@ -187,8 +197,19 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
   function updateConditionField(i: number, field: string) {
     if (field === TAG_CONDITION_FIELD) {
       updateCondition(i, { field, op: 'has', group: undefined, value: allTagOptions[0] ?? '' });
-    } else {
+      return;
+    }
+    // A numeric op ("<=") and a number value (0) make no sense once the
+    // field is a text/boolean custom field, and vice versa - same reasoning
+    // as the tag-field reset right above. Default unknown fields (legacy
+    // keys not in allFields - see needsFallbackOption below) to the numeric
+    // shape, matching what every condition on them looked like before this
+    // change.
+    const fieldType = allFields.find(f => f.key === field)?.type ?? 'number';
+    if (fieldType === 'number') {
       updateCondition(i, { field, op: '<=', group: undefined, value: 0 });
+    } else {
+      updateCondition(i, { field, op: '=', group: undefined, value: '' });
     }
   }
   // Changing which tag group a "Has Tag" condition points at also has to
@@ -269,6 +290,11 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
               {form.conditions.map((cond, i) => {
                 const isTag = cond.field === TAG_CONDITION_FIELD;
                 const tagValueOptions = isTag ? optionsForGroup(cond.group) : [];
+                // Unknown (legacy) fields default to the numeric field type
+                // - see needsFallbackOption below and updateConditionField's
+                // comment above for why that matches pre-existing behavior.
+                const fieldType = isTag ? null : (allFields.find(f => f.key === cond.field)?.type ?? 'number');
+                const isTextField = fieldType != null && fieldType !== 'number';
                 // A condition saved before the "SMC fields became custom
                 // columns" migration (see the note on allFields above) can
                 // carry a legacy field key that's no longer in allFields for
@@ -327,6 +353,23 @@ export default function StrategyDialog({ open, strategy, onSave, onClose }: Prop
                           </Button>
                         </div>
                       </>
+                    ) : isTextField ? (
+                      // Text/boolean custom field - equality only (see
+                      // TEXT_OPS's comment in types.ts), value typed as
+                      // free text so it matches whatever's actually stored
+                      // in extra_data for this field on a trade (e.g.
+                      // "Bullish", "Yes") rather than assuming a fixed set
+                      // of options.
+                      <div className="flex items-center gap-2">
+                        <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-16 text-xs shrink-0">
+                          {TEXT_OPS.map(op => <option key={op} value={op}>{op}</option>)}
+                        </Select>
+                        <Input className="flex-1 min-w-0 text-xs" value={String(cond.value)} placeholder="Value, e.g. Yes"
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateCondition(i, { value: e.target.value })} />
+                        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeCondition(i)}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     ) : (
                       <div className="flex items-center gap-2">
                         <Select value={cond.op} onChange={e => updateCondition(i, { op: e.target.value })} className="w-16 text-xs shrink-0">

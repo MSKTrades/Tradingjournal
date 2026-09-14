@@ -180,6 +180,18 @@ export type Condition = { field: string; op: string; value: number | string; gro
 export const TAG_CONDITION_FIELD = 'has_tag';
 export const TAG_OPS = ['has', '!has'] as const;
 
+// Custom fields whose data_type is 'text' or 'boolean' (see CustomColumn
+// below) compare by equality only, not by <, <=, >, >= - "Aligned with
+// Daily = Yes" makes sense, "Aligned with Daily >= Yes" doesn't. Boolean
+// fields get the same treatment as text ones here rather than their own
+// Yes/No picker: TradeDetailPanel's custom-field editor renders a boolean
+// field as a plain text input too (nothing actually enforces the value is
+// literally "Yes"/"No" - see the comment there), so a hardcoded Yes/No
+// select on the condition side could easily fail to match whatever was
+// really typed. A free-text value compared with = / != always matches
+// exactly what's actually stored, for both types.
+export const TEXT_OPS = ['=', '!='];
+
 export type Strategy = {
   id: number;
   name: string;

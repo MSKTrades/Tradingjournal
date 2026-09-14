@@ -503,14 +503,16 @@ const LEGACY_EXTRA_DATA_ALIASES: Record<string, string> = {
   cisd_break: 'cisd_break', inverse_candles: 'inverse_candle_size', gap_from_asia_h: 'distance_from_asia',
 };
 
-function getFieldValue(trade: any, field: string): number | null {
+// Raw, uncoerced value - mirrors api/summary/index.ts's getRawFieldValue
+// (kept in sync with that file and api/trades/performance.ts on purpose).
+function getRawFieldValue(trade: any, field: string): unknown {
   const rawKey = RAW_NUMERIC_FIELDS[field];
-  if (rawKey) {
-    const v = trade[rawKey];
-    return v != null ? Number(v) : null;
-  }
+  if (rawKey) return trade[rawKey];
   const extraKey = LEGACY_EXTRA_DATA_ALIASES[field] ?? field;
-  const v = trade.extra_data?.[extraKey] ?? trade[extraKey];
+  return trade.extra_data?.[extraKey] ?? trade[extraKey];
+}
+function getFieldValue(trade: any, field: string): number | null {
+  const v = getRawFieldValue(trade, field);
   return v != null && v !== '' && !isNaN(Number(v)) ? Number(v) : null;
 }
 function evalCondition(val: number | null, op: string, threshold: number): boolean {
@@ -525,6 +527,15 @@ function evalCondition(val: number | null, op: string, threshold: number): boole
     default: return false;
   }
 }
+// Equality-only fallback for Text/Yes-No custom fields - see the matching
+// comment in api/summary/index.ts.
+function evalTextCondition(raw: unknown, op: string, target: unknown): boolean {
+  if (raw == null || raw === '') return false;
+  if (op !== '=' && op !== '!=') return false;
+  const a = String(raw).trim().toLowerCase();
+  const b = String(target).trim().toLowerCase();
+  return op === '=' ? a === b : a !== b;
+}
 function matchesTagCondition(trade: any, op: string, tagName: string, group?: string): boolean {
   let has: boolean;
   if (group) {
@@ -537,7 +548,10 @@ function matchesTagCondition(trade: any, op: string, tagName: string, group?: st
 }
 function matchesCondition(trade: any, cond: Condition): boolean {
   if (cond.field === TAG_CONDITION_FIELD) return matchesTagCondition(trade, cond.op, String(cond.value), cond.group);
-  return evalCondition(getFieldValue(trade, cond.field), cond.op, Number(cond.value));
+  const numVal = getFieldValue(trade, cond.field);
+  const numTarget = cond.value !== '' ? Number(cond.value) : NaN;
+  if (numVal !== null && !isNaN(numTarget)) return evalCondition(numVal, cond.op, numTarget);
+  return evalTextCondition(getRawFieldValue(trade, cond.field), cond.op, cond.value);
 }
 function matchesDay(trade: any, days: number[] | null | undefined): boolean {
   if (!days || days.length === 0) return true;
