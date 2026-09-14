@@ -542,13 +542,30 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
           // are usually chart/platform captures where more pixels legible
           // is strictly better, and the drawer itself is wide enough now
           // to give them real room instead of shrinking them down.
-          <div key={i} className="w-full rounded-lg overflow-hidden border border-border">
+          //
+          // Deliberately NOT overflow-hidden on this outer card anymore -
+          // it used to be, purely to round the screenshot's own corners,
+          // but that had a bug hiding in it: overflow-hidden clips ANY
+          // descendant that paints outside the box, including the
+          // comment/checklist popovers below (they're position:absolute
+          // and open below the last row, i.e. exactly where this box's
+          // edge was) - so whichever popover happened to be the last row
+          // rendered completely invisible, clicks did nothing. Only the
+          // <img> itself needs its corners clipped, so that moved to its
+          // own wrapper just below instead; the outer card keeps its
+          // rounded-lg border (a border draws rounded regardless of
+          // overflow) and the bottom corners are rounded directly on
+          // whichever row is actually last (see rounded-b-lg below) so
+          // nothing needs the parent to clip it into shape.
+          <div key={i} className="w-full rounded-lg border border-border">
             <div className="relative group">
-              <img
-                ref={(el) => { if (el) imgRefs.current.set(i, el); else imgRefs.current.delete(i); }}
-                src={block.url} alt="Trade screenshot" className="w-full h-auto block cursor-zoom-in"
-                onClick={() => setLightbox(block.url)}
-              />
+              <div className="overflow-hidden rounded-t-lg">
+                <img
+                  ref={(el) => { if (el) imgRefs.current.set(i, el); else imgRefs.current.delete(i); }}
+                  src={block.url} alt="Trade screenshot" className="w-full h-auto block cursor-zoom-in"
+                  onClick={() => setLightbox(block.url)}
+                />
+              </div>
               <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   className="h-7 w-7 rounded-md bg-black/60 text-white flex items-center justify-center hover:bg-black/80"
@@ -601,9 +618,13 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
             <div className="relative">
               <button
                 onClick={() => toggleComment(i)}
+                // rounded-b-lg only when this is actually the last row (no
+                // checklist row following it) - see the comment on the
+                // outer card above for why that's on the row itself now
+                // instead of an ancestor's overflow-hidden.
                 className={`w-full flex items-center gap-1.5 px-2.5 py-2 text-xs text-left border-t border-border transition-colors ${
                   block.comment ? 'bg-primary/15 hover:bg-primary/20' : 'bg-muted/40 hover:bg-muted text-muted-foreground'
-                }`}
+                } ${checklistItems.length === 0 ? 'rounded-b-lg' : ''}`}
               >
                 <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${block.comment ? 'text-primary' : ''}`} />
                 {/* Stripped to plain text for this single-line preview - the
@@ -634,7 +655,9 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
               <div className="relative">
                 <button
                   onClick={() => setOpenChecklistFor(openChecklistFor === i ? null : i)}
-                  className={`w-full flex items-center gap-1.5 px-2.5 py-2 text-xs text-left border-t border-border transition-colors ${
+                  // Always the last row when it renders at all, so always
+                  // rounded-b-lg (see the comment row's version of this).
+                  className={`w-full flex items-center gap-1.5 px-2.5 py-2 text-xs text-left border-t border-border transition-colors rounded-b-lg ${
                     (block.checklistItemIds?.length ?? 0) > 0 ? 'bg-primary/15 hover:bg-primary/20' : 'bg-muted/40 hover:bg-muted text-muted-foreground'
                   }`}
                 >
