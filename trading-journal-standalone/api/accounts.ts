@@ -508,7 +508,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     await sql.unsafe(
       `UPDATE trades SET
          checklist_enabled = $1,
-         checklist_id = CASE WHEN $1 THEN $2 ELSE NULL END
+         checklist_id = CASE WHEN $1 THEN $2::integer ELSE NULL END
        WHERE account_id = $3`,
       [rows[0].checklist_enabled, rows[0].checklist_id, id]
     );
