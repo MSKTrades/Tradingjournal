@@ -304,6 +304,23 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS checklist_enabled BOOLEAN NOT NULL D
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS checklist_id INTEGER REFERENCES checklists(id) ON DELETE SET NULL;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS checklist_results JSONB NOT NULL DEFAULT '{}'::jsonb;  -- { "<checklist_item id>": true|false }
 
+-- Checklist grading moved from a per-trade toggle to an account-level
+-- default: turning it on here (and picking a checklist) applies to every
+-- trade on this account automatically, instead of remembering to flip it
+-- and pick the same checklist on each new trade one at a time. The columns
+-- on trades above still exist and still hold the real per-trade grading
+-- data (checklist_results in particular - which rules were actually
+-- followed on THIS trade is inherently per-trade, an account-level setting
+-- can't carry that), but trades.checklist_enabled/checklist_id are now
+-- treated as derived from the owning account rather than independently
+-- toggled - see the read/write paths in api/trades/index.ts and
+-- api/trades/[id].ts, which overwrite whatever a client sends for those two
+-- fields with the account's current settings before it ever reaches the
+-- database, so an account's choice really does apply to every trade under
+-- it, including ones logged before this feature existed, not just new ones.
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS checklist_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS checklist_id INTEGER REFERENCES checklists(id) ON DELETE SET NULL;
+
 -- ============================================================================
 -- REPAIR: undo double-JSON-encoding caused by a real driver-behavior bug in
 -- api/trades/index.ts, api/trades/[id].ts, api/trades/bulk-add.ts, and

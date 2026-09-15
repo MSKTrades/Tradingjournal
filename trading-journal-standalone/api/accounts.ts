@@ -149,8 +149,8 @@ async function createAccount(sql: ReturnType<typeof db>, userId: number, p: any)
   const name = String(p?.name ?? '').trim();
   if (!name) throw new Error('Account name is required');
   const rows = await sql.unsafe(
-    `INSERT INTO accounts (name, type, starting_balance, active, sort_order, daily_loss_limit_pct, max_drawdown_limit_pct, consistency_rule_pct, user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO accounts (name, type, starting_balance, active, sort_order, daily_loss_limit_pct, max_drawdown_limit_pct, consistency_rule_pct, checklist_enabled, checklist_id, user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       name,
@@ -161,6 +161,8 @@ async function createAccount(sql: ReturnType<typeof db>, userId: number, p: any)
       p.daily_loss_limit_pct ?? null,
       p.max_drawdown_limit_pct ?? null,
       p.consistency_rule_pct ?? null,
+      p.checklist_enabled ?? false,
+      p.checklist_id ?? null,
       userId,
     ]
   );
@@ -478,7 +480,8 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         name = $1, type = $2, starting_balance = $3, active = $4, sort_order = $5,
         daily_loss_limit_pct = $6, max_drawdown_limit_pct = $7, consistency_rule_pct = $8,
         public_share_enabled = $9, public_share_name = $10, public_share_show_dollars = $11,
-        public_share_token = CASE WHEN $9 AND public_share_token IS NULL THEN $12 ELSE public_share_token END
+        public_share_token = CASE WHEN $9 AND public_share_token IS NULL THEN $12 ELSE public_share_token END,
+        checklist_enabled = $15, checklist_id = $16
        WHERE id = $13 AND user_id = $14
        RETURNING *`,
       [
@@ -486,6 +489,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.daily_loss_limit_pct ?? null, p.max_drawdown_limit_pct ?? null, p.consistency_rule_pct ?? null,
         publicShareEnabled, p.public_share_name ?? null, p.public_share_show_dollars ?? false,
         candidateShareToken, id, userId,
+        p.checklist_enabled ?? false, p.checklist_id ?? null,
       ]
     );
 
@@ -493,6 +497,21 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     // starting_balance may have changed — every trade's capital chain in
     // this account is derived from it, so recompute the whole chain.
     await recalcAccountCapital(sql, id);
+    // The checklist selection may have just changed too - every trade under
+    // this account needs its own checklist_enabled/checklist_id columns
+    // brought back in line with the account's new choice (see the
+    // schema.sql note on why those trade columns are treated as derived
+    // rather than independently set). recalcAccountCapital doesn't touch
+    // these, so they're synced here explicitly, in the same request that
+    // changed them, rather than waiting for each trade to next be
+    // individually edited/resaved.
+    await sql.unsafe(
+      `UPDATE trades SET
+         checklist_enabled = $1,
+         checklist_id = CASE WHEN $1 THEN $2 ELSE NULL END
+       WHERE account_id = $3`,
+      [rows[0].checklist_enabled, rows[0].checklist_id, id]
+    );
     res.status(200).json(rows[0]);
   } else if (req.method === 'DELETE') {
     const ownRows = await sql.unsafe('SELECT 1 FROM accounts WHERE id = $1 AND user_id = $2', [id, userId]);

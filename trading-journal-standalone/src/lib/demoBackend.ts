@@ -160,6 +160,11 @@ function buildSeed(): Store {
     public_share_token: null,
     public_share_name: null,
     public_share_show_dollars: false,
+    // Checklist grading is on for the whole demo account (see the seeded
+    // trades below, which all carry it) - showcases the account-level
+    // toggle (AccountDialog.tsx) rather than the old per-trade one.
+    checklist_enabled: true,
+    checklist_id: null, // filled in below once checklistId exists
   };
 
   const checklistId = nextId();
@@ -176,6 +181,7 @@ function buildSeed(): Store {
       { id: nextId(), checklist_id: checklistId, text: 'Checked the economic calendar for red-folder news', sort_order: 3, active: true },
     ],
   };
+  account.checklist_id = checklistId;
 
   const strategy: Strategy = {
     id: nextId(),
@@ -314,7 +320,11 @@ function buildSeed(): Store {
         } else if (win && rand() < 0.4) {
           flatTags.push('A+ Setup');
         }
-        const gradeChecklist = rand() < 0.6;
+        // Every trade grades against the account's checklist now (see
+        // account.checklist_enabled above) - matches the real backend,
+        // which derives these two fields from the account rather than
+        // letting each trade decide independently.
+        const gradeChecklist = account.checklist_enabled;
         rawTrades.push({
           id: nextId(),
           account_id: accountId,
@@ -855,6 +865,15 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
     }
     if (method === 'PUT') {
       Object.assign(store.account, b);
+      // Mirrors the real backend's api/accounts.ts: a changed checklist
+      // selection applies to every trade on this account immediately, not
+      // just future ones - see the schema.sql note on trades.checklist_id
+      // being treated as derived from the account rather than independently
+      // set.
+      for (const t of store.trades) {
+        (t as any).checklist_enabled = store.account.checklist_enabled;
+        (t as any).checklist_id = store.account.checklist_enabled ? store.account.checklist_id : null;
+      }
       return { ok: true };
     }
     if (method === 'DELETE' && resource === 'ledger') {
@@ -882,6 +901,10 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
         extra_data: b.extra_data ?? {},
         screenshots: [],
         notes_blocks: b.notes_blocks ?? [],
+        // From the account, not the client - mirrors api/trades/index.ts's
+        // addTrade (see schema.sql's note on why these are account-derived).
+        checklist_enabled: store.account.checklist_enabled,
+        checklist_id: store.account.checklist_enabled ? store.account.checklist_id : null,
         checklist_results: b.checklist_results ?? {},
         emotions: b.emotions ?? [],
         created_at: new Date().toISOString(),
@@ -898,7 +921,12 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
     if (method === 'PUT') {
       const idx = store.trades.findIndex(t => t.id === id);
       if (idx === -1) throw new Error('Trade not found');
-      store.trades[idx] = { ...store.trades[idx], ...b, id, account_id: accountId };
+      store.trades[idx] = {
+        ...store.trades[idx], ...b, id, account_id: accountId,
+        // From the account, not the client - same as the POST branch above.
+        checklist_enabled: store.account.checklist_enabled,
+        checklist_id: store.account.checklist_enabled ? store.account.checklist_id : null,
+      } as any;
       upsertTagsFromTrade((store.trades[idx] as any).tags ?? []);
       recalcCapital(store.trades.filter(t => t.account_id === accountId), Number(store.account.starting_balance ?? 0));
       return store.trades[idx];

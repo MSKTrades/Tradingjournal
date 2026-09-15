@@ -404,7 +404,24 @@ export default function TradeDetailPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.entry_price, form.sl_price, form.coin_token]);
 
-  const activeChecklist = checklists.find(c => c.id === form.checklist_id) ?? null;
+  // The trade's own account (not necessarily the globally active one, since
+  // a trade can belong to any account) - also used below for Position Size
+  // Calculator's live balance.
+  const selectedAccount = accounts.find(a => a.id === form.account_id) ?? null;
+
+  // Checklist enable + which-checklist are account-level settings now (see
+  // AccountDialog.tsx and the schema.sql note on trades.checklist_enabled/
+  // checklist_id) rather than something toggled per trade - every trade on
+  // an account with grading on automatically grades against that account's
+  // chosen checklist. form.checklist_enabled/checklist_id still exist on
+  // the trade record itself (the backend keeps them in sync with the
+  // account - see api/trades/index.ts and api/accounts.ts), but the UI
+  // reads the account directly rather than the trade's own copy, so a
+  // still-unsaved change to an account's checklist elsewhere (or just
+  // switching which account this trade belongs to, before saving) is
+  // reflected immediately instead of waiting for a round trip.
+  const checklistEnabled = selectedAccount?.checklist_enabled ?? false;
+  const activeChecklist = checklistEnabled ? (checklists.find(c => c.id === selectedAccount?.checklist_id) ?? null) : null;
 
   const { data: newsData } = useFetch<{ events: NewsEvent[] }>('/summary?resource=news');
   const newsCheck = useMemo(
@@ -412,19 +429,17 @@ export default function TradeDetailPanel({
     [form.coin_token, form.trade_placed_at, newsData]
   );
   const checklistSummary = useMemo(() => {
-    if (!form.checklist_enabled || !activeChecklist || activeChecklist.items.length === 0) return null;
+    if (!checklistEnabled || !activeChecklist || activeChecklist.items.length === 0) return null;
     const followed = activeChecklist.items.filter(i => form.checklist_results[String(i.id)] === true).length;
     return { followed, total: activeChecklist.items.length };
-  }, [form.checklist_enabled, form.checklist_results, activeChecklist]);
+  }, [checklistEnabled, form.checklist_results, activeChecklist]);
 
-  // Position Size Calculator — uses the selected trade's own account (not
-  // necessarily the globally active one, since a trade can belong to any
-  // account) and, for the currently active account only, its live running
-  // balance (starting balance + all trades so far) rather than the static
-  // starting balance, so the suggested size reflects where the account
-  // actually stands today. For any other account we fall back to its
-  // starting balance since we don't have that account's trades loaded here.
-  const selectedAccount = accounts.find(a => a.id === form.account_id) ?? null;
+  // Position Size Calculator — uses the selected trade's own account and,
+  // for the currently active account only, its live running balance
+  // (starting balance + all trades so far) rather than the static starting
+  // balance, so the suggested size reflects where the account actually
+  // stands today. For any other account we fall back to its starting
+  // balance since we don't have that account's trades loaded here.
   const accountBalanceForSizing = useMemo(() => {
     if (!selectedAccount) return null;
     // starting_balance comes back from the API as a string (same as every
@@ -1034,58 +1049,47 @@ export default function TradeDetailPanel({
             <CollapsibleSection
               storageKey="forexforge_panel_checklist_open"
               title="Checklist"
-              subtitle={form.checklist_enabled ? (activeChecklist ? activeChecklist.name : 'Enabled — pick a checklist below') : 'Off — turn on to grade this trade against your rules'}
+              subtitle={checklistEnabled ? (activeChecklist ? activeChecklist.name : 'Enabled on this account — pick a checklist in its settings') : 'Off for this account'}
             >
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">Enable checklist for this trade</Label>
-                <Switch
-                  checked={form.checklist_enabled}
-                  onCheckedChange={v => set('checklist_enabled', v)}
-                />
-              </div>
-
-              {form.checklist_enabled && (
-                checklists.length > 0 ? (
-                  <>
-                    <FieldRow label="Checklist">
-                      <Select
-                        value={form.checklist_id ?? ''}
-                        onChange={e => set('checklist_id', e.target.value ? Number(e.target.value) : null)}
-                      >
-                        <option value="">Select a checklist…</option>
-                        {checklists.map(cl => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
-                      </Select>
-                    </FieldRow>
-
-                    {activeChecklist && (
-                      activeChecklist.items.length > 0 ? (
-                        <div className="flex flex-col gap-2 mt-1">
-                          {activeChecklist.items.map((item, idx) => (
-                            <div key={item.id} className="flex items-center gap-2">
-                              <Checkbox
-                                checked={!!form.checklist_results[String(item.id)]}
-                                onCheckedChange={() => setChecklistResult(item.id, !form.checklist_results[String(item.id)])}
-                                aria-label={item.text}
-                              />
-                              <span className="text-xs flex-1">
-                                <span className="font-semibold text-muted-foreground mr-1">Rule {idx + 1}:</span>
-                                {item.text}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">
-                          This checklist has no rules yet — add some on the <strong>Checklists</strong> tab.
-                        </p>
-                      )
-                    )}
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    No checklists yet — create one on the <strong>Checklists</strong> tab first.
-                  </p>
-                )
+              {/* No enable toggle or checklist picker here anymore - both
+                  moved to the account itself (AccountDialog.tsx), so every
+                  trade on an account with grading on picks it up
+                  automatically instead of needing it set per trade. Which
+                  RULES were actually followed is still tracked per trade
+                  right below (that can't be an account-wide fact) - either
+                  ticked directly here, or marked on a chart screenshot in
+                  Notes, which also ticks it here (see NotesEditor's
+                  onChecklistItemMarked). */}
+              {!checklistEnabled ? (
+                <p className="text-xs text-muted-foreground">
+                  Checklist grading is off for {selectedAccount?.name ?? 'this account'}. Turn it on (and pick a
+                  checklist) from that account's settings — every trade on it will grade automatically after that.
+                </p>
+              ) : !activeChecklist ? (
+                <p className="text-xs text-muted-foreground">
+                  {selectedAccount?.name ?? 'This account'} has grading on, but no checklist is picked yet — set one
+                  in that account's settings.
+                </p>
+              ) : activeChecklist.items.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {activeChecklist.items.map((item, idx) => (
+                    <div key={item.id} className="flex items-center gap-2">
+                      <Checkbox
+                        checked={!!form.checklist_results[String(item.id)]}
+                        onCheckedChange={() => setChecklistResult(item.id, !form.checklist_results[String(item.id)])}
+                        aria-label={item.text}
+                      />
+                      <span className="text-xs flex-1">
+                        <span className="font-semibold text-muted-foreground mr-1">Rule {idx + 1}:</span>
+                        {item.text}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  This checklist has no rules yet — add some on the <strong>Checklists</strong> tab.
+                </p>
               )}
             </CollapsibleSection>
 
@@ -1118,7 +1122,7 @@ export default function TradeDetailPanel({
                 <ListChecks className="w-4 h-4 text-muted-foreground shrink-0" />
                 <span className="text-xs text-muted-foreground">Checklist</span>
                 <span className="text-sm font-medium">
-                  {!form.checklist_enabled ? '—'
+                  {!checklistEnabled ? '—'
                     : !checklistSummary ? 'No rules'
                     : checklistSummary.followed === checklistSummary.total
                       ? `All ${checklistSummary.total} followed`
@@ -1279,7 +1283,15 @@ export default function TradeDetailPanel({
               onChange={(blocks) => set('notes_blocks', blocks)}
               timeframes={timeframes}
               onAddTimeframe={handleAddTimeframe}
-              checklistItems={form.checklist_enabled ? (activeChecklist?.items.filter(i => i.active) ?? []) : []}
+              checklistItems={checklistEnabled ? (activeChecklist?.items.filter(i => i.active) ?? []) : []}
+              // Marking a rule on a chart screenshot also ticks it in the
+              // Checklist section's own grid above - one action, one piece
+              // of evidence, one result, rather than having to remember to
+              // do it twice. Deliberately one-directional: unmarking it on
+              // the screenshot later does NOT untick the grid, since other
+              // screenshots (or a manual tick) might be the real reason it's
+              // still true - only marking is ever treated as authoritative.
+              onChecklistItemMarked={(itemId) => setChecklistResult(itemId, true)}
             />
           </div>
         </div>

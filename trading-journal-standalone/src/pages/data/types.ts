@@ -28,6 +28,15 @@ export type Account = {
   public_share_token: string | null;
   public_share_name: string | null;
   public_share_show_dollars: boolean;
+  // Checklist grading, set once per account instead of per trade - turn
+  // this on and pick a checklist here and every trade logged on this
+  // account grades against it automatically (see the schema.sql note on
+  // these same two columns). checklist_id references Checklist.id and can
+  // be null even when checklist_enabled is true (enabled, but no checklist
+  // picked yet) - same "on but unconfigured" state the old per-trade toggle
+  // could be in.
+  checklist_enabled: boolean;
+  checklist_id: number | null;
 };
 
 // One cash movement to/from the prop firm for an account - a challenge fee

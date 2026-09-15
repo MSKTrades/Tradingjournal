@@ -81,6 +81,13 @@ async function addTrade(p: any) {
   // as start_capital/end_capital/gain_loss above - it's a derived number
   // (gross_profit - commission), not a fact being reported.
   const netProfit = p.gross_profit != null ? Math.round((Number(p.gross_profit) - Number(p.commission ?? 0)) * 100) / 100 : null;
+  // checklist_enabled/checklist_id are the owning account's current
+  // settings, not whatever the client sent - checklist grading is an
+  // account-level choice now (see schema.sql), so a new trade should start
+  // out matching that account exactly, the same as every other trade on it.
+  const acctRows = await sql.unsafe('SELECT checklist_enabled, checklist_id FROM accounts WHERE id = $1', [accountId]);
+  const checklistEnabled = acctRows[0]?.checklist_enabled ?? false;
+  const checklistId = checklistEnabled ? (acctRows[0]?.checklist_id ?? null) : null;
 
   const rows = await sql.unsafe(
     `INSERT INTO trades (
@@ -117,7 +124,7 @@ async function addTrade(p: any) {
       // Passed as raw JS values (not pre-stringified) on purpose — see the
       // note by deriveFromNotesBlocks below for why.
       p.max_rr, comments, p.extra_data ?? {}, screenshots, p.notes_blocks ?? [],
-      p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, p.tags ?? [], p.tag_selections ?? {},
+      checklistEnabled, checklistId, p.checklist_results ?? {}, p.tags ?? [], p.tag_selections ?? {},
       // emotions is a native Postgres TEXT[] column (unlike tags, which is
       // JSONB) - passed as a plain JS array with no ::jsonb cast, so the
       // driver encodes it as a real Postgres array instead of JSON text.

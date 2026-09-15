@@ -11,6 +11,11 @@ export type NewAccountPayload = {
   daily_loss_limit_pct: number | null;
   max_drawdown_limit_pct: number | null;
   consistency_rule_pct: number | null;
+  // Unlike Public Track Record below, checklist grading has no server-
+  // generated token to wait for - it's safe to set right away on a
+  // brand-new account, so it's on both payload types, not just the patch.
+  checklist_enabled: boolean;
+  checklist_id: number | null;
 };
 
 export type AccountPatch = {
@@ -22,6 +27,8 @@ export type AccountPatch = {
   daily_loss_limit_pct: number | null;
   max_drawdown_limit_pct: number | null;
   consistency_rule_pct: number | null;
+  checklist_enabled: boolean;
+  checklist_id: number | null;
   // Public Track Record fields - optional because AccountDialog only ever
   // sends these when editing an existing account (a brand-new account has
   // no id yet to attach a share token to). See schema.sql / api/accounts.ts.

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../lib/ui/dialog';
 import { Button } from '../../lib/ui/button';
-import { Input, Label, Switch } from '../../lib/ui/form';
+import { Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trash2 } from 'lucide-react';
-import { Account } from '../data/types';
+import { Account, Checklist } from '../data/types';
 import { AccountPatch, NewAccountPayload } from '../../lib/accounts';
-import { api } from '../../lib/api';
+import { api, useFetch } from '../../lib/api';
 import BrokerConnect from './BrokerConnect';
 import ProBadge from '../../components/ProBadge';
 import ProNotice from '../../components/ProNotice';
@@ -31,6 +31,8 @@ type FormState = {
   daily_loss_limit_pct: string;
   max_drawdown_limit_pct: string;
   consistency_rule_pct: string;
+  checklist_enabled: boolean;
+  checklist_id: number | null;
   public_share_enabled: boolean;
   public_share_name: string;
   public_share_show_dollars: boolean;
@@ -40,6 +42,7 @@ function emptyForm(): FormState {
   return {
     name: '', type: '', starting_balance: '', active: true,
     daily_loss_limit_pct: '', max_drawdown_limit_pct: '', consistency_rule_pct: '',
+    checklist_enabled: false, checklist_id: null,
     public_share_enabled: false, public_share_name: '', public_share_show_dollars: false,
   };
 }
@@ -53,6 +56,8 @@ function fromAccount(a: Account): FormState {
     daily_loss_limit_pct: a.daily_loss_limit_pct != null ? String(a.daily_loss_limit_pct) : '',
     max_drawdown_limit_pct: a.max_drawdown_limit_pct != null ? String(a.max_drawdown_limit_pct) : '',
     consistency_rule_pct: a.consistency_rule_pct != null ? String(a.consistency_rule_pct) : '',
+    checklist_enabled: a.checklist_enabled ?? false,
+    checklist_id: a.checklist_id ?? null,
     public_share_enabled: a.public_share_enabled,
     public_share_name: a.public_share_name ?? '',
     public_share_show_dollars: a.public_share_show_dollars,
@@ -74,6 +79,13 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+
+  // Every checklist the user has, regardless of which account(s) it's
+  // currently restricted to (no account_id param - same "management page"
+  // call the Checklists tab itself makes) - picking one here is what SETS
+  // an account's scope going forward, so it can't be pre-filtered by it.
+  const { data: rawChecklists } = useFetch<Checklist[]>('/checklist');
+  const checklists = rawChecklists ?? [];
 
   useEffect(() => {
     if (open) {
@@ -101,6 +113,8 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
         daily_loss_limit_pct: form.daily_loss_limit_pct.trim() === '' ? null : Number(form.daily_loss_limit_pct),
         max_drawdown_limit_pct: form.max_drawdown_limit_pct.trim() === '' ? null : Number(form.max_drawdown_limit_pct),
         consistency_rule_pct: form.consistency_rule_pct.trim() === '' ? null : Number(form.consistency_rule_pct),
+        checklist_enabled: form.checklist_enabled,
+        checklist_id: form.checklist_enabled ? form.checklist_id : null,
         // Public Track Record fields only apply to an existing account (see
         // the gating on the section below) - a brand-new account has
         // nothing to attach a share token to yet.
@@ -249,6 +263,46 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
             20% consistency) to get a live guardrail on the Summary page showing how close you are to each limit.
             Leave blank to skip.
           </p>
+
+          {/* Checklist grading, set once here instead of per trade - was a
+              toggle + picker repeated on every single trade, which meant
+              remembering to flip it (and re-pick the same checklist) every
+              time. Turning it on here applies to every trade on this
+              account automatically, including ones already logged (see the
+              schema.sql note on trades.checklist_enabled/checklist_id) -
+              the actual rule-by-rule grading still happens per trade (in
+              the trade panel's Checklist section, or by marking a rule
+              directly on a chart screenshot), since which rules were
+              followed is inherently a per-trade fact, not an account-wide
+              one. */}
+          <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+            <div className="flex items-center gap-3">
+              <Switch checked={form.checklist_enabled} onCheckedChange={(v) => set('checklist_enabled', v)} />
+              <Label>Grade trades against a checklist</Label>
+            </div>
+
+            {form.checklist_enabled && (
+              checklists.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs text-muted-foreground">Checklist</Label>
+                  <Select
+                    value={form.checklist_id ?? ''}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => set('checklist_id', e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">Select a checklist…</option>
+                    {checklists.map(cl => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Every trade on this account will grade against this checklist - no need to turn it on per trade anymore.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No checklists yet — create one on the <strong>Checklists</strong> tab first, then come back here to pick it.
+                </p>
+              )
+            )}
+          </div>
 
           {account && (
             <div className="flex items-center gap-3">

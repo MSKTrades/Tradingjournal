@@ -68,8 +68,16 @@ type Props = {
   // trade's checklist rather than being its own independent list). Optional
   // and defaults to empty - the checklist row on each screenshot only
   // renders when there's actually something to mark, i.e. the caller has a
-  // checklist enabled and turned on for this trade.
+  // checklist enabled and turned on for this account.
   checklistItems?: ChecklistItem[];
+  // Fired whenever a rule gets marked (turned ON, never off - see
+  // toggleImageChecklistItem) on a screenshot, so the caller can mirror that
+  // onto the trade's own whole-checklist grid (TradeDetailPanel's Checklist
+  // section) - one tick on a chart should count as ticking it for the trade
+  // too, not a second, separate record that can silently disagree with the
+  // first. Optional so NotesEditor still works standalone without a caller
+  // that has a grid to sync into.
+  onChecklistItemMarked?: (itemId: number) => void;
 };
 
 // Small popover shown on each screenshot to record which chart timeframe it
@@ -363,7 +371,7 @@ function AutoTextarea({ value, onChange, onPasteImage, placeholder, focused }: {
 // an "Add Screenshot" file-picker button here, but paste already covers the
 // same job with less UI to scan past, so it was dropped in favor of just
 // the placeholder text telling you paste works.
-export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTimeframe, checklistItems = [] }: Props) {
+export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTimeframe, checklistItems = [], onChecklistItemMarked }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -501,8 +509,13 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
   function toggleImageChecklistItem(i: number, itemId: number) {
     const block = normalized[i] as { type: 'image'; url: string; timeframe?: string; comment?: string; checklistItemIds?: number[] };
     const current = block.checklistItemIds ?? [];
-    const next = current.includes(itemId) ? current.filter(id => id !== itemId) : [...current, itemId];
+    const isMarking = !current.includes(itemId);
+    const next = isMarking ? [...current, itemId] : current.filter(id => id !== itemId);
     setBlock(i, { ...block, checklistItemIds: next });
+    // Only the "just marked it" direction syncs outward - see
+    // onChecklistItemMarked's comment on Props for why unmarking here
+    // deliberately doesn't untick the trade's own grid.
+    if (isMarking) onChecklistItemMarked?.(itemId);
   }
 
   return (

@@ -78,6 +78,13 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     // as start_capital/end_capital/gain_loss above - it's a derived number
     // (gross_profit - commission), not a fact being reported.
     const netProfit = p.gross_profit != null ? Math.round((Number(p.gross_profit) - Number(p.commission ?? 0)) * 100) / 100 : null;
+    // checklist_enabled/checklist_id come from the (possibly just-changed)
+    // owning account, not the client - see the matching comment in
+    // api/trades/index.ts's addTrade. Uses newAccountId so moving a trade to
+    // a different account picks up THAT account's checklist immediately.
+    const acctRows = await sql.unsafe('SELECT checklist_enabled, checklist_id FROM accounts WHERE id = $1', [newAccountId]);
+    const checklistEnabled = acctRows[0]?.checklist_enabled ?? false;
+    const checklistId = checklistEnabled ? (acctRows[0]?.checklist_id ?? null) : null;
 
     await sql.unsafe(
       `UPDATE trades SET
@@ -107,7 +114,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
         p.partial_1, p.partial_2,
         p.reached_1r2 ?? false, p.reached_1r3 ?? false, p.reached_1r4 ?? false, p.reached_1r5 ?? false,
         p.max_rr, comments, p.extra_data ?? {}, screenshots, p.notes_blocks ?? [],
-        p.checklist_enabled ?? false, p.checklist_id ?? null, p.checklist_results ?? {}, p.tags ?? [], p.tag_selections ?? {},
+        checklistEnabled, checklistId, p.checklist_results ?? {}, p.tags ?? [], p.tag_selections ?? {},
         // emotions is a native Postgres TEXT[] column (unlike tags, which is
         // JSONB) - passed as a plain JS array with no ::jsonb cast, so the
         // driver encodes it as a real Postgres array instead of JSON text.
