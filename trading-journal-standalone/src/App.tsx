@@ -30,6 +30,10 @@ import BacktestComingSoon from './pages/BacktestComingSoon';
 import ChallengeSimulator from './pages/ChallengeSimulator';
 import SmcAnalysis from './pages/SmcAnalysis';
 import SmcComingSoon from './pages/SmcComingSoon';
+// Step 2 proof page for the Advanced Charts integration - see this
+// component's own header comment for why it's public/unrouted-from-nav
+// rather than wrapped in Protected/AuthedShell like the real Backtest page.
+import TvChartReplayTest from './pages/TvChartReplayTest';
 import { isAdminEmail } from './lib/admin';
 // Chart Replay & Backtesting is open to every signed-in user, free or paid
 // (this page has always been built on `lightweight-charts`, TradingView's
@@ -197,6 +201,13 @@ export default function App() {
                 (email capture, see SessionClockTool.tsx). */}
             <Route path="/demo" element={<Demo />} />
             <Route path="/tools/session-clock" element={<SessionClockTool />} />
+            {/* Advanced Charts integration, step 2 proof - see
+                TvChartReplayTest.tsx's header comment. Public/no-login,
+                synthetic data only, not linked from anywhere - same
+                "prove it in isolation first" reasoning as tv-test.html in
+                step 1, just now inside the real React app so it can use
+                the real useReplayPlayback hook. */}
+            <Route path="/tv-chart-test" element={<TvChartReplayTest />} />
             {/* The full multi-tab sandbox - see DemoShell above. Every one
                 of these renders the real authenticated page component, just
                 inside DemoShell instead of AuthedShell+Protected. */}
