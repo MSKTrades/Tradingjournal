@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Advanced Charts plumbing test</title>
+  <style>html,body,#chart{margin:0;padding:0;width:100%;height:100vh;background:#131722;}</style>
+</head>
+<body>
+  <div id="chart"></div>
+  <script src="/charting_library/charting_library.standalone.js"></script>
+  <script>
+    // Synthetic candles matching PipEcho's Candle type ({time, open, high,
+    // low, close, volume}), just enough to prove the widget mounts, fetches
+    // its own worker/asset files correctly from /charting_library/, and
+    // renders bars from a fully custom (non-UDF) datafeed - exactly the
+    // shape the real integration will use (getBars slicing an in-memory
+    // array PipEcho already has, no live subscribeBars pushes).
+    function genCandles(n) {
+      const out = [];
+      let t = Math.floor(Date.now() / 1000) - n * 3600;
+      let price = 1.2700;
+      for (let i = 0; i < n; i++) {
+        const open = price;
+        const change = (Math.random() - 0.5) * 0.002;
+        const close = open + change;
+        const high = Math.max(open, close) + Math.random() * 0.0008;
+        const low = Math.min(open, close) - Math.random() * 0.0008;
+        out.push({ time: t, open, high, low, close, volume: Math.round(Math.random() * 1000) });
+        price = close;
+        t += 3600;
+      }
+      return out;
+    }
+    const candles = genCandles(300);
+
+    const datafeed = {
+      onReady: (cb) => setTimeout(() => cb({ supported_resolutions: ['60'] }), 0),
+      searchSymbols: (_i, _e, _t, onResult) => onResult([]),
+      resolveSymbol: (_name, onResolve) => onResolve({
+        name: 'PLUMBING-TEST', ticker: 'PLUMBING-TEST', description: 'PipEcho plumbing test',
+        type: 'forex', session: '24x7', timezone: 'Etc/UTC',
+        minmov: 1, pricescale: 100000, has_intraday: true,
+        supported_resolutions: ['60'], volume_precision: 0, data_status: 'streaming',
+      }),
+      getBars: (_symbolInfo, _resolution, periodParams, onResult) => {
+        const bars = candles.filter(c => c.time >= periodParams.from && c.time <= periodParams.to);
+        onResult(bars, { noData: bars.length === 0 });
+      },
+      subscribeBars: () => {},
+      unsubscribeBars: () => {},
+    };
+
+    window.tvWidget = new TradingView.widget({
+      symbol: 'PLUMBING-TEST',
+      interval: '60',
+      datafeed: datafeed,
+      container: 'chart',
+      library_path: '/charting_library/',
+      locale: 'en',
+      autosize: true,
+      theme: 'dark',
+      disabled_features: ['use_localstorage_for_settings'],
+    });
+
+    window.tvWidget.onChartReady(() => {
+      document.title = 'READY: ' + document.title;
+      console.log('CHART_READY');
+    });
+  </script>
+</body>
+</html>

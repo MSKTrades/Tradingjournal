@@ -1,0 +1,21 @@
+# Dependencies and build output - never committed, regenerated locally/on Vercel.
+node_modules/
+dist/
+
+# TradingView Advanced Charts - fetched at build time by
+# trading-journal-standalone/scripts/fetch-charting-library.mjs from the
+# private tradingview/charting_library repo we were granted access to.
+# This repo is public and TradingView's license only grants access "for the
+# project specified... does not give any right for redistribution" - so
+# these files must never be committed here. See that script's header comment
+# for the full explanation and the TV_CHARTING_LIBRARY_TOKEN env var it needs.
+trading-journal-standalone/public/charting_library/
+trading-journal-standalone/public/datafeeds/
+trading-journal-standalone/charting_library.d.ts
+
+# Local env files that may carry the token above (or other secrets) -
+# .env.local is git-ignored by convention; .env itself is intentionally NOT
+# listed here since some existing setups may rely on committing it - check
+# before adding secrets to either.
+.env.local
+*.local
