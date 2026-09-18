@@ -3,6 +3,7 @@ import { Play, Pause, SkipBack, SkipForward, RotateCcw } from 'lucide-react';
 import { Candle, BacktestTrade } from './data/types';
 import TradingViewChart from './ui/TradingViewChart';
 import { useReplayPlayback, SPEED_OPTIONS } from './ui/useReplayPlayback';
+import { findSwings, detectStructureEvents, detectOrderBlocks, detectFvgs, computeRange } from './ui/smc/marketStructure';
 
 // Step 2 proof page for advanced-charts-integration-plan.md: wires
 // TradingViewChart (the Advanced Charts equivalent of ReplayChart.tsx) up
@@ -92,9 +93,29 @@ function generateTrades(candles: Candle[]): BacktestTrade[] {
   ];
 }
 
+// Step 6 proof data: run the SAME detection engine the SMC Analysis page
+// uses (marketStructure.ts, completely unmodified) over the full synthetic
+// candle series, exactly the way SmcAnalysis.tsx does today - not a
+// hand-built fake OrderBlock/FVG list. Ground-truth mitigated/filled state
+// is computed once over the FULL series here (detectOrderBlocks/detectFvgs
+// both scan forward through the whole array to find it); it's
+// TradingViewChart's own job to re-derive what's actually been "revealed"
+// as of the current visibleCount and not show a box's future outcome early
+// - see its syncSmcOverlayBody() for that half.
+function computeSmc(candles: Candle[]) {
+  const swings = findSwings(candles);
+  const { events } = detectStructureEvents(candles, swings);
+  return {
+    orderBlocks: detectOrderBlocks(candles, events),
+    fvgs: detectFvgs(candles),
+    range: computeRange(swings),
+  };
+}
+
 export default function TvChartReplayTest() {
   const candles = useMemo(() => generateCandles(CANDLE_COUNT), []);
   const trades = useMemo(() => generateTrades(candles), [candles]);
+  const { orderBlocks, fvgs, range } = useMemo(() => computeSmc(candles), [candles]);
   const { visibleCount, setVisibleCount, playing, setPlaying, speedIdx, setSpeedIdx, reset } = useReplayPlayback(candles.length);
   const [started, setStarted] = useState(false);
 
@@ -161,6 +182,9 @@ export default function TvChartReplayTest() {
             candles={candles}
             visibleCount={visibleCount}
             trades={trades}
+            orderBlocks={orderBlocks}
+            fvgs={fvgs}
+            range={range}
             baseTimeframe="1m"
             datasetId={1}
             height={520}

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Candle, BacktestTrade, ChartDrawing, ChartDrawingType } from '../data/types';
 import { createReplayDatafeed, tfToResolution } from './tvDatafeed';
 import { api } from '../../lib/api';
+import { OrderBlock, FVG, RangeInfo } from './smc/types';
 
 // Step 4: trendlines/horizontal lines/rectangles/fib retracements, drawn via
 // Advanced Charts' own native drawing toolbar (unlike ReplayChart.tsx, which
@@ -49,6 +50,36 @@ const SMA_PERIOD = 20;
 const EMA_PERIOD = 50;
 const RSI_PERIOD = 14;
 
+// Step 6: order blocks, FVGs, and the active dealing range/EQ line - ported
+// from smcOverlayPrimitive.ts (the SMC Analysis page's chart overlay), the
+// one piece of the integration plan with no built-in TradingView equivalent
+// to swap in. Same colors/alphas/labels as that primitive, so a trader who
+// knows the existing SMC page's markup reads this chart the same way. Only
+// the auto-detected zones are ported here - the primitive's Entry/SL/TP
+// markup lines are a SEPARATE, page-specific "click to set a price" feature
+// belonging to the SMC Analysis page's own UI (armField/onChartPriceClick in
+// SmcChart.tsx), not something this replay-driven chart has any concept of;
+// BacktestTrade markers (step 3) already cover this chart's own equivalent
+// need (a trade's actual entry/SL/TP once it exists).
+//
+// Rendered as native 'rectangle' shapes (boxes) and 'horizontal_line' shapes
+// (range/EQ), reusing the exact same createMultipointShape/createShape
+// machinery steps 3-4 already built, rather than a custom pane primitive -
+// no need for the lightweight-charts-specific canvas approach
+// smcOverlayPrimitive.ts uses, since Advanced Charts' own shapes already do
+// everything needed (including an `extendRight` option that keeps an
+// unmitigated OB/FVG's box extending to the live edge on its own, with no
+// need to redraw it every replay tick the way the lightweight-charts version
+// has to recompute x2 against mediaSize.width on every draw() call).
+const OB_COLOR: Record<'bullish' | 'bearish', string> = { bullish: '#22c55e', bearish: '#ef4444' };
+const FVG_COLOR: Record<'bullish' | 'bearish', string> = { bullish: '#3b82f6', bearish: '#f97316' };
+// smcOverlayPrimitive.ts's alphas (0-1, canvas globalAlpha) converted to
+// TradingView's `transparency` override (0-100, inverted - 0 opaque, 100
+// invisible).
+const alphaToTransparency = (alpha: number) => Math.round((1 - alpha) * 100);
+const OB_TRANSPARENCY = { active: alphaToTransparency(0.16), mitigated: alphaToTransparency(0.05) };
+const FVG_TRANSPARENCY = { active: alphaToTransparency(0.11), filled: alphaToTransparency(0.04) };
+
 type Props = {
   candles: Candle[];
   visibleCount: number;
@@ -62,6 +93,18 @@ type Props = {
   // createOrderLine, the API this was originally built against, turned out
   // not to be usable here).
   trades: BacktestTrade[];
+  // Step 6 - see the block comment above OB_COLOR. Same "only what's been
+  // revealed so far" contract as trades: a zone only shows once its
+  // formation time has been passed by visibleCount, and a mitigated/filled
+  // zone is only drawn as such once ITS mitigation/fill time has also been
+  // revealed - otherwise it's shown as still active, matching how a trade's
+  // exit marker doesn't appear until the exit itself has been revealed.
+  // All three default to empty/null so callers that don't do SMC detection
+  // (e.g. this file's own proof page, before it opts in) don't need to pass
+  // anything.
+  orderBlocks?: OrderBlock[];
+  fvgs?: FVG[];
+  range?: RangeInfo | null;
   height?: number;
   baseTimeframe?: string;
   datasetId?: number | null;
@@ -109,7 +152,7 @@ function loadChartingLibrary(): Promise<void> {
 // advanced-charts-integration-plan.md and land as separate,
 // independently-testable changes on top of this once this piece is
 // confirmed solid - see that plan's "Suggested sequencing" section.
-export default function TradingViewChart({ candles, visibleCount, trades, height = 480, baseTimeframe, datasetId, onReady }: Props) {
+export default function TradingViewChart({ candles, visibleCount, trades, orderBlocks = [], fvgs = [], range = null, height = 480, baseTimeframe, datasetId, onReady }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<{ remove?: () => void } | null>(null);
   const candlesRef = useRef(candles);
@@ -166,6 +209,25 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
   // reference back out through a ref to unsubscribe the exact callback that
   // was subscribed.
   const onDrawingEventRef = useRef<((sourceId: unknown, drawingEventType: unknown) => void) | null>(null);
+  // Step 6 (SMC overlay) - mirrors trades/shapeIdsRef/syncTokenRef exactly:
+  // live-read refs for the sync function, the currently-drawn shape ids so
+  // the next sync clears exactly what the last one drew, and a token so a
+  // stale in-flight sync (createMultipointShape/createShape are async)
+  // discards its own results if a newer sync has since started.
+  const orderBlocksRef = useRef(orderBlocks);
+  const fvgsRef = useRef(fvgs);
+  const rangeRef = useRef(range);
+  const syncSmcOverlayRef = useRef<(() => void) | null>(null);
+  const smcShapeIdsRef = useRef<string[]>([]);
+  const smcSyncTokenRef = useRef(0);
+  // Same purpose as tradeSyncBusyRef, same reason: OB/FVG boxes and the
+  // range/EQ lines are drawn as 'rectangle'/'horizontal_line' shapes, both
+  // of which are also user-drawable types - a reconcile running mid-resync
+  // could mistake one of this component's own in-flight zone shapes for a
+  // new user drawing. Kept as a separate flag from tradeSyncBusyRef (rather
+  // than merged into one) so a trade resync and an SMC resync can each be
+  // reasoned about independently; reconcile just checks both.
+  const smcSyncBusyRef = useRef(false);
 
   // Mutate-ref-from-effect, not from render - the datafeed's getters run
   // outside React's render cycle (invoked by the widget itself, on its own
@@ -175,6 +237,9 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
   useEffect(() => { candlesRef.current = candles; }, [candles]);
   useEffect(() => { visibleCountRef.current = visibleCount; }, [visibleCount]);
   useEffect(() => { tradesRef.current = trades; }, [trades]);
+  useEffect(() => { orderBlocksRef.current = orderBlocks; }, [orderBlocks]);
+  useEffect(() => { fvgsRef.current = fvgs; }, [fvgs]);
+  useEffect(() => { rangeRef.current = range; }, [range]);
 
   // (Re)create the widget once per dataset - not per candle/visibleCount
   // change, which are applied imperatively via notifyReveal() below instead
@@ -419,6 +484,129 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
           }
           shapeIdsRef.current = newShapeIds;
         }
+
+        // Step 6: order block / FVG boxes and the range/EQ lines - same
+        // clear-then-async-rebuild-then-discard-if-stale shape as
+        // syncTrades()/syncTradesBody() above (down to the busy-flag wrapper
+        // and the syncToken staleness guard), just building 'rectangle' and
+        // 'horizontal_line' shapes from OrderBlock/FVG/RangeInfo data
+        // instead of BacktestTrade rows. See the block comment above
+        // OB_COLOR for what's deliberately NOT ported (the SMC Analysis
+        // page's own Entry/SL/TP markup feature).
+        async function syncSmcOverlay() {
+          smcSyncBusyRef.current = true;
+          try {
+            await syncSmcOverlayBody();
+          } finally {
+            smcSyncBusyRef.current = false;
+          }
+        }
+        async function syncSmcOverlayBody() {
+          const chart = widget.activeChart();
+          const myToken = ++smcSyncTokenRef.current;
+
+          const oldShapeIds = smcShapeIdsRef.current;
+          smcShapeIdsRef.current = [];
+          oldShapeIds.forEach(id => chart.removeEntity(id, { disableUndo: true }));
+
+          const c = candlesRef.current;
+          const vc = Math.max(0, Math.min(visibleCountRef.current, c.length));
+          const lastVisibleTime = c[vc - 1]?.time ?? -Infinity;
+
+          type SmcShapeSpec =
+            | { kind: 'single'; point: { time: number; price: number }; shape: string; text: string; overrides: Record<string, unknown> }
+            | { kind: 'multi'; points: Array<{ time: number; price: number }>; shape: string; text: string; overrides: Record<string, unknown> };
+          const specs: SmcShapeSpec[] = [];
+
+          for (const ob of orderBlocksRef.current) {
+            if (ob.time > lastVisibleTime) continue; // replay hasn't reached this OB's formation yet
+            // A mitigation the ground-truth data already knows about doesn't
+            // count until the replay has actually reached it either -
+            // otherwise a box would jump straight to its "mitigated" look
+            // the moment it's revealed, spoiling exactly the information the
+            // replay is supposed to be withholding.
+            const revealedMitigated = ob.mitigated && ob.mitigatedAt != null && ob.mitigatedAt <= lastVisibleTime;
+            const color = OB_COLOR[ob.direction];
+            specs.push({
+              kind: 'multi',
+              points: [{ time: ob.time, price: ob.high }, { time: revealedMitigated ? ob.mitigatedAt! : lastVisibleTime, price: ob.low }],
+              shape: 'rectangle',
+              text: revealedMitigated ? 'OB (mitigated)' : 'OB',
+              overrides: {
+                color, textColor: color, fillBackground: true,
+                transparency: revealedMitigated ? OB_TRANSPARENCY.mitigated : OB_TRANSPARENCY.active,
+                linewidth: 1, linestyle: 0 /* LineStyle.Solid */,
+                // Keeps an active OB's box extending to the live edge on its
+                // own as replay reveals more candles, with nothing here
+                // needing to recompute where "the edge" is on every tick -
+                // see this file's history for how this was confirmed to
+                // work (createMultipointShape's 2nd point's TIME is ignored
+                // once this is set, only its price still matters).
+                extendRight: !revealedMitigated,
+              },
+            });
+          }
+
+          for (const f of fvgsRef.current) {
+            if (f.time > lastVisibleTime) continue;
+            const revealedFilled = f.filled && f.filledAt != null && f.filledAt <= lastVisibleTime;
+            const color = FVG_COLOR[f.direction];
+            specs.push({
+              kind: 'multi',
+              points: [{ time: f.time, price: f.top }, { time: revealedFilled ? f.filledAt! : lastVisibleTime, price: f.bottom }],
+              shape: 'rectangle',
+              text: revealedFilled ? 'FVG (filled)' : 'FVG',
+              overrides: {
+                color, textColor: color, fillBackground: true,
+                transparency: revealedFilled ? FVG_TRANSPARENCY.filled : FVG_TRANSPARENCY.active,
+                linewidth: 1, linestyle: 2 /* LineStyle.Dashed - distinguishes an FVG's box from an OB's solid one, same as smcOverlayPrimitive.ts's dashed flag */,
+                extendRight: !revealedFilled,
+              },
+            });
+          }
+
+          // The active dealing range only counts once BOTH swings that
+          // define it have been revealed - showing a range built from a
+          // swing the replay hasn't reached yet would leak future structure.
+          const r = rangeRef.current;
+          if (r && r.highTime <= lastVisibleTime && r.lowTime <= lastVisibleTime) {
+            const lines: Array<{ price: number; text: string; color: string }> = [
+              { price: r.eq, text: 'EQ 50%', color: '#a855f7' },
+              { price: r.high, text: 'Range High', color: 'rgba(168,85,247,0.5)' },
+              { price: r.low, text: 'Range Low', color: 'rgba(168,85,247,0.5)' },
+            ];
+            for (const l of lines) {
+              specs.push({
+                kind: 'single',
+                point: { time: lastVisibleTime, price: l.price },
+                shape: 'horizontal_line',
+                text: l.text,
+                overrides: { linecolor: l.color, textcolor: l.color, linestyle: 2, linewidth: 1, showPrice: true },
+              });
+            }
+          }
+
+          const newShapeIds = (
+            await Promise.all(
+              specs.map(s => {
+                const options = { shape: s.shape, text: s.text, overrides: s.overrides, disableSelection: true, disableSave: true, lock: true, zOrder: 'bottom' as const };
+                // 'bottom' so these always sit behind trade markers/user
+                // drawings - background context, same intent as
+                // smcOverlayPrimitive.ts's own pane zOrder, even though the
+                // exact compositing model differs from lightweight-charts'.
+                const promise = s.kind === 'single' ? chart.createShape(s.point, options) : chart.createMultipointShape(s.points, options);
+                return promise.catch(() => null);
+              }),
+            )
+          ).filter((id): id is string => id != null);
+
+          if (smcSyncTokenRef.current !== myToken) {
+            newShapeIds.forEach(id => chart.removeEntity(id, { disableUndo: true }));
+            return;
+          }
+          smcShapeIdsRef.current = newShapeIds;
+        }
+        syncSmcOverlayRef.current = () => { syncSmcOverlay().catch(err => console.error('[TradingViewChart] SMC overlay sync failed', err)); };
         syncTradesRef.current = () => { syncTrades().catch(err => console.error('[TradingViewChart] trade marker sync failed', err)); };
 
         // Best-effort color for a shape of a given TradingView type, read
@@ -550,12 +738,17 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
 
         async function runReconcile() {
           if (datasetId == null || cancelled) return;
-          if (tradeSyncBusyRef.current) { scheduleReconcile(250); return; }
+          if (tradeSyncBusyRef.current || smcSyncBusyRef.current) { scheduleReconcile(250); return; }
 
           const chart = widget.activeChart();
           const all = chart.getAllShapes();
           const allIds = new Set(all.map(s => s.id));
-          const tradeMarkerIds = new Set(shapeIdsRef.current);
+          // Both this component's own trade markers AND its SMC overlay
+          // zones reuse shape types (horizontal_line, rectangle) that are
+          // also user-drawable - excluded here the same way, by current
+          // membership rather than by event attribution (see the block
+          // comment above DRAWING_TYPE_TO_TV_SHAPE).
+          const appOwnedIds = new Set([...shapeIdsRef.current, ...smcShapeIdsRef.current]);
           const known = drawingsRef.current;
 
           // A drawing this component was tracking is no longer on the chart
@@ -576,7 +769,7 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
           // native tool this app doesn't have a ChartDrawingType for, one of
           // our own trade markers still mid-resync) is left alone.
           for (const { id, name } of all) {
-            if (tradeMarkerIds.has(id) || known.has(id) || ignoredShapeIdsRef.current.has(id)) continue;
+            if (appOwnedIds.has(id) || known.has(id) || ignoredShapeIdsRef.current.has(id)) continue;
             const type = TV_SHAPE_TO_DRAWING_TYPE[name];
             if (!type) continue;
 
@@ -676,6 +869,10 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
           // downstream needs to block on the default indicators existing.
           createDefaultIndicators();
 
+          // Same already-mid-replay-on-mount reasoning as syncTradesRef
+          // above, for the SMC overlay this time.
+          syncSmcOverlayRef.current?.();
+
           onReady?.();
         });
       })
@@ -698,11 +895,13 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
       widgetRef.current = null;
       notifyRevealRef.current = null;
       syncTradesRef.current = null;
+      syncSmcOverlayRef.current = null;
       // No explicit removeEntity() cleanup needed here - widget.remove()
       // above tears down the whole chart (and everything drawn on it) at
       // once. Just drop the bookkeeping refs so a future widget instance
       // starts from an empty slate.
       shapeIdsRef.current = [];
+      smcShapeIdsRef.current = [];
       drawingsRef.current = new Map();
       ignoredShapeIdsRef.current = new Set();
     };
@@ -732,6 +931,14 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
   useEffect(() => {
     if (readyRef.current) syncTradesRef.current?.();
   }, [trades, visibleCount]);
+
+  // SMC overlay redrawn on the same triggers, same reasoning: the detected
+  // zones changing (a fresh detection run) or visibleCount revealing more of
+  // them / their mitigation-or-fill state. Kept separate from the trades
+  // effect above for the same "independent layers" reason.
+  useEffect(() => {
+    if (readyRef.current) syncSmcOverlayRef.current?.();
+  }, [orderBlocks, fvgs, range, visibleCount]);
 
   return <div ref={containerRef} style={{ width: '100%', height }} />;
 }
