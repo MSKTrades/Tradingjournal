@@ -744,8 +744,33 @@ const SMC_ONLY_RESOURCES = new Set([
   'smc_candles', 'smc_candles_tf', 'smc_markups', 'smc_chart_markups', 'smc_chart_analyze',
 ]);
 
+// Self-heals a schema gap that reached production undetected: `user_id` was
+// added to backtest_trades/chart_drawings' CREATE TABLE definitions in
+// schema.sql once Backtest opened up beyond one admin account (see the
+// comment on chart_drawings there), but `CREATE TABLE IF NOT EXISTS` is a
+// no-op against a database where these tables already existed from before
+// that point - so the column was never actually added on the live
+// database, and every practice-trade/drawing insert failed outright with
+// "column user_id does not exist" (confirmed via Vercel's runtime error
+// logs - every single POST to this file's trades/drawings resources had
+// been failing this way since the column was added to the schema, just
+// invisible because /backtest was gated off and nobody could reach this
+// code path until now). Running the missing migration here means the fix
+// ships as code instead of a manual step someone has to separately run
+// against the database - `ADD COLUMN IF NOT EXISTS` is a no-op once the
+// column exists, so this stays cheap and safe to leave in place
+// permanently rather than something to remember to remove later.
+let _backtestSchemaEnsured = false;
+async function ensureBacktestSchema(sql: ReturnType<typeof db>) {
+  if (_backtestSchemaEnsured) return;
+  await sql.unsafe(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE`);
+  await sql.unsafe(`ALTER TABLE chart_drawings ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE`);
+  _backtestSchemaEnsured = true;
+}
+
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
+  await ensureBacktestSchema(sql);
 
   const requester = await getUserFromRequest(req, sql);
   if (!requester) { res.status(401).json({ error: 'Not authenticated' }); return; }

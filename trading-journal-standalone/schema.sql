@@ -673,6 +673,21 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- user_id is in the CREATE TABLE above, but that's only enough for a truly
+-- fresh database - CREATE TABLE IF NOT EXISTS is a no-op against a database
+-- where this table already existed from before user_id was added to this
+-- definition (this table predates per-user scoping; see the note on
+-- chart_drawings below for the same history). Without this line, a
+-- database created before user_id existed here never actually gets the
+-- column - confirmed the hard way via production runtime errors ("column
+-- user_id does not exist" / "column user_id of relation backtest_trades
+-- does not exist") on every single practice-trade insert, since the whole
+-- Backtest page was gated off long enough that nobody hit this path until
+-- now. Nullable, not NOT NULL, so this is safe to run even if the table
+-- somehow already has rows (there weren't meant to be any pre-user_id rows
+-- left from a single-admin-account era, but this doesn't assume that).
+ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+
 CREATE INDEX IF NOT EXISTS idx_backtest_trades_dataset ON backtest_trades (dataset_id);
 CREATE INDEX IF NOT EXISTS idx_backtest_trades_user ON backtest_trades (user_id);
 
@@ -703,6 +718,15 @@ CREATE TABLE IF NOT EXISTS chart_drawings (
   color         TEXT NOT NULL DEFAULT '#3b82f6',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Same reason as backtest_trades.user_id just above: this column is in the
+-- CREATE TABLE definition, but CREATE TABLE IF NOT EXISTS never retrofits
+-- it onto a database where chart_drawings already existed from the
+-- single-admin-account era this table's own comment describes - confirmed
+-- via a production runtime error ("column user_id of relation
+-- chart_drawings does not exist") the same way backtest_trades' missing
+-- column was. Nullable for the same safety reason.
+ALTER TABLE chart_drawings ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
 
 CREATE INDEX IF NOT EXISTS idx_chart_drawings_dataset ON chart_drawings (dataset_id);
 CREATE INDEX IF NOT EXISTS idx_chart_drawings_user ON chart_drawings (user_id);
