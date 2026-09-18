@@ -41,6 +41,14 @@ const DEFAULT_DRAWING_COLOR: Record<ChartDrawingType, string> = {
   horizontal: '#10b981',
 };
 
+// Step 5: same three defaults indicators.ts/ReplayChart.tsx already use
+// (EMA 50 as a trend filter, SMA 20 as a faster mean, RSI 14 as the
+// textbook momentum reading) - see createDefaultIndicators below for why
+// these are now built-in studies instead of hand-rolled math.
+const SMA_PERIOD = 20;
+const EMA_PERIOD = 50;
+const RSI_PERIOD = 14;
+
 type Props = {
   candles: Candle[];
   visibleCount: number;
@@ -214,6 +222,14 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
                   getPoints: () => Array<{ time: number; price: number }>;
                   getProperties: <P = Record<string, unknown>>() => P;
                 };
+                createStudy: (
+                  name: string,
+                  forceOverlay: boolean,
+                  lock: boolean,
+                  inputs?: Record<string, unknown>,
+                  overrides?: Record<string, unknown>,
+                ) => Promise<string | null>;
+                getStudyById: (entityId: string) => { setVisible: (visible: boolean) => void };
               };
             };
           };
@@ -468,6 +484,55 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
           }
         }
 
+        // Step 5: SMA 20 / EMA 50 / RSI 14, replacing the hand-rolled math in
+        // indicators.ts with the widget's own built-in studies - per
+        // advanced-charts-integration-plan.md's own framing, this is meant
+        // to be a straight delete-and-replace, not a port, since the whole
+        // point of the built-in studies is that PipEcho no longer has to
+        // maintain that math itself. Once created, a study recalculates
+        // itself live from whatever bars the datafeed hands back - unlike
+        // trade markers/drawings there's nothing here to keep in sync on
+        // every visibleCount tick, so this runs once on chart-ready and
+        // never again for the lifetime of this widget instance.
+        //
+        // Study names ('Moving Average', 'Moving Average Exponential',
+        // 'Relative Strength Index') and the input/override key names
+        // ('length', 'plot.color') were confirmed by actually creating each
+        // one and reading back getInputsInfo()/getInputValues() - the same
+        // "test it live" discipline steps 3-4 needed, not a guess from the
+        // override interfaces' names alone (e.g. plain 'Moving Average' is
+        // the simple one; there's no separate 'Simple Moving Average' or
+        // bare 'RSI' - both throw).
+        //
+        // Same three defaults ReplayChart.tsx's chips start with (EMA on,
+        // SMA/RSI off) - past that, all three are left fully native: the
+        // widget's own legend row (the little "MA 20 close 0 •••" line
+        // under the symbol header) already has a working eye-icon toggle,
+        // a settings dialog, and a remove button, and the "Indicators"
+        // button in the toolbar already opens a full search panel over
+        // hundreds of other built-in studies - there's no reason to layer
+        // PipEcho's own chip UI on top of controls that already exist and
+        // are more capable. RSI's overbought/oversold shading is also
+        // already built into the indicator itself (upperlimit/lowerlimit
+        // default to 70/30) - no need to add reference lines by hand the
+        // way ReplayChart.tsx's lightweight-charts version has to.
+        async function createDefaultIndicators() {
+          const chart = widget.activeChart();
+          try {
+            const [smaId, emaId, rsiId] = await Promise.all([
+              chart.createStudy('Moving Average', false, false, { length: SMA_PERIOD }, { 'plot.color': '#a855f7', 'plot.linewidth': 2 }),
+              chart.createStudy('Moving Average Exponential', false, false, { length: EMA_PERIOD }, { 'plot.color': '#3b82f6', 'plot.linewidth': 2 }),
+              chart.createStudy('Relative Strength Index', false, false, { length: RSI_PERIOD }, { 'plot.color': isDark ? '#facc15' : '#b45309' }),
+            ]);
+            if (cancelled) return;
+            if (smaId) chart.getStudyById(smaId).setVisible(false);
+            if (rsiId) chart.getStudyById(rsiId).setVisible(false);
+            void emaId; // stays visible - matches ReplayChart.tsx's EMA-on-by-default
+          } catch (err) {
+            console.error('[TradingViewChart] failed to create default indicators', err);
+          }
+        }
+
         // Debounced rather than run straight off each drawing_event: the
         // event only tells us *something* changed (create/remove) and an
         // id, not which side caused it or what it now is, so the reliable
@@ -606,6 +671,10 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
           // and syncTrades() above, for this dataset's saved drawings -
           // fire-and-forget since nothing else needs to block on it.
           loadDrawings().catch(err => console.error('[TradingViewChart] failed to load drawings', err));
+
+          // Fire-and-forget for the same reason loadDrawings() is - nothing
+          // downstream needs to block on the default indicators existing.
+          createDefaultIndicators();
 
           onReady?.();
         });
