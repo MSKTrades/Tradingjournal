@@ -104,6 +104,14 @@ export default function Backtest() {
   const [startIndex, setStartIndex] = useState(MIN_LOOKBACK);
   const [closingTrade, setClosingTrade] = useState<BacktestTrade | null>(null);
   const [closePrice, setClosePrice] = useState('');
+  // Surfaces a failed trade log/close/delete/tag-update instead of the
+  // silent no-op it used to be: every handler below used to let a rejected
+  // api.post/put/del just vanish as an unhandled promise rejection - visible
+  // in the browser console if you knew to look, invisible otherwise, which
+  // is exactly what "I clicked Log Trade and nothing happened" looks like
+  // from the outside. One shared banner (rather than a field per handler)
+  // since only one of these actions can realistically be in flight at once.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { visibleCount, setVisibleCount, playing, setPlaying, speedIdx, setSpeedIdx, reset: resetPlayback } = useReplayPlayback(candles?.length ?? 0);
 
@@ -205,22 +213,28 @@ export default function Backtest() {
 
   async function handleLogTrade(t: { direction: string; entry_price: number; sl_price: number | null; tp_price: number | null; notes: string }) {
     if (!candles || !selectedId || visibleCount === 0) return;
+    setActionError(null);
     const candle = candles[visibleCount - 1];
-    await api.post('/backtest', {
-      resource: 'trades',
-      dataset_id: selectedId,
-      direction: t.direction,
-      entry_price: t.entry_price,
-      sl_price: t.sl_price,
-      tp_price: t.tp_price,
-      entry_time: new Date(candle.time * 1000).toISOString(),
-      notes: t.notes,
-    });
-    refetchTrades();
+    try {
+      await api.post('/backtest', {
+        resource: 'trades',
+        dataset_id: selectedId,
+        direction: t.direction,
+        entry_price: t.entry_price,
+        sl_price: t.sl_price,
+        tp_price: t.tp_price,
+        entry_time: new Date(candle.time * 1000).toISOString(),
+        notes: t.notes,
+      });
+      refetchTrades();
+    } catch (e: any) {
+      setActionError(e?.message ?? 'Failed to log trade.');
+    }
   }
 
   async function handleManualClose() {
     if (!closingTrade || !closePrice.trim() || isNaN(Number(closePrice)) || !candles || visibleCount === 0) return;
+    setActionError(null);
     const exitPrice = Number(closePrice);
     const entry = Number(closingTrade.entry_price);
     const isLong = closingTrade.direction === 'Long';
@@ -230,28 +244,42 @@ export default function Backtest() {
     const reward = Math.abs(exitPrice - entry);
     const rr = risk > 0 ? Math.round((reward / risk) * (result === 'Profit' ? 1 : -1) * 100) / 100 : (result === 'Profit' ? 1 : -1);
     const candle = candles[visibleCount - 1];
-    await api.put(`/backtest?resource=trades&id=${closingTrade.id}`, {
-      direction: closingTrade.direction, entry_price: closingTrade.entry_price, sl_price: closingTrade.sl_price, tp_price: closingTrade.tp_price,
-      entry_time: closingTrade.entry_time, exit_time: new Date(candle.time * 1000).toISOString(),
-      exit_price: exitPrice, result, rr, notes: closingTrade.notes, tags: closingTrade.tags,
-    });
-    setClosingTrade(null);
-    setClosePrice('');
-    refetchTrades();
+    try {
+      await api.put(`/backtest?resource=trades&id=${closingTrade.id}`, {
+        direction: closingTrade.direction, entry_price: closingTrade.entry_price, sl_price: closingTrade.sl_price, tp_price: closingTrade.tp_price,
+        entry_time: closingTrade.entry_time, exit_time: new Date(candle.time * 1000).toISOString(),
+        exit_price: exitPrice, result, rr, notes: closingTrade.notes, tags: closingTrade.tags,
+      });
+      setClosingTrade(null);
+      setClosePrice('');
+      refetchTrades();
+    } catch (e: any) {
+      setActionError(e?.message ?? 'Failed to close trade.');
+    }
   }
 
   async function handleDeleteTrade(id: number) {
-    await api.del(`/backtest?resource=trades&id=${id}`);
-    refetchTrades();
+    setActionError(null);
+    try {
+      await api.del(`/backtest?resource=trades&id=${id}`);
+      refetchTrades();
+    } catch (e: any) {
+      setActionError(e?.message ?? 'Failed to delete trade.');
+    }
   }
 
   async function handleUpdateTags(trade: BacktestTrade, tags: string[]) {
-    await api.put(`/backtest?resource=trades&id=${trade.id}`, {
-      direction: trade.direction, entry_price: trade.entry_price, sl_price: trade.sl_price, tp_price: trade.tp_price,
-      entry_time: trade.entry_time, exit_time: trade.exit_time, exit_price: trade.exit_price,
-      result: trade.result, rr: trade.rr, notes: trade.notes, tags,
-    });
-    refetchTrades();
+    setActionError(null);
+    try {
+      await api.put(`/backtest?resource=trades&id=${trade.id}`, {
+        direction: trade.direction, entry_price: trade.entry_price, sl_price: trade.sl_price, tp_price: trade.tp_price,
+        entry_time: trade.entry_time, exit_time: trade.exit_time, exit_price: trade.exit_price,
+        result: trade.result, rr: trade.rr, notes: trade.notes, tags,
+      });
+      refetchTrades();
+    } catch (e: any) {
+      setActionError(e?.message ?? 'Failed to update tags.');
+    }
   }
 
   function handleCreateTag(name: string) {
@@ -373,6 +401,15 @@ export default function Backtest() {
                   <TradingViewChart candles={candles} visibleCount={visibleCount} trades={trades} baseTimeframe={selectedDataset?.timeframe} datasetId={selectedId} />
                 </CardContent>
               </Card>
+
+              {actionError && (
+                <Card className="border-destructive/40">
+                  <CardContent className="pt-3 pb-3 text-sm text-destructive flex items-center justify-between gap-3">
+                    <span>{actionError}</span>
+                    <Button size="sm" variant="ghost" onClick={() => setActionError(null)}>Dismiss</Button>
+                  </CardContent>
+                </Card>
+              )}
 
               <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
                 <LogTradeForm lastClose={candles[Math.max(0, visibleCount - 1)].close} onSubmit={handleLogTrade} />
