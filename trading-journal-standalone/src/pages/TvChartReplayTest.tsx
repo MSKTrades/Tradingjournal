@@ -91,7 +91,18 @@ export default function TvChartReplayTest() {
             <button onClick={() => setVisibleCount(v => Math.min(candles.length, v + 1))} disabled={visibleCount >= candles.length} title="Step forward">
               <SkipForward size={16} />
             </button>
-            <select value={speedIdx} onChange={e => setSpeedIdx(Number(e.target.value))}>
+            {/* No explicit colors here originally - a native <select> falls
+                back to the browser's own (light) control chrome, which on
+                PipEcho's dark shell (white ambient text, dark page
+                background - see this file's other elements, which all
+                inherit that fine) meant white text on the select's own
+                white background: invisible. colorScheme: 'dark' also fixes
+                the popup option list itself, not just the closed control. */}
+            <select
+              value={speedIdx}
+              onChange={e => setSpeedIdx(Number(e.target.value))}
+              style={{ background: '#111', color: '#fff', border: '1px solid #444', borderRadius: 4, padding: '2px 4px', colorScheme: 'dark' }}
+            >
               {SPEED_OPTIONS.map((s, i) => <option key={s.label} value={i}>{s.label}</option>)}
             </select>
             <button onClick={fullReset} title="Reset">
