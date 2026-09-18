@@ -7,7 +7,7 @@ import { Select } from '../../lib/ui/form';
 import { useAccount } from '../../lib/accounts';
 import { useFetch } from '../../lib/api';
 import { ChartDataset, Candle, Trade, BacktestTrade, fmtMoney } from '../data/types';
-import ReplayChart from './ReplayChart';
+import TradingViewChart from './TradingViewChart';
 import { useReplayPlayback, SPEED_OPTIONS } from './useReplayPlayback';
 
 type Props = { datasets: ChartDataset[] };
@@ -189,7 +189,7 @@ export default function TradeReplayTab({ datasets }: Props) {
                 {selected.trade.gain_loss != null && <span className="font-mono text-muted-foreground">{fmtMoney(selected.trade.gain_loss)}</span>}
               </div>
             </div>
-            <ReplayChart candles={windowed.slice} visibleCount={visibleCount} trades={[windowed.reviewTrade]} baseTimeframe={selected.dataset.timeframe} datasetId={selected.dataset.id} />
+            <TradingViewChart candles={windowed.slice} visibleCount={visibleCount} trades={[windowed.reviewTrade]} baseTimeframe={selected.dataset.timeframe} datasetId={selected.dataset.id} />
           </CardContent>
         </Card>
       )}

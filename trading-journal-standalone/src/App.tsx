@@ -26,7 +26,7 @@ import StrategyDetail from './pages/StrategyDetail';
 import Checklists from './pages/Checklists';
 import Billing from './pages/Billing';
 import Admin from './pages/Admin';
-import BacktestComingSoon from './pages/BacktestComingSoon';
+import Backtest from './pages/Backtest';
 import ChallengeSimulator from './pages/ChallengeSimulator';
 import SmcAnalysis from './pages/SmcAnalysis';
 import SmcComingSoon from './pages/SmcComingSoon';
@@ -237,13 +237,14 @@ export default function App() {
                 the demo sandbox (DemoShell) - there's no real account or
                 Stripe customer behind a demo session to bill. */}
             <Route path="/billing" element={<Protected><AuthedShell><Billing /></AuthedShell></Protected>} />
-            {/* Chart Replay & Backtesting is gated to BacktestComingSoon for
-                everyone right now, not just non-admins (unlike SmcGate below) -
-                see BacktestComingSoon.tsx's own doc comment for why. The real
-                Backtest page component still exists (src/pages/Backtest.tsx)
-                and is fully built; it's just not routed to from here while
-                that's true, so re-enabling it later is a one-line swap back. */}
-            <Route path="/backtest" element={<Protected><AuthedShell><BacktestComingSoon /></AuthedShell></Protected>} />
+            {/* Chart Replay & Backtesting - was gated to BacktestComingSoon
+                (see that file's own doc comment) while waiting on a proper
+                charting library; now on Advanced Charts (TradingViewChart)
+                as of the migration this route swap ships, so the real page
+                is live for every account. BacktestComingSoon.tsx is left in
+                place, unused, in case this ever needs to go back behind a
+                gate. */}
+            <Route path="/backtest" element={<Protected><AuthedShell><Backtest /></AuthedShell></Protected>} />
             <Route path="/challenge-simulator" element={<Protected><AuthedShell><ChallengeSimulator /></AuthedShell></Protected>} />
             <Route path="/smc-analysis" element={<Protected><AuthedShell><SmcGate /></AuthedShell></Protected>} />
             {/* In-app, admin-only for now - see PlaybooksGate above for why.

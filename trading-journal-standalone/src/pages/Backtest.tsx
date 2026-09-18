@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../lib/ui/tabs';
 import { api, useFetch } from '../lib/api';
 import { ChartDataset, Candle, BacktestTrade, Tag } from './data/types';
-import ReplayChart from './ui/ReplayChart';
+import TradingViewChart from './ui/TradingViewChart';
 import FetchDatasetDialog from './ui/FetchDatasetDialog';
 import BacktestLog from './ui/BacktestLog';
 import TradeReplayTab from './ui/TradeReplayTab';
@@ -370,7 +370,7 @@ export default function Backtest() {
                       {new Date(candles[Math.max(0, visibleCount - 1)].time * 1000).toLocaleString()} &middot; {visibleCount.toLocaleString()} / {candles.length.toLocaleString()}
                     </p>
                   </div>
-                  <ReplayChart candles={candles} visibleCount={visibleCount} trades={trades} baseTimeframe={selectedDataset?.timeframe} datasetId={selectedId} />
+                  <TradingViewChart candles={candles} visibleCount={visibleCount} trades={trades} baseTimeframe={selectedDataset?.timeframe} datasetId={selectedId} />
                 </CardContent>
               </Card>
 

@@ -28,13 +28,11 @@ const NAV_ITEMS = [
   { to: 'performance',  label: 'Performance', icon: TrendingUp, disabled: false },
   { to: 'strategies',   label: 'Strategies',  icon: Settings,   disabled: false },
   { to: 'checklists',   label: 'Checklists',  icon: ListChecks, disabled: false },
-  // Chart Replay & Backtesting - gated to "Coming soon" for everyone right
-  // now (see App.tsx's /backtest route rendering BacktestComingSoon, and
-  // that file's own doc comment for why). Kept visible-but-disabled rather
-  // than removed entirely so the feature isn't a surprise once it ships -
-  // same pattern as any other `disabled: true` item below. Not offered
-  // inside the demo sandbox either way (see DEMO_HIDDEN below).
-  { to: 'backtest',     label: 'Backtest',    icon: History,    disabled: true },
+  // Chart Replay & Backtesting - was disabled while waiting on a proper
+  // charting library (see App.tsx's /backtest route); now live on Advanced
+  // Charts. Not offered inside the demo sandbox either way (see DEMO_HIDDEN
+  // below - the demo backend doesn't mock real historical candle data).
+  { to: 'backtest',     label: 'Backtest',    icon: History,    disabled: false },
   { to: 'challenge-simulator', label: 'Challenge Simulator', icon: Trophy, disabled: false },
   // Real Stripe billing (src/pages/Billing.tsx, api/stripe.ts) - not shown
   // in the demo sandbox at all (see DEMO_HIDDEN below), same as Backtest/

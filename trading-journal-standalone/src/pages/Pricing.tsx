@@ -41,7 +41,7 @@ const PLANS = [
       'Excel import',
       'Execution Mistakes analysis',
       'HTF Bias Alignment',
-      'Chart Replay & Backtesting — up to 6 months of history (Coming soon)',
+      'Chart Replay & Backtesting — up to 6 months of history',
     ],
   },
   {
@@ -60,7 +60,7 @@ const PLANS = [
       'Checklist Compliance analysis',
       'R-Multiple Distribution',
       'Vision Board (wins/losses pattern + comment narrative analysis)',
-      'Chart Replay & Backtesting — unlimited history (Coming soon)',
+      'Chart Replay & Backtesting — unlimited history',
       'Priority support',
     ],
   },

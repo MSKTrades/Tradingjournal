@@ -37,7 +37,7 @@ const FEATURE_MENU: {
     column: 'Core workflow',
     items: [
       { icon: BookOpen, title: 'Trade Journal', desc: 'Log every trade with full context, automatically.' },
-      { icon: History, title: 'Chart Replay & Backtesting', desc: 'Rehearse a strategy on real historical candles.', comingSoon: true },
+      { icon: History, title: 'Chart Replay & Backtesting', desc: 'Rehearse a strategy on real historical candles.' },
       { icon: Settings2, title: 'Strategy Playbooks', desc: 'Define a setup once, track it forever after.' },
       { icon: ListChecks, title: 'Pre-Trade Checklists', desc: 'Your own rules, enforced before every entry.' },
     ],
