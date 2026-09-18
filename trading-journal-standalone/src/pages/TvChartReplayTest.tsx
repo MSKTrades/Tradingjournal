@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Play, Pause, SkipBack, SkipForward, RotateCcw } from 'lucide-react';
-import { Candle } from './data/types';
+import { Candle, BacktestTrade } from './data/types';
 import TradingViewChart from './ui/TradingViewChart';
 import { useReplayPlayback, SPEED_OPTIONS } from './ui/useReplayPlayback';
 
@@ -48,8 +48,53 @@ function generateCandles(count: number): Candle[] {
 const CANDLE_COUNT = 20_000; // ~13.9 days of 1-minute bars
 const START_INDEX = 500; // enough history behind the start point for a coarser timeframe to look reasonable immediately, same reasoning as Backtest.tsx's DEFAULT_LOOKBACK
 
+// Step 3 proof data: a handful of synthetic trades placed against real
+// points on the generated candle series (entry/exit prices taken from the
+// actual candle at that index, not made up numbers), covering the three
+// cases TradingViewChart's trade-marker sync needs to get right:
+//   - a closed Long, fully in the past before replay even starts (index
+//     100->300, well under START_INDEX) - proves trades already "placed"
+//     before mount show up via the onChartReady-triggered sync, not just
+//     ones revealed later by stepping/playing.
+//   - a closed Short, same idea (index 450->480, still before START_INDEX)
+//     - proves direction-based styling (red/short vs green/long) alongside
+//       the Long case above.
+//   - an open Long with SL/TP set, entered just after START_INDEX (index
+//     520) with no exit - proves a trade getting revealed *during* replay
+//     (via the [trades, visibleCount] effect, not the mount-time one)
+//     triggers its entry marker, and that the order-line annotations only
+//     appear for a trade that's still open.
+function generateTrades(candles: Candle[]): BacktestTrade[] {
+  const at = (i: number) => candles[i];
+  const iso = (i: number) => new Date(at(i).time * 1000).toISOString();
+  return [
+    {
+      id: 1, dataset_id: 1, direction: 'Long',
+      entry_price: at(100).close, sl_price: at(100).close - 0.002, tp_price: at(100).close + 0.004,
+      entry_time: iso(100), exit_time: iso(300), exit_price: at(300).close,
+      result: at(300).close > at(100).close ? 'Profit' : 'Loss', rr: 1.4,
+      notes: null, tags: [], created_at: iso(100),
+    },
+    {
+      id: 2, dataset_id: 1, direction: 'Short',
+      entry_price: at(450).close, sl_price: at(450).close + 0.002, tp_price: at(450).close - 0.004,
+      entry_time: iso(450), exit_time: iso(480), exit_price: at(480).close,
+      result: at(480).close < at(450).close ? 'Profit' : 'Loss', rr: 0.8,
+      notes: null, tags: [], created_at: iso(450),
+    },
+    {
+      id: 3, dataset_id: 1, direction: 'Long',
+      entry_price: at(520).close, sl_price: at(520).close - 0.0015, tp_price: at(520).close + 0.005,
+      entry_time: iso(520), exit_time: null, exit_price: null,
+      result: null, rr: null,
+      notes: null, tags: [], created_at: iso(520),
+    },
+  ];
+}
+
 export default function TvChartReplayTest() {
   const candles = useMemo(() => generateCandles(CANDLE_COUNT), []);
+  const trades = useMemo(() => generateTrades(candles), [candles]);
   const { visibleCount, setVisibleCount, playing, setPlaying, speedIdx, setSpeedIdx, reset } = useReplayPlayback(candles.length);
   const [started, setStarted] = useState(false);
 
@@ -115,7 +160,7 @@ export default function TvChartReplayTest() {
           <TradingViewChart
             candles={candles}
             visibleCount={visibleCount}
-            trades={[]}
+            trades={trades}
             baseTimeframe="1m"
             datasetId={1}
             height={520}
