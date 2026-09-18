@@ -1,6 +1,45 @@
 import { useEffect, useRef } from 'react';
-import { Candle, BacktestTrade } from '../data/types';
+import { Candle, BacktestTrade, ChartDrawing, ChartDrawingType } from '../data/types';
 import { createReplayDatafeed, tfToResolution } from './tvDatafeed';
+import { api } from '../../lib/api';
+
+// Step 4: trendlines/horizontal lines/rectangles/fib retracements, drawn via
+// Advanced Charts' own native drawing toolbar (unlike ReplayChart.tsx, which
+// implements its own toolbar + DrawingsPrimitive on top of lightweight-charts
+// - there's no equivalent need here since the widget already ships full
+// drawing tools). Same create+delete-only persistence scope as ReplayChart's
+// own drawings feature (see api/backtest.ts - no PUT/update route exists for
+// resource=drawings, so move/resize was never a supported operation there
+// either; a user can still drag an existing drawing around during a session,
+// it just won't survive a reload here, matching that same limitation).
+//
+// TradingView's own shape "name" (as returned by getAllShapes()) turns out
+// to be exactly the shape string passed to createShape/createMultipointShape
+// (confirmed by creating one of each and reading it back - see this file's
+// history), so the two directions of this mapping are exact inverses of each
+// other, not a guess at some separate human-readable label.
+const DRAWING_TYPE_TO_TV_SHAPE: Record<ChartDrawingType, string> = {
+  trendline: 'trend_line',
+  horizontal: 'horizontal_line',
+  rectangle: 'rectangle',
+  fib: 'fib_retracement',
+};
+const TV_SHAPE_TO_DRAWING_TYPE: Record<string, ChartDrawingType> = {
+  trend_line: 'trendline',
+  horizontal_line: 'horizontal',
+  rectangle: 'rectangle',
+  fib_retracement: 'fib',
+};
+// Same per-type defaults ReplayChart.tsx's own toolbar uses (TOOL_COLORS) -
+// applied here when re-rendering a saved drawing whose color for some reason
+// didn't round-trip, and as the fallback when a freshly user-drawn shape's
+// color can't be read back (see colorOverridesFor/extractDrawingColor).
+const DEFAULT_DRAWING_COLOR: Record<ChartDrawingType, string> = {
+  trendline: '#3b82f6',
+  rectangle: '#a855f7',
+  fib: '#f59e0b',
+  horizontal: '#10b981',
+};
 
 type Props = {
   candles: Candle[];
@@ -85,6 +124,40 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
   // visibleCount can change many times a second during fast replay, each
   // one triggering its own sync.
   const syncTokenRef = useRef(0);
+  // Step 4 (drawings) bookkeeping - see the block comment above
+  // DRAWING_TYPE_TO_TV_SHAPE for the overall approach (debounced diff
+  // against getAllShapes() rather than trying to attribute individual
+  // drawing_event firings to "us" vs "the user").
+  //
+  // TradingView entityId -> the persisted ChartDrawing row it represents.
+  // Populated both for drawings loaded from the server on mount and for
+  // ones the user has since drawn and successfully saved - membership here
+  // is what lets a later reconcile tell "already a tracked drawing" apart
+  // from "brand new, never seen this id before".
+  const drawingsRef = useRef<Map<string, ChartDrawing>>(new Map());
+  // Shape ids reconcile has already looked at and decided aren't worth
+  // persisting (e.g. a drawing tool that was started but never actually
+  // given a second point) - without this, a degenerate shape sitting on the
+  // chart would get re-inspected and skipped again on every single
+  // reconcile for as long as it stays there.
+  const ignoredShapeIdsRef = useRef<Set<string>>(new Set());
+  // True for the duration of a syncTrades() call. Trade markers reuse
+  // 'horizontal_line' (for Entry/SL/TP), which is also one of the 4
+  // user-drawable types - so a reconcile that ran mid-resync could easily
+  // mistake a trade marker that's been created but not yet registered in
+  // shapeIdsRef for a genuine new user drawing. Reconcile checks this and
+  // simply reschedules itself rather than running while it's true, so it
+  // only ever diffs against a settled, steady-state shape list.
+  const tradeSyncBusyRef = useRef(false);
+  const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The drawing_event handler is created inside the async
+  // loadChartingLibrary().then(...) closure (same reason notifyRevealRef/
+  // syncTradesRef are refs rather than plain closure variables) - the
+  // synchronous cleanup function below runs in the outer effect scope and
+  // can't see into that closure directly, so it needs the same function
+  // reference back out through a ref to unsubscribe the exact callback that
+  // was subscribed.
+  const onDrawingEventRef = useRef<((sourceId: unknown, drawingEventType: unknown) => void) | null>(null);
 
   // Mutate-ref-from-effect, not from render - the datafeed's getters run
   // outside React's render cycle (invoked by the widget itself, on its own
@@ -122,6 +195,8 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
             widget: new (opts: Record<string, unknown>) => {
               remove?: () => void;
               onChartReady: (cb: () => void) => void;
+              subscribe: (event: string, callback: (...args: unknown[]) => void) => void;
+              unsubscribe: (event: string, callback: (...args: unknown[]) => void) => void;
               activeChart: () => {
                 setVisibleRange: (range: { from: number; to: number }, options?: Record<string, unknown>) => Promise<void>;
                 onDataLoaded: () => { subscribe: (obj: unknown, cb: () => void, singleshot?: boolean) => void };
@@ -129,7 +204,16 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
                   point: { time: number; channel?: 'open' | 'high' | 'low' | 'close'; price?: number },
                   options: { shape: string; text?: string; overrides?: Record<string, unknown>; disableSelection?: boolean; disableSave?: boolean; lock?: boolean; zOrder?: string },
                 ) => Promise<string>;
+                createMultipointShape: (
+                  points: Array<{ time: number; price: number }>,
+                  options: { shape: string; text?: string; overrides?: Record<string, unknown>; disableSelection?: boolean; disableSave?: boolean; lock?: boolean; zOrder?: string },
+                ) => Promise<string>;
                 removeEntity: (entityId: string, options?: { disableUndo?: boolean }) => void;
+                getAllShapes: () => Array<{ id: string; name: string }>;
+                getShapeById: (entityId: string) => {
+                  getPoints: () => Array<{ time: number; price: number }>;
+                  getProperties: <P = Record<string, unknown>>() => P;
+                };
               };
             };
           };
@@ -175,6 +259,20 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
         // otherwise discard them, so a burst of visibleCount changes during
         // fast replay can never leave duplicate markers on the chart.
         async function syncTrades() {
+          // See tradeSyncBusyRef's declaration above - a drawings reconcile
+          // that happens to run mid-resync could misread a trade marker
+          // that's been created but not yet registered in shapeIdsRef as a
+          // fresh user drawing (they share the 'horizontal_line' shape).
+          // Cleared in `finally` so it comes back down regardless of which
+          // return path below actually runs.
+          tradeSyncBusyRef.current = true;
+          try {
+            await syncTradesBody();
+          } finally {
+            tradeSyncBusyRef.current = false;
+          }
+        }
+        async function syncTradesBody() {
           const chart = widget.activeChart();
           const myToken = ++syncTokenRef.current;
 
@@ -307,6 +405,152 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
         }
         syncTradesRef.current = () => { syncTrades().catch(err => console.error('[TradingViewChart] trade marker sync failed', err)); };
 
+        // Best-effort color for a shape of a given TradingView type, read
+        // from whatever getProperties() actually exposes for that type -
+        // established empirically (see this file's history), not from the
+        // .d.ts alone, since only trend_line/horizontal_line document a
+        // flat top-level `linecolor` and rectangle's equivalent turned out
+        // to be a differently-named `color`. fib_retracement has no single
+        // color (each of its ~24 levels carries its own), so it's excluded
+        // here and always falls back to DEFAULT_DRAWING_COLOR.fib instead of
+        // trying to collapse that into one value.
+        function extractDrawingColor(tvShape: string, type: ChartDrawingType, props: Record<string, unknown>): string {
+          const raw = tvShape === 'rectangle' ? props.color : tvShape === 'trend_line' || tvShape === 'horizontal_line' ? props.linecolor : undefined;
+          return typeof raw === 'string' ? raw : DEFAULT_DRAWING_COLOR[type];
+        }
+
+        // The inverse: what to pass as `overrides` when (re)creating a shape
+        // for a drawing this app already has a stored color for (a loaded
+        // row, or a fallback default). Mirrors the same key-per-shape-type
+        // mapping extractDrawingColor reads from.
+        function colorOverridesFor(tvShape: string, color: string): Record<string, unknown> {
+          if (tvShape === 'trend_line' || tvShape === 'horizontal_line') return { linecolor: color };
+          if (tvShape === 'rectangle') return { color, textColor: color };
+          return {}; // fib_retracement - let the library use its own default per-level colors
+        }
+
+        // Renders this dataset's previously-saved drawings on top of the
+        // widget's native drawing layer. Unlike trade markers (disableSave,
+        // disableSelection, lock - fully protected from user interaction),
+        // these are left selectable/deletable: deleting one through the
+        // widget's own UI (Delete key, right-click > Remove) is how the
+        // "delete" half of this feature's create+delete scope is meant to
+        // be triggered, picked up by the next reconcile. Dragging one to a
+        // new position also works (it's native to the tool), it just won't
+        // be saved - same limitation ReplayChart.tsx already has, since
+        // there's no update route for this resource server-side (see
+        // api/backtest.ts).
+        async function loadDrawings() {
+          if (datasetId == null) return;
+          let rows: ChartDrawing[];
+          try {
+            rows = await api.get(`/backtest?resource=drawings&dataset_id=${datasetId}`);
+          } catch (err) {
+            console.error('[TradingViewChart] failed to load drawings', err);
+            return;
+          }
+          if (cancelled) return;
+          const chart = widget.activeChart();
+          for (const d of rows) {
+            const tvShape = DRAWING_TYPE_TO_TV_SHAPE[d.type];
+            if (!tvShape || d.points.length === 0) continue;
+            try {
+              const overrides = colorOverridesFor(tvShape, d.color);
+              const options = { shape: tvShape, overrides, disableSave: true, disableSelection: false, lock: false, zOrder: 'top' as const };
+              const id = d.type === 'horizontal'
+                ? await chart.createShape(d.points[0], options)
+                : await chart.createMultipointShape(d.points, options);
+              if (cancelled) { chart.removeEntity(id, { disableUndo: true }); continue; }
+              drawingsRef.current.set(id, d);
+            } catch (err) {
+              console.error('[TradingViewChart] failed to render saved drawing', d.id, err);
+            }
+          }
+        }
+
+        // Debounced rather than run straight off each drawing_event: the
+        // event only tells us *something* changed (create/remove) and an
+        // id, not which side caused it or what it now is, so the reliable
+        // way to find out is to wait for things to settle and then diff
+        // getAllShapes() against what this component already knows about -
+        // see the block comment above DRAWING_TYPE_TO_TV_SHAPE for why this
+        // replaced trying to attribute individual events in real time.
+        function scheduleReconcile(delay = 400) {
+          if (reconcileTimerRef.current != null) clearTimeout(reconcileTimerRef.current);
+          reconcileTimerRef.current = setTimeout(() => {
+            reconcileTimerRef.current = null;
+            runReconcile().catch(err => console.error('[TradingViewChart] drawing reconcile failed', err));
+          }, delay);
+        }
+
+        async function runReconcile() {
+          if (datasetId == null || cancelled) return;
+          if (tradeSyncBusyRef.current) { scheduleReconcile(250); return; }
+
+          const chart = widget.activeChart();
+          const all = chart.getAllShapes();
+          const allIds = new Set(all.map(s => s.id));
+          const tradeMarkerIds = new Set(shapeIdsRef.current);
+          const known = drawingsRef.current;
+
+          // A drawing this component was tracking is no longer on the chart
+          // - the user deleted it via the widget's own UI. Persist the
+          // deletion. (Our own code never removes a tracked drawing's
+          // entity directly, so any disappearance here is genuinely
+          // user-initiated.)
+          for (const [id, drawing] of Array.from(known.entries())) {
+            if (allIds.has(id)) continue;
+            known.delete(id);
+            api.del(`/backtest?resource=drawings&id=${drawing.id}`).catch(err =>
+              console.error('[TradingViewChart] failed to persist drawing delete', drawing.id, err));
+          }
+
+          // A shape on the chart this component has never seen before, of a
+          // type it persists, that isn't one of its own trade markers - a
+          // genuine new user-drawn shape. Anything else (an indicator, a
+          // native tool this app doesn't have a ChartDrawingType for, one of
+          // our own trade markers still mid-resync) is left alone.
+          for (const { id, name } of all) {
+            if (tradeMarkerIds.has(id) || known.has(id) || ignoredShapeIdsRef.current.has(id)) continue;
+            const type = TV_SHAPE_TO_DRAWING_TYPE[name];
+            if (!type) continue;
+
+            let points: Array<{ time: number; price: number }>;
+            try {
+              points = chart.getShapeById(id).getPoints();
+            } catch {
+              ignoredShapeIdsRef.current.add(id);
+              continue;
+            }
+            const minPoints = type === 'horizontal' ? 1 : 2;
+            const degenerate = points.length < minPoints
+              || (points.length >= 2 && points[0].time === points[1].time && points[0].price === points[1].price);
+            if (degenerate) {
+              // A drawing tool that got selected but never actually given a
+              // real second point (e.g. a stray click with no drag) - not
+              // worth saving, and not worth re-checking every reconcile
+              // either.
+              ignoredShapeIdsRef.current.add(id);
+              continue;
+            }
+
+            let color = DEFAULT_DRAWING_COLOR[type];
+            try {
+              color = extractDrawingColor(name, type, chart.getShapeById(id).getProperties());
+            } catch { /* keep the default */ }
+
+            api.post('/backtest', { resource: 'drawings', dataset_id: datasetId, type, points, color })
+              .then((saved: ChartDrawing) => { if (!cancelled) known.set(id, saved); })
+              .catch(err => console.error('[TradingViewChart] failed to persist new drawing', err));
+          }
+        }
+
+        function onDrawingEvent(sourceId: unknown, drawingEventType: unknown) {
+          if (drawingEventType === 'create' || drawingEventType === 'remove') scheduleReconcile();
+        }
+        onDrawingEventRef.current = onDrawingEvent;
+        widget.subscribe('drawing_event', onDrawingEvent);
+
         widget.onChartReady(() => {
           if (cancelled) return;
           readyRef.current = true;
@@ -358,6 +602,11 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
           // an empty chart until the next visibleCount change.
           syncTradesRef.current?.();
 
+          // Same already-mid-session-on-mount reasoning as notifyReveal()
+          // and syncTrades() above, for this dataset's saved drawings -
+          // fire-and-forget since nothing else needs to block on it.
+          loadDrawings().catch(err => console.error('[TradingViewChart] failed to load drawings', err));
+
           onReady?.();
         });
       })
@@ -366,15 +615,27 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
     return () => {
       cancelled = true;
       readyRef.current = false;
+      if (reconcileTimerRef.current != null) {
+        clearTimeout(reconcileTimerRef.current);
+        reconcileTimerRef.current = null;
+      }
+      if (onDrawingEventRef.current) {
+        try {
+          (widgetRef.current as unknown as { unsubscribe?: (event: string, cb: unknown) => void } | null)?.unsubscribe?.('drawing_event', onDrawingEventRef.current);
+        } catch { /* widget may already be mid-teardown - nothing to unsubscribe from */ }
+        onDrawingEventRef.current = null;
+      }
       widgetRef.current?.remove?.();
       widgetRef.current = null;
       notifyRevealRef.current = null;
       syncTradesRef.current = null;
       // No explicit removeEntity() cleanup needed here - widget.remove()
       // above tears down the whole chart (and everything drawn on it) at
-      // once. Just drop the bookkeeping ref so a future widget instance
+      // once. Just drop the bookkeeping refs so a future widget instance
       // starts from an empty slate.
       shapeIdsRef.current = [];
+      drawingsRef.current = new Map();
+      ignoredShapeIdsRef.current = new Set();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetId]);
