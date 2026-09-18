@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3, Pencil, Check, Trash2, Star, Smile } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3, Pencil, Check, Trash2, Star, Smile, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
-import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, Timeframe, Instrument, SESSIONS, ENTRY_TYPES, fmtMoney } from '../data/types';
+import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, Timeframe, Instrument, SESSIONS, ENTRY_TYPES, fmtMoney, MTF_TIMEFRAMES, getTradeMtfTrends } from '../data/types';
 import { computeDrawdown, positionSizeLots, slPipsFromPrices } from '../data/risk';
 import { useAccount } from '../../lib/accounts';
 import { api, useFetch } from '../../lib/api';
@@ -433,6 +433,14 @@ export default function TradeDetailPanel({
     const followed = activeChecklist.items.filter(i => form.checklist_results[String(i.id)] === true).length;
     return { followed, total: activeChecklist.items.length };
   }, [checklistEnabled, form.checklist_results, activeChecklist]);
+
+  // Multi-Timeframe Bias - purely derived from whichever pasted screenshots
+  // (below, in Notes) have been tagged with both a canonical timeframe and a
+  // trend (see getTradeMtfTrends/MTF_TIMEFRAMES in types.ts). No separate
+  // field to keep in sync - recomputed straight from form.notes_blocks every
+  // time it changes, so the summary row below can never show something the
+  // screenshots themselves don't back up.
+  const mtfTrends = useMemo(() => getTradeMtfTrends(form), [form.notes_blocks]);
 
   // Position Size Calculator — uses the selected trade's own account and,
   // for the currently active account only, its live running balance
@@ -1275,6 +1283,43 @@ export default function TradeDetailPanel({
                     <span className="text-xs text-muted-foreground ml-1.5">{form.trade_rating}/5</span>
                   )}
                 </div>
+              </div>
+            </div>
+
+            {/* Multi-Timeframe Bias - the fixed, hardcoded Monthly -> 15M
+                bias summary, derived from screenshots tagged below (see
+                mtfTrends above). Placed right below Emotions/Trade Rating
+                and right above the screenshots that actually populate it,
+                so it reads as "here's what you tagged" rather than a
+                separate thing to fill in on its own. Every one of the 6
+                timeframes always renders, tagged or not - an empty slot is
+                itself useful information (a reminder of what top-down
+                context wasn't checked for this trade), not something to
+                hide until it has data. */}
+            <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 mb-4 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-primary shrink-0" />
+                <span className="text-xs font-bold text-primary shrink-0">Multi-Timeframe Bias</span>
+                <span className="text-[11px] text-muted-foreground">— tag a pasted chart's timeframe below to fill these in</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {MTF_TIMEFRAMES.map(tf => {
+                  const trend = mtfTrends[tf];
+                  const cls = trend === 'bullish'
+                    ? 'border-green-500 bg-green-500/15 text-green-700 dark:text-green-300'
+                    : trend === 'bearish'
+                    ? 'border-red-500 bg-red-500/15 text-red-700 dark:text-red-300'
+                    : trend === 'neutral'
+                    ? 'border-foreground/40 bg-muted text-foreground'
+                    : 'border-border bg-transparent text-muted-foreground/60';
+                  const Icon = trend === 'bullish' ? TrendingUp : trend === 'bearish' ? TrendingDown : Minus;
+                  return (
+                    <span key={tf} className={cn('px-2 py-1 rounded-full text-xs font-medium border flex items-center gap-1', cls)}>
+                      {trend && <Icon className="w-3 h-3" />}
+                      {tf}
+                    </span>
+                  );
+                })}
               </div>
             </div>
 

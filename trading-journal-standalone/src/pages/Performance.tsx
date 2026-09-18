@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { fmtMoney, plColor, StrategyResult, Trade, Tag, TagGroup } from './data/types';
+import { fmtMoney, plColor, StrategyResult, Trade, Tag, TagGroup, MTF_TIMEFRAMES, MtfTimeframe, MtfTrend, getTradeMtfTrends } from './data/types';
 import { computeDrawdown } from './data/risk';
 import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters, allTagsOnTrade, TagOption } from './ui/PerformanceFilterBar';
 import RMultipleDistribution from './ui/RMultipleDistribution';
@@ -177,6 +177,83 @@ function computeHourly(trades: Trade[]): { rows: PeriodRow[]; skipped: number } 
     };
   });
   return { rows, skipped };
+}
+
+// The same wins/losses/win_rate/profit_factor/avg_rr/pct_return math
+// computeHourly uses above, factored out so the Multi-Timeframe Bias
+// breakdowns below (one row per TF+trend, and one row per full bias
+// combination) don't re-derive it a third time. `period` is just whatever
+// label the caller wants for that row (an hour window there, a timeframe or
+// a combination signature here).
+function statsForGroup(period: string, group: Trade[]): PeriodRow {
+  const wins = group.filter(t => t.profit_loss === 'Profit').length;
+  const losses = group.filter(t => t.profit_loss === 'Loss').length;
+  const decided = wins + losses;
+  const win_rate = decided > 0 ? Math.round((wins / decided) * 100) : 0;
+  const total_gain = group.reduce((s, t) => s + Number(t.gain_loss ?? 0), 0);
+  const grossWin = group.reduce((s, t) => s + Math.max(0, Number(t.gain_loss ?? 0)), 0);
+  const grossLoss = Math.abs(group.reduce((s, t) => s + Math.min(0, Number(t.gain_loss ?? 0)), 0));
+  const profit_factor = grossLoss > 0 ? Math.round((grossWin / grossLoss) * 100) / 100 : (grossWin > 0 ? null : 0);
+  const rrVals = group.map(t => t.rr).filter(v => v != null).map(v => Number(v));
+  const avg_rr = rrVals.length > 0 ? Math.round((rrVals.reduce((s, v) => s + v, 0) / rrVals.length) * 100) / 100 : null;
+  const pct_return = Math.round(group.reduce((s, t) => s + Number(t.gain_loss_pct ?? 0), 0) * 100) / 100;
+  return {
+    period, total_trades: group.length, wins, losses, win_rate,
+    total_gain: Math.round(total_gain * 100) / 100, pct_return,
+    start_capital: 0, end_capital: 0, profit_factor, avg_rr,
+  };
+}
+
+const TREND_LABEL: Record<MtfTrend, string> = { bullish: 'Bullish', bearish: 'Bearish', neutral: 'Neutral' };
+
+// One row per (timeframe, trend) pair that at least one trade was actually
+// tagged with - e.g. "4H — Bearish". Simpler and far less data-hungry than
+// the full combination breakdown below (6 TFs x 3 trends = at most 18 rows
+// total, each with a real sample size), so this is the one that's actually
+// readable while a journal is still small - the combination table fragments
+// fast once every TF is being tagged on every trade.
+function computeMtfByTimeframe(trades: Trade[]): PeriodRow[] {
+  const rows: PeriodRow[] = [];
+  for (const tf of MTF_TIMEFRAMES) {
+    for (const trend of ['bullish', 'bearish', 'neutral'] as const) {
+      const group = trades.filter(t => getTradeMtfTrends(t)[tf] === trend);
+      if (group.length === 0) continue;
+      rows.push(statsForGroup(`${tf} — ${TREND_LABEL[trend]}`, group));
+    }
+  }
+  return rows;
+}
+
+// One row per distinct FULL bias signature - every canonical timeframe that
+// was tagged on a trade, combined ("Daily: Bullish, 4H: Bearish, 1H:
+// Bullish"). Only timeframes actually set are part of the signature (an
+// untagged TF isn't assumed neutral - it's just not part of that trade's
+// picture), and a trade with nothing tagged at all doesn't appear here since
+// there's no combination to group it into. Sorted by profit factor
+// (untradeable/no-loss infinite-PF groups pushed to the end rather than
+// first, since a 1-trade 100%-win group topping the list by "infinite"
+// profit factor would be misleading) then by sample size, so the most
+// interesting AND most reliable combinations surface together - trade count
+// is always shown alongside so a thin sample is visible, not hidden.
+function computeMtfCombinations(trades: Trade[]): PeriodRow[] {
+  const groups = new Map<string, Trade[]>();
+  for (const t of trades) {
+    const trends = getTradeMtfTrends(t);
+    const parts = MTF_TIMEFRAMES
+      .filter(tf => trends[tf])
+      .map(tf => `${tf}: ${TREND_LABEL[trends[tf]!]}`);
+    if (parts.length === 0) continue;
+    const key = parts.join(' · ');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(t);
+  }
+  const rows = Array.from(groups.entries()).map(([key, group]) => statsForGroup(key, group));
+  return rows.sort((a, b) => {
+    const pfA = a.profit_factor ?? Infinity;
+    const pfB = b.profit_factor ?? Infinity;
+    if (pfA !== pfB) return pfB - pfA;
+    return b.total_trades - a.total_trades;
+  });
 }
 
 function PerfBadge({ v }: { v: number }) {
@@ -744,6 +821,12 @@ export default function Performance() {
   );
 
   const { rows: hourly, skipped: hourlySkipped } = useMemo(() => computeHourly(filteredTrades), [filteredTrades]);
+  const mtfByTimeframe = useMemo(() => computeMtfByTimeframe(filteredTrades), [filteredTrades]);
+  const mtfCombinations = useMemo(() => computeMtfCombinations(filteredTrades), [filteredTrades]);
+  const mtfTaggedCount = useMemo(
+    () => filteredTrades.filter(t => Object.keys(getTradeMtfTrends(t)).length > 0).length,
+    [filteredTrades]
+  );
 
   // Cumulative P/L line: filtered trades in date order, running total of
   // gain_loss (Number()'d for the same reason as computeHourly above - the
@@ -855,6 +938,7 @@ export default function Performance() {
               <TabsTrigger value="weekday">By Day of Week</TabsTrigger>
               <TabsTrigger value="session">By Session</TabsTrigger>
               <TabsTrigger value="hour">By Hour</TabsTrigger>
+              <TabsTrigger value="mtf">MTF Bias</TabsTrigger>
             </TabsList>
 
             <TabsContent value="heatmap">
@@ -1151,6 +1235,83 @@ export default function Performance() {
                         </TableBody>
                       </Table></div>
                     </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="mtf">
+              <Card>
+                <CardContent className="pt-4 flex flex-col gap-6">
+                  <p className="text-xs text-muted-foreground">
+                    Built from the Monthly/Weekly/Daily/4H/1H/15M bias you tag on pasted charts in a trade's Journal
+                    entry (Notes → tag a screenshot's timeframe, then its Bullish/Bearish/Neutral bias).
+                    {mtfTaggedCount > 0
+                      ? <> {mtfTaggedCount} of {filteredTrades.length} trade{filteredTrades.length !== 1 ? 's' : ''} have at least one timeframe tagged.</>
+                      : <> No trades have a timeframe bias tagged yet — nothing to break down here until you do.</>}
+                  </p>
+
+                  {mtfByTimeframe.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold mb-2">By single timeframe</p>
+                      <div className="overflow-x-auto border rounded-lg"><Table>
+                        <TableHeader>
+                          <TableRow className="text-xs">
+                            <TableHead>Timeframe — Bias</TableHead>
+                            <TableHead className="text-center">Trades</TableHead>
+                            <TableHead className="text-center">Win %</TableHead>
+                            <TableHead className="text-center">Avg R</TableHead>
+                            <TableHead className="text-center">Profit Factor</TableHead>
+                            <TableHead className="text-right">Gain / Loss $</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {mtfByTimeframe.map(r => (
+                            <TableRow key={r.period} className="text-xs">
+                              <TableCell className="font-semibold">{r.period}</TableCell>
+                              <TableCell className="text-center">{r.total_trades}</TableCell>
+                              <TableCell className="text-center">{r.win_rate}%</TableCell>
+                              <TableCell className="text-center">{r.avg_rr !== null ? `${r.avg_rr}R` : '—'}</TableCell>
+                              <TableCell className="text-center">{fmtPF(r.profit_factor)}</TableCell>
+                              <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table></div>
+                    </div>
+                  )}
+
+                  {mtfCombinations.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold mb-2">By full combination</p>
+                      <p className="text-[11px] text-muted-foreground mb-2">
+                        Sorted by profit factor, then sample size — a combination with only 1–2 trades is noise, not a signal; check the Trades column before trusting a row near the top.
+                      </p>
+                      <div className="overflow-x-auto border rounded-lg"><Table>
+                        <TableHeader>
+                          <TableRow className="text-xs">
+                            <TableHead>Combination</TableHead>
+                            <TableHead className="text-center">Trades</TableHead>
+                            <TableHead className="text-center">Win %</TableHead>
+                            <TableHead className="text-center">Avg R</TableHead>
+                            <TableHead className="text-center">Profit Factor</TableHead>
+                            <TableHead className="text-right">Gain / Loss $</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {mtfCombinations.map(r => (
+                            <TableRow key={r.period} className="text-xs">
+                              <TableCell className="font-medium max-w-xs">{r.period}</TableCell>
+                              <TableCell className="text-center">{r.total_trades}</TableCell>
+                              <TableCell className="text-center">{r.win_rate}%</TableCell>
+                              <TableCell className="text-center">{r.avg_rr !== null ? `${r.avg_rr}R` : '—'}</TableCell>
+                              <TableCell className="text-center">{fmtPF(r.profit_factor)}</TableCell>
+                              <TableCell className="text-right"><PerfBadge v={r.total_gain} /></TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table></div>
+                    </div>
                   )}
                 </CardContent>
               </Card>

@@ -373,28 +373,74 @@ export default function TradingViewChart({ candles, visibleCount, trades, height
             }
           }
 
-          // Price lines only for a trade still open (no exit yet) at this
-          // point in the replay - once closed, the marker above is enough
-          // context. Same rule ReplayChart uses for its createPriceLine
-          // calls. Anchor time doesn't matter for a horizontal_line (unlike
-          // horizontal_ray, it draws across the whole chart regardless of
-          // where its one point sits) - lastVisibleTime keeps it anchored
-          // somewhere always within the currently-loaded range.
-          const openTrade = placedTrades.find(t => !t.exit_time);
-          if (openTrade) {
-            const lines: Array<{ price: number; text: string; color: string }> = [
-              { price: openTrade.entry_price, text: 'Entry', color: '#9ca3af' },
-            ];
-            if (openTrade.sl_price != null) lines.push({ price: openTrade.sl_price, text: 'SL', color: '#ef4444' });
-            if (openTrade.tp_price != null) lines.push({ price: openTrade.tp_price, text: 'TP', color: '#22c55e' });
-            for (const l of lines) {
-              shapeSpecs.push({
-                point: { time: lastVisibleTime, price: l.price },
-                shape: 'horizontal_line',
-                text: l.text,
-                overrides: { linecolor: l.color, textcolor: l.color, linestyle: 2 /* LineStyle.Dashed */, linewidth: 1, showPrice: true },
-              });
-            }
+          // Entry/SL/TP drawn with Advanced Charts' own native
+          // 'long_position'/'short_position' tool - the exact same one a
+          // trader would reach for manually (Alt+P), rather than a trio of
+          // plain dashed lines. Used to be dashed lines shown only for a
+          // still-open trade ("once closed, the marker above is enough
+          // context") - now every revealed trade with at least one of
+          // sl_price/tp_price gets the full box, open or closed, since a
+          // closed trade's entry/SL/TP is exactly the "trade idea" a replay
+          // is for reliving (see the Trade Replay tab), not just live-trade
+          // bookkeeping.
+          //
+          // This tool has no documented price-based input - `getProperties()`
+          // on a freshly-created one (confirmed empirically, not from the
+          // .d.ts, which only lists the account-size/risk/lotSize side of its
+          // overrides) reports `stopLevel`/`profitLevel` as INTEGER TICK
+          // COUNTS measured from the entry point, where one tick is the
+          // symbol's own minmov/pricescale - the same unit the tool's own
+          // "Ticks" input under Stop/Profit Level uses (see the screenshots
+          // this was verified against). tvDatafeed.ts's resolveSymbol
+          // currently hardcodes minmov/pricescale to 1/100000 (mintick
+          // 0.00001) for every symbol, but this reads it back off the chart's
+          // own symbolExt() rather than repeating that constant here, so it
+          // keeps working unmodified if that ever becomes pair-aware.
+          //
+          // Passing stopLevel/profitLevel straight in `overrides` at
+          // createShape time (rather than a separate setProperties call
+          // after) was confirmed to apply immediately and correctly. The
+          // shape's second (width) point could NOT be repositioned via
+          // setPoints() in testing - it silently collapsed back onto the
+          // first point - so the box is left at the tool's own default
+          // auto-width rather than stretched to lastVisibleTime/exit time;
+          // visually that's a fixed-width box anchored at entry, same as
+          // what shows immediately after manually placing one.
+          // `chart`'s type here is whatever TS structurally infers from this
+          // file's own usage (see TradingViewGlobal's `unknown`-typed widget
+          // constructor above) rather than the real charting_library.d.ts
+          // IChartWidgetApi - symbolExt() genuinely exists on the real
+          // widget (confirmed empirically), it's just not one of the methods
+          // already used elsewhere in this file for TS to have picked up, so
+          // this one call needs an explicit escape hatch rather than
+          // widening every other `chart` usage in the file for it.
+          const posSymbol = (chart as { symbolExt?: () => { minmov?: number; pricescale?: number } | null }).symbolExt?.();
+          const mintick = posSymbol && posSymbol.pricescale ? (posSymbol.minmov ?? 1) / posSymbol.pricescale : 0.00001;
+          for (const t of placedTrades) {
+            if (t.sl_price == null && t.tp_price == null) continue;
+            const entryTimeSec = Math.floor(new Date(t.entry_time).getTime() / 1000);
+            const isLong = t.direction === 'Long';
+            // Info blocks that depend on a $ account size / lot size /
+            // risk % this app has no real value for (the tool defaults to a
+            // fictional $1,000 @ 25% risk) are hidden - amount/qty numbers
+            // computed from that would just be misleading fiction sitting
+            // next to real price data. The price/tick/percent offsets and
+            // R:R ratio are left visible since those come straight from the
+            // real entry/SL/TP prices, not the fictional account inputs.
+            const overrides: Record<string, unknown> = {
+              infoBlocks: {
+                qty: { visible: false }, tpAmount: { visible: false }, slAmount: { visible: false },
+                tpPL: { visible: false }, slPL: { visible: false }, openClosePL: { visible: false },
+              },
+            };
+            if (t.sl_price != null) overrides.stopLevel = Math.max(1, Math.round(Math.abs(t.entry_price - t.sl_price) / mintick));
+            if (t.tp_price != null) overrides.profitLevel = Math.max(1, Math.round(Math.abs(t.tp_price - t.entry_price) / mintick));
+            shapeSpecs.push({
+              point: { time: entryTimeSec, price: t.entry_price },
+              shape: isLong ? 'long_position' : 'short_position',
+              text: '', // long_position/short_position auto-generate their own label - see the .d.ts note on `text`
+              overrides,
+            });
           }
 
           const newShapeIds = (

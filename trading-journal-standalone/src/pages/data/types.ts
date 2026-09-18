@@ -158,9 +158,66 @@ export type Trade = {
 // if the checklist is edited later, same as checklist_results already can.
 // Optional/no-default, same treatment as timeframe and comment - most
 // screenshots won't use this.
+// `trend` is the Bullish/Bearish/Neutral bias tagged for THIS screenshot -
+// same optional/no-default treatment as timeframe, and deliberately only
+// meaningful alongside one (see MTF_TIMEFRAMES below): NotesEditor only
+// offers a trend picker once the screenshot's timeframe is one of that
+// fixed, "finalised" list, since an ad-hoc/custom timeframe (a scalper's
+// "5M" note, say) has nowhere to roll up into and would just add clutter
+// with no analysis behind it. Set via the same TimeframePicker popover as
+// timeframe, right after picking a canonical TF - see NotesEditor.tsx.
+export type MtfTrend = 'bullish' | 'bearish' | 'neutral';
+
 export type NoteBlock =
   | { type: 'text'; value: string }
-  | { type: 'image'; url: string; timeframe?: string; comment?: string; checklistItemIds?: number[] };
+  | { type: 'image'; url: string; timeframe?: string; trend?: MtfTrend; comment?: string; checklistItemIds?: number[] };
+
+// The fixed set of "top-down bias" timeframes a trade can be tagged against
+// - Monthly/Weekly/Daily/4H/1H/15M, deliberately hardcoded (unlike the
+// free-form Timeframe entity/TIMEFRAME_PRESETS above, which anyone can
+// extend with their own labels for plain screenshot organizing). This list
+// needs to be fixed, not user-extensible, because it's the join key the
+// Performance page's win-rate/profit-factor-by-bias-combination breakdown
+// groups trades on (see computeMtfCombinations in Performance.tsx) - letting
+// it grow unbounded would fragment every trade into its own one-off
+// combination and make that analysis meaningless. Order here is top-down
+// (highest timeframe first), reused everywhere this list is displayed so
+// the bias summary always reads Monthly -> 15M, not creation order.
+export const MTF_TIMEFRAMES = ['Monthly', 'Weekly', 'Daily', '4H', '1H', '15M'] as const;
+export type MtfTimeframe = typeof MTF_TIMEFRAMES[number];
+
+// True for any timeframe string that's one of MTF_TIMEFRAMES, matched
+// case-insensitively (screenshots pick their timeframe from the same
+// free-text-capable picker as any other TF, so "4h" typed by hand should
+// still count as "4H" for this purpose, not silently fail to join).
+export function isMtfTimeframe(tf: string | undefined | null): tf is MtfTimeframe {
+  if (!tf) return false;
+  const lower = tf.toLowerCase();
+  return MTF_TIMEFRAMES.some(mtf => mtf.toLowerCase() === lower);
+}
+
+// Rolls a trade's pasted-screenshot notes up into "what was this trade's
+// bias on each of the 6 canonical timeframes" - the derived summary shown
+// at the top of TradeDetailPanel and the grouping key Performance.tsx's
+// combination breakdown reads. Purely a read of notes_blocks - there's no
+// separate column for this, so it's always recomputed from the same source
+// of truth the screenshots themselves show, never able to drift out of sync
+// with what's actually pasted in.
+//
+// When more than one screenshot on the same trade is tagged with the same
+// timeframe (re-checking a chart, or just tagging two screenshots the same
+// way by habit), the LAST one in notes_blocks order wins - the same
+// "whatever you set most recently sticks" rule setImageTimeframe already
+// uses for a screenshot's own badge, applied one level up.
+export function getTradeMtfTrends(trade: { notes_blocks: NoteBlock[] }): Partial<Record<MtfTimeframe, MtfTrend>> {
+  const result: Partial<Record<MtfTimeframe, MtfTrend>> = {};
+  for (const block of trade.notes_blocks) {
+    if (block.type !== 'image' || !block.trend || !isMtfTimeframe(block.timeframe)) continue;
+    const canonical = MTF_TIMEFRAMES.find(mtf => mtf.toLowerCase() === block.timeframe!.toLowerCase())!;
+    result[canonical] = block.trend;
+  }
+  return result;
+}
 
 // `value` is a plain number for every ordinary numeric field condition
 // (rr < 2, entry_price >= 1.27, etc). The one exception is the reserved

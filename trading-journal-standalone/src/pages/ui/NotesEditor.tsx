@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
-import { Bold, Check, Clock3, Italic, List, ListChecks, ListOrdered, Loader2, MessageSquare, Plus, Trash2, Underline, X, ZoomIn } from 'lucide-react';
-import { ChecklistItem, NoteBlock, Timeframe, TIMEFRAME_PRESETS } from '../data/types';
+import { Bold, Check, Clock3, Italic, List, ListChecks, ListOrdered, Loader2, MessageSquare, Minus, Plus, Trash2, TrendingDown, TrendingUp, Underline, X, ZoomIn } from 'lucide-react';
+import { ChecklistItem, isMtfTimeframe, MtfTrend, NoteBlock, Timeframe, TIMEFRAME_PRESETS } from '../data/types';
 import { isDemoMode } from '../../lib/demoMode';
 
 // Comments are stored as a small allowlisted subset of HTML (bold/italic/
@@ -80,6 +80,15 @@ type Props = {
   onChecklistItemMarked?: (itemId: number) => void;
 };
 
+// The three trend buttons shown once a screenshot is tagged with one of the
+// canonical MTF_TIMEFRAMES - shared between TimeframePicker below (compact,
+// icon-only) and anywhere else that ever needs the same three-way choice.
+const TREND_OPTIONS: { value: MtfTrend; label: string; Icon: typeof TrendingUp; activeCls: string }[] = [
+  { value: 'bullish', label: 'Bullish', Icon: TrendingUp, activeCls: 'bg-green-500/15 text-green-700 dark:text-green-300 border-green-500' },
+  { value: 'bearish', label: 'Bearish', Icon: TrendingDown, activeCls: 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500' },
+  { value: 'neutral', label: 'Neutral', Icon: Minus, activeCls: 'bg-muted text-foreground border-foreground/40' },
+];
+
 // Small popover shown on each screenshot to record which chart timeframe it
 // was taken on - opens automatically right after a screenshot is pasted (see
 // openTfFor in NotesEditor below), or can be reopened any time by clicking
@@ -87,10 +96,21 @@ type Props = {
 // this user's saved list yet (or typing a custom one) calls onAddTimeframe
 // so it's there to pick again next time, same "save on first real use"
 // pattern the tag picker uses for colors.
-function TimeframePicker({ value, options, onPick, onClose }: {
+//
+// Once the picked timeframe is one of the six canonical MTF_TIMEFRAMES (see
+// types.ts), a second row appears right below it to tag this chart's
+// Bullish/Bearish/Neutral bias - that's what feeds the trade's
+// Multi-Timeframe Bias summary (TradeDetailPanel) and the win-rate/profit-
+// factor-by-combination breakdown (Performance.tsx). A non-canonical TF
+// (anything custom/free-typed) skips that row entirely and just closes on
+// pick, same as before this existed - there's nowhere for an arbitrary
+// label to roll up into.
+function TimeframePicker({ value, trend, options, onPick, onPickTrend, onClose }: {
   value: string | undefined;
+  trend: MtfTrend | undefined;
   options: string[];
   onPick: (tf: string) => void;
+  onPickTrend: (trend: MtfTrend) => void;
   onClose: () => void;
 }) {
   const [custom, setCustom] = useState('');
@@ -133,7 +153,7 @@ function TimeframePicker({ value, options, onPick, onClose }: {
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-1 px-1">
+      <div className="flex items-center gap-1 px-1 pb-2">
         <input
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
@@ -149,6 +169,26 @@ function TimeframePicker({ value, options, onPick, onClose }: {
           <Plus className="w-3 h-3" />
         </button>
       </div>
+      {isMtfTimeframe(value) && (
+        <div className="border-t border-border pt-2 px-1">
+          <p className="text-[11px] font-medium text-muted-foreground pb-1.5">{value} bias?</p>
+          <div className="flex gap-1">
+            {TREND_OPTIONS.map(({ value: tv, label, Icon, activeCls }) => (
+              <button
+                key={tv}
+                onClick={() => onPickTrend(tv)}
+                title={label}
+                aria-label={label}
+                className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-xs border transition-colors ${
+                  trend === tv ? activeCls : 'border-border hover:bg-muted text-muted-foreground'
+                }`}
+              >
+                <Icon className="w-3 h-3" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -499,6 +539,16 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
   function setImageTimeframe(i: number, tf: string) {
     setBlock(i, { ...(normalized[i] as { type: 'image'; url: string; timeframe?: string; comment?: string }), timeframe: tf });
     onAddTimeframe?.(tf);
+    // Only auto-close for a non-canonical TF (unchanged behavior). A
+    // canonical one (Monthly/Weekly/Daily/4H/1H/15M) leaves the popover
+    // open so the trend row TimeframePicker now shows underneath it is
+    // reachable in the same motion - "pick TF, pick trend" in one popover
+    // visit rather than needing to reopen it a second time.
+    if (!isMtfTimeframe(tf)) setOpenTfFor(null);
+  }
+
+  function setImageTrend(i: number, trend: MtfTrend) {
+    setBlock(i, { ...(normalized[i] as { type: 'image'; url: string; timeframe?: string; trend?: MtfTrend; comment?: string }), trend });
     setOpenTfFor(null);
   }
 
@@ -597,7 +647,10 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
                   the zoom/delete buttons above) since it's information, not
                   just an action, and blank/unlabelled is itself worth seeing
                   at a glance. Click to open/change; auto-opens right after
-                  this image is first pasted (see openTfFor). */}
+                  this image is first pasted (see openTfFor). Once a bias is
+                  tagged (canonical TFs only), its icon rides along in the
+                  same badge rather than a second one - both are "what is
+                  this chart" at a glance. */}
               <button
                 onClick={() => setOpenTfFor(openTfFor === i ? null : i)}
                 className={`absolute top-1.5 left-1.5 h-7 px-2 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
@@ -608,12 +661,19 @@ export default function NotesEditor({ blocks, onChange, timeframes = [], onAddTi
               >
                 <Clock3 className="w-3 h-3" />
                 {block.timeframe ?? 'Set TF'}
+                {block.trend && (() => {
+                  const opt = TREND_OPTIONS.find(o => o.value === block.trend)!;
+                  const glyphColor = block.trend === 'bullish' ? 'text-green-400' : block.trend === 'bearish' ? 'text-red-400' : 'text-gray-300';
+                  return <opt.Icon className={`w-3 h-3 ${glyphColor}`} />;
+                })()}
               </button>
               {openTfFor === i && (
                 <TimeframePicker
                   value={block.timeframe}
+                  trend={block.trend}
                   options={tfOptions}
                   onPick={(tf) => setImageTimeframe(i, tf)}
+                  onPickTrend={(trend) => setImageTrend(i, trend)}
                   onClose={() => setOpenTfFor(null)}
                 />
               )}
