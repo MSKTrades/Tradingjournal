@@ -95,7 +95,18 @@ export default function TradingViewChart({ candles, visibleCount, height = 480, 
       .then(() => {
         if (cancelled || !containerRef.current) return;
         const isDark = document.documentElement.classList.contains('dark');
-        const TradingViewGlobal = (window as unknown as { TradingView: { widget: new (opts: Record<string, unknown>) => { remove?: () => void; onChartReady: (cb: () => void) => void } } }).TradingView;
+        const TradingViewGlobal = (window as unknown as {
+          TradingView: {
+            widget: new (opts: Record<string, unknown>) => {
+              remove?: () => void;
+              onChartReady: (cb: () => void) => void;
+              activeChart: () => {
+                setVisibleRange: (range: { from: number; to: number }, options?: Record<string, unknown>) => Promise<void>;
+                onDataLoaded: () => { subscribe: (obj: unknown, cb: () => void, singleshot?: boolean) => void };
+              };
+            };
+          };
+        }).TradingView;
         const widget = new TradingViewGlobal.widget({
           symbol: 'REPLAY',
           interval: tfToResolution(baseTimeframe ?? '1m'),
@@ -116,6 +127,43 @@ export default function TradingViewChart({ candles, visibleCount, height = 480, 
           // through when this component mounted) - without this, the chart
           // would sit empty until the next visibleCount change.
           notifyRevealRef.current?.();
+
+          // The widget's own default zoom assumes a live symbol trading up
+          // to real wall-clock "now" (same reasoning as getBars'
+          // firstDataRequest handling in tvDatafeed.ts) - left uncorrected,
+          // a historical replay's actual bars end up squeezed into a few
+          // pixels at the very edge of a much wider default view, which
+          // reads as "only one candle" even though the data is all there
+          // (ReplayChart.tsx avoids this the same way, via
+          // chart.timeScale().fitContent() after every setData()).
+          //
+          // Calling setVisibleRange() here, synchronously inside
+          // onChartReady, turned out not to be enough: onChartReady fires
+          // once the chart UI itself exists, but the datafeed's actual
+          // getBars() call (the one that resolves periodParams.firstDataRequest
+          // and hands back real bars) happens asynchronously afterwards -
+          // and when that data finishes loading, the widget re-applies its
+          // own default auto-range, silently clobbering whatever range we'd
+          // just set. onDataLoaded() is the event that fires *after* that
+          // happens, so setting the range there (once, via the `true`
+          // singleshot flag - this only needs to happen for the initial
+          // load, not every subsequent live tick) is what actually sticks.
+          const fitToRevealed = () => {
+            const c = candlesRef.current;
+            const vc = Math.max(0, Math.min(visibleCountRef.current, c.length));
+            if (vc > 0) {
+              const from = c[Math.max(0, vc - 200)].time;
+              const to = c[vc - 1].time;
+              widget.activeChart().setVisibleRange({ from, to }, { percentRightMargin: 20 }).catch(() => {});
+            }
+          };
+          widget.activeChart().onDataLoaded().subscribe(null, fitToRevealed, true);
+          // Also fire once immediately, in case onDataLoaded already fired
+          // before this subscription was registered (e.g. a very fast
+          // synchronous datafeed) - redundant with the subscription above in
+          // the normal case, harmless if both end up running.
+          fitToRevealed();
+
           onReady?.();
         });
       })

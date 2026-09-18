@@ -32,6 +32,22 @@ export function tfToResolution(tf: string): string {
   return TF_TO_RESOLUTION[tf] ?? tf;
 }
 
+// The one unit mismatch baked into the Advanced Charts datafeed API itself:
+// `PeriodParams.from`/`.to` (what getBars is asked for) and
+// `SetVisibleTimeRange.from`/`.to` (setVisibleRange) are both plain Unix
+// *seconds* - same as every timestamp elsewhere in this codebase (Candle.time,
+// ReplayChart.tsx, resample.ts). But the `Bar.time` a datafeed hands *back*
+// is documented to be Unix *milliseconds* - the one place this datafeed
+// talks to the widget where the unit changes. Getting this wrong doesn't
+// error or throw; it just places every bar ~1000x closer together than
+// intended, which at real dataset scale (candles a minute apart) collapses
+// hundreds of bars into a visually indistinguishable blob a few pixels wide
+// - exactly the "just one candle" symptom this was built to fix. Convert
+// only at this one boundary; everything else in this file stays in seconds.
+function toBar(c: { time: number; open: number; high: number; low: number; close: number }): Bar {
+  return { time: c.time * 1000, open: c.open, high: c.high, low: c.low, close: c.close };
+}
+
 // Falls back to parsing the resolution string directly (rather than only
 // trusting the lookup table above) because the widget can in principle ask
 // for a resolution PipEcho didn't explicitly advertise in
@@ -136,7 +152,11 @@ export function createReplayDatafeed(opts: {
         const { candles, visibleCount } = visibleSlice();
         const { candles: resampled } = resampleIncremental(cache, candles, visibleCount, toTfSeconds);
 
-        let bars: Bar[];
+        // periodParams.from/to are Unix seconds (same as candle.time) -
+        // filtering happens in that native unit; only the Bar objects handed
+        // back to the widget via toBar() below get converted to the
+        // milliseconds the widget itself expects (see toBar's comment).
+        let sliced: typeof resampled;
         if (periodParams.firstDataRequest) {
           // The widget's very first request for a symbol/resolution doesn't
           // know what "the latest" data looks like yet - per the datafeed
@@ -150,10 +170,11 @@ export function createReplayDatafeed(opts: {
           // that's stopped somewhere in the past, and the chart would load
           // empty until the first live subscribeBars push arrived.
           const count = periodParams.countBack ?? 300;
-          bars = resampled.slice(Math.max(0, resampled.length - count));
+          sliced = resampled.slice(Math.max(0, resampled.length - count));
         } else {
-          bars = resampled.filter(c => c.time >= periodParams.from && c.time <= periodParams.to);
+          sliced = resampled.filter(c => c.time >= periodParams.from && c.time <= periodParams.to);
         }
+        const bars = sliced.map(toBar);
         onResult(bars, { noData: bars.length === 0 });
       } catch (e) {
         onError(e instanceof Error ? e.message : String(e));
@@ -196,7 +217,7 @@ export function createReplayDatafeed(opts: {
       return;
     }
     const last = resampled[resampled.length - 1];
-    if (last) activeSub.onTick({ time: last.time, open: last.open, high: last.high, low: last.low, close: last.close });
+    if (last) activeSub.onTick(toBar(last));
   }
 
   return { datafeed, notifyReveal };
