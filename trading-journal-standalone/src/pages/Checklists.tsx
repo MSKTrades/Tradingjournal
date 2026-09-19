@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Button } from '../lib/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../lib/ui/card';
-import { Input } from '../lib/ui/form';
-import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
+import { Input, Select } from '../lib/ui/form';
+import { Plus, Pencil, Trash2, X, Check, Clock3 } from 'lucide-react';
 import { api, useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { Checklist } from './data/types';
+import { Checklist, MTF_TIMEFRAMES } from './data/types';
 import DailyRoutine from './ui/DailyRoutine';
 
 export default function Checklists() {
@@ -24,8 +24,10 @@ export default function Checklists() {
   const [renameValue, setRenameValue] = useState('');
   const [addingItemFor, setAddingItemFor] = useState<number | null>(null);
   const [newItemText, setNewItemText] = useState('');
+  const [newItemTf, setNewItemTf] = useState('');
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [editItemValue, setEditItemValue] = useState('');
+  const [editItemTf, setEditItemTf] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
 
   async function handleAddChecklist() {
@@ -89,8 +91,9 @@ export default function Checklists() {
     if (!text) return;
     setBusy(`add-item-${checklistId}`);
     try {
-      await api.post('/checklist', { resource: 'item', checklist_id: checklistId, text });
+      await api.post('/checklist', { resource: 'item', checklist_id: checklistId, text, mtf_timeframe: newItemTf || null });
       setNewItemText('');
+      setNewItemTf('');
       setAddingItemFor(null);
       refetch();
     } finally {
@@ -113,7 +116,7 @@ export default function Checklists() {
     if (!text) return;
     setBusy(`edit-item-${id}`);
     try {
-      await api.put(`/checklist?resource=item&id=${id}`, { text });
+      await api.put(`/checklist?resource=item&id=${id}`, { text, mtf_timeframe: editItemTf || null });
       setEditingItemId(null);
       refetch();
     } finally {
@@ -243,34 +246,49 @@ export default function Checklists() {
 
               {cl.items.map((item, idx) => (
                 editingItemId === item.id ? (
-                  <div key={item.id} className="flex items-center gap-1.5">
-                    <span className="font-semibold text-muted-foreground text-sm shrink-0">Rule {idx + 1}:</span>
-                    <Input
-                      autoFocus
-                      value={editItemValue}
-                      className="h-7 text-sm flex-1"
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditItemValue(e.target.value)}
-                      onKeyDown={(e: React.KeyboardEvent) => {
-                        if (e.key === 'Enter') handleEditItem(item.id);
-                        if (e.key === 'Escape') setEditingItemId(null);
-                      }}
-                    />
-                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleEditItem(item.id)} disabled={busy === `edit-item-${item.id}`}>
-                      <Check className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setEditingItemId(null)}>
-                      <X className="w-3.5 h-3.5" />
-                    </Button>
+                  <div key={item.id} className="flex flex-col gap-1.5 border border-dashed border-border rounded-md p-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-muted-foreground text-sm shrink-0">Rule {idx + 1}:</span>
+                      <Input
+                        autoFocus
+                        value={editItemValue}
+                        className="h-7 text-sm flex-1"
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditItemValue(e.target.value)}
+                        onKeyDown={(e: React.KeyboardEvent) => {
+                          if (e.key === 'Enter') handleEditItem(item.id);
+                          if (e.key === 'Escape') setEditingItemId(null);
+                        }}
+                      />
+                      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleEditItem(item.id)} disabled={busy === `edit-item-${item.id}`}>
+                        <Check className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setEditingItemId(null)}>
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-1.5 pl-[calc(2.5rem)]">
+                      <Clock3 className="w-3 h-3 text-muted-foreground shrink-0" />
+                      <span className="text-[11px] text-muted-foreground shrink-0">Link to timeframe (optional):</span>
+                      <Select value={editItemTf} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEditItemTf(e.target.value)} className="h-6 text-xs w-28">
+                        <option value="">None</option>
+                        {MTF_TIMEFRAMES.map(tf => <option key={tf} value={tf}>{tf}</option>)}
+                      </Select>
+                    </div>
                   </div>
                 ) : (
                   <div key={item.id} className="flex items-center gap-2 group">
                     <span className="text-sm flex-1">
                       <span className="font-semibold text-muted-foreground mr-1.5">Rule {idx + 1}:</span>
                       {item.text}
+                      {item.mtf_timeframe && (
+                        <span className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary align-middle">
+                          <Clock3 className="w-2.5 h-2.5" /> {item.mtf_timeframe}
+                        </span>
+                      )}
                     </span>
                     <button
                       type="button"
-                      onClick={() => { setEditingItemId(item.id); setEditItemValue(item.text); }}
+                      onClick={() => { setEditingItemId(item.id); setEditItemValue(item.text); setEditItemTf(item.mtf_timeframe ?? ''); }}
                       className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Pencil className="w-3.5 h-3.5" />
@@ -297,9 +315,17 @@ export default function Checklists() {
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewItemText(e.target.value)}
                     onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && handleAddItem(cl.id)}
                   />
+                  <div className="flex items-center gap-1.5">
+                    <Clock3 className="w-3 h-3 text-muted-foreground shrink-0" />
+                    <span className="text-[11px] text-muted-foreground shrink-0">Link to timeframe (optional):</span>
+                    <Select value={newItemTf} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewItemTf(e.target.value)} className="h-6 text-xs w-28">
+                      <option value="">None</option>
+                      {MTF_TIMEFRAMES.map(tf => <option key={tf} value={tf}>{tf}</option>)}
+                    </Select>
+                  </div>
                   <div className="flex gap-2">
                     <Button size="sm" onClick={() => handleAddItem(cl.id)} disabled={!newItemText.trim() || busy === `add-item-${cl.id}`}>Add</Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setAddingItemFor(null); setNewItemText(''); }}>
+                    <Button size="sm" variant="ghost" onClick={() => { setAddingItemFor(null); setNewItemText(''); setNewItemTf(''); }}>
                       <X className="w-3.5 h-3.5" />
                     </Button>
                   </div>
@@ -307,7 +333,7 @@ export default function Checklists() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => { setAddingItemFor(cl.id); setNewItemText(''); }}
+                  onClick={() => { setAddingItemFor(cl.id); setNewItemText(''); setNewItemTf(''); }}
                   className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mt-1"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add a rule

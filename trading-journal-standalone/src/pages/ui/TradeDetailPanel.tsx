@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3, Pencil, Check, Trash2, Star, Smile, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, ListChecks, Newspaper, Clock3, Pencil, Check, Trash2, Star, Smile, TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Checkbox, Input, Label, Select, Switch } from '../../lib/ui/form';
 import { Trade, CustomColumn, Checklist, NewsEvent, TagGroup, Timeframe, Instrument, SESSIONS, ENTRY_TYPES, fmtMoney, MTF_TIMEFRAMES, getTradeMtfTrends } from '../data/types';
@@ -434,6 +434,18 @@ export default function TradeDetailPanel({
     return { followed, total: activeChecklist.items.length };
   }, [checklistEnabled, form.checklist_results, activeChecklist]);
 
+  // Rules linked to a timeframe (ChecklistItem.mtf_timeframe - see
+  // Checklists.tsx) that AREN'T ticked yet on this trade. Surfaced as a
+  // banner right at the top of the panel (not just left as an unticked box
+  // down in the Checklist section) since a rule like "Confirmed 4H
+  // structure" is exactly the kind of thing that's easy to silently skip in
+  // the moment - the point of linking it to a TF at all is to make
+  // forgetting it loud.
+  const missingLinkedRules = useMemo(() => {
+    if (!checklistEnabled || !activeChecklist) return [];
+    return activeChecklist.items.filter(i => i.active && i.mtf_timeframe && form.checklist_results[String(i.id)] !== true);
+  }, [checklistEnabled, activeChecklist, form.checklist_results]);
+
   // Multi-Timeframe Bias - purely derived from whichever pasted screenshots
   // (below, in Notes) have been tagged with both a canonical timeframe and a
   // trend (see getTradeMtfTrends/MTF_TIMEFRAMES in types.ts). No separate
@@ -736,6 +748,25 @@ export default function TradeDetailPanel({
             <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save Trade'}</Button>
           </div>
         </div>
+
+        {/* Missing-linked-rule warning - only for rules you explicitly tied
+            to a timeframe (Checklists.tsx's optional "Link to timeframe"),
+            and only while unticked. Sits above everything else in the body
+            so it's the first thing you see reopening a trade you graded in
+            a hurry, not something you'd only notice by scrolling down to
+            the Checklist section. */}
+        {missingLinkedRules.length > 0 && (
+          <div className="shrink-0 px-5 py-2.5 border-b border-amber-500/30 bg-amber-500/10 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex flex-col gap-0.5">
+              {missingLinkedRules.map(item => (
+                <p key={item.id} className="text-xs text-amber-800 dark:text-amber-300">
+                  <span className="font-semibold">Missing rule on {item.mtf_timeframe}:</span> {item.text}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Body: fields (left) · notes + screenshots (right). The left
             column used to stay a fixed 300px even after the drawer itself
@@ -1090,6 +1121,16 @@ export default function TradeDetailPanel({
                       <span className="text-xs flex-1">
                         <span className="font-semibold text-muted-foreground mr-1">Rule {idx + 1}:</span>
                         {item.text}
+                        {item.mtf_timeframe && (
+                          <span className={cn(
+                            'ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium align-middle',
+                            form.checklist_results[String(item.id)] === true
+                              ? 'bg-primary/10 text-primary'
+                              : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                          )}>
+                            <Clock3 className="w-2.5 h-2.5" /> {item.mtf_timeframe}
+                          </span>
+                        )}
                       </span>
                     </div>
                   ))}

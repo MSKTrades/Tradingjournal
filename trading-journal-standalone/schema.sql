@@ -219,12 +219,24 @@ ALTER TABLE checklists ADD COLUMN IF NOT EXISTS account_ids JSONB NOT NULL DEFAU
 -- (trades.checklist_enabled) — not every trade needs one, so it's never
 -- mandatory.
 CREATE TABLE IF NOT EXISTS checklist_items (
-  id          SERIAL PRIMARY KEY,
-  text        TEXT NOT NULL,
-  sort_order  INTEGER NOT NULL DEFAULT 0,
-  active      BOOLEAN NOT NULL DEFAULT true,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  id             SERIAL PRIMARY KEY,
+  text           TEXT NOT NULL,
+  sort_order     INTEGER NOT NULL DEFAULT 0,
+  active         BOOLEAN NOT NULL DEFAULT true,
+  -- Optional link to one of the six top-down-bias timeframes (Monthly/
+  -- Weekly/Daily/4H/1H/15M - see MTF_TIMEFRAMES in types.ts). NULL for most
+  -- rules. When set, TradeDetailPanel warns at the top of the trade panel
+  -- if this rule isn't ticked on that trade ("Missing rule on 4H").
+  mtf_timeframe  TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Self-heal for a database where checklist_items already existed before
+-- mtf_timeframe was added here - same reasoning as checklist_id's own
+-- ALTER right below (CREATE TABLE IF NOT EXISTS is a no-op against an
+-- existing table). Also mirrored as a runtime ALTER in api/checklist.ts so
+-- it lands on production without needing this file re-run by hand - see
+-- that file's ensureChecklistSchema for why that extra step matters.
+ALTER TABLE checklist_items ADD COLUMN IF NOT EXISTS mtf_timeframe TEXT;
 
 -- Idempotent migration: checklist_items used to be one flat, ungrouped
 -- list (no checklist_id — from an earlier version of this feature that

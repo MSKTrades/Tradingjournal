@@ -397,12 +397,23 @@ export const ENTRY_TYPES = ['Market', 'Limit', 'Stop'];
 
 // A user-defined trade rule ("Did I wait for the CISD?", "Risk <= 1%?"),
 // belonging to one Checklist.
+//
+// mtf_timeframe optionally links this rule to one of the six top-down bias
+// timeframes (see MTF_TIMEFRAMES below) - entirely optional, most rules
+// won't have one. When set, TradeDetailPanel checks whether this rule is
+// actually ticked (form.checklist_results) on the trade being edited and,
+// if it isn't, surfaces a "Missing rule on 4H" warning at the top of the
+// panel - the point being that a rule like "Confirmed 4H structure before
+// entry" is easy to silently skip in the moment, and this makes forgetting
+// it loud instead of just another unticked checkbox buried in the
+// Checklist section.
 export type ChecklistItem = {
   id: number;
   checklist_id: number;
   text: string;
   sort_order: number;
   active: boolean;
+  mtf_timeframe: MtfTimeframe | null;
 };
 
 // A named, reusable rule set (e.g. "London Reversal", "Breakout Setup").

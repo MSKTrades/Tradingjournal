@@ -2,6 +2,29 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { db, withApi } from './_db.js';
 import { requireUserId, ownsChecklist } from './_auth.js';
 
+// The six top-down-bias timeframes a rule can optionally be linked to (see
+// MTF_TIMEFRAMES in src/pages/data/types.ts - duplicated here rather than
+// imported, same "this api file stays self-contained" reasoning every other
+// serverless function in this project already follows). Anything outside
+// this list is rejected rather than silently stored, since it's the join
+// key TradeDetailPanel's "Missing rule on X" warning matches against a
+// trade's tagged screenshots.
+const MTF_TIMEFRAMES = ['Monthly', 'Weekly', 'Daily', '4H', '1H', '15M'];
+
+// checklist_items existed before mtf_timeframe was added to its definition
+// in schema.sql - CREATE TABLE IF NOT EXISTS is a no-op against a database
+// where the table already existed, so without this the column never
+// actually lands on production (same class of bug as the backtest_trades
+// user_id gap documented in api/backtest.ts - confirmed there via runtime
+// error logs, so this ships the same self-heal proactively instead of
+// waiting to hit it the same way).
+let _checklistSchemaEnsured = false;
+async function ensureChecklistSchema(sql: ReturnType<typeof db>) {
+  if (_checklistSchemaEnsured) return;
+  await sql.unsafe('ALTER TABLE checklist_items ADD COLUMN IF NOT EXISTS mtf_timeframe TEXT');
+  _checklistSchemaEnsured = true;
+}
+
 // Handles checklists (named rule sets, e.g. "London Reversal"),
 // checklist_items (the individual rules inside one), AND Daily Routine
 // notes (a free-text per-date note, unrelated to the rule-set checklists
@@ -13,6 +36,7 @@ import { requireUserId, ownsChecklist } from './_auth.js';
 // the more common read.
 export default withApi(async (req: VercelRequest, res: VercelResponse) => {
   const sql = db();
+  await ensureChecklistSchema(sql);
   const userId = await requireUserId(req, res, sql);
   if (!userId) return;
 
@@ -118,11 +142,13 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       const checklistId = Number(p.checklist_id);
       if (!checklistId || isNaN(checklistId)) { res.status(400).json({ error: 'checklist_id is required' }); return; }
       if (!(await ownsChecklist(sql, checklistId, userId))) { res.status(404).json({ error: 'Checklist not found' }); return; }
+      const mtfTimeframe = p.mtf_timeframe ? String(p.mtf_timeframe).trim() : null;
+      if (mtfTimeframe && !MTF_TIMEFRAMES.includes(mtfTimeframe)) { res.status(400).json({ error: `mtf_timeframe must be one of ${MTF_TIMEFRAMES.join(', ')}` }); return; }
       const maxOrderRows = await sql.unsafe('SELECT COALESCE(MAX(sort_order), 0) as max FROM checklist_items WHERE checklist_id = $1', [checklistId]);
       const nextOrder = (maxOrderRows[0]?.max ?? 0) + 1;
       const rows = await sql.unsafe(
-        `INSERT INTO checklist_items (checklist_id, text, sort_order) VALUES ($1, $2, $3) RETURNING *`,
-        [checklistId, p.text, nextOrder]
+        `INSERT INTO checklist_items (checklist_id, text, sort_order, mtf_timeframe) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [checklistId, p.text, nextOrder, mtfTimeframe]
       );
       res.status(200).json(rows[0]);
       return;
@@ -159,12 +185,21 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
     if (resource === 'item') {
       const text = String(req.body?.text ?? '').trim();
       if (!text) { res.status(400).json({ error: 'text is required' }); return; }
+      // Unlike checklist rename/account_ids above, this isn't a partial
+      // update - the item editor always sends both fields together (its TF
+      // picker sits right next to the text field, see Checklists.tsx), so
+      // mtf_timeframe is always set explicitly here, including to null to
+      // unlink it. That avoids the ambiguity a COALESCE-style "only touch it
+      // if present" update would have between "field omitted" and "field
+      // explicitly cleared".
+      const mtfTimeframe = req.body?.mtf_timeframe ? String(req.body.mtf_timeframe).trim() : null;
+      if (mtfTimeframe && !MTF_TIMEFRAMES.includes(mtfTimeframe)) { res.status(400).json({ error: `mtf_timeframe must be one of ${MTF_TIMEFRAMES.join(', ')}` }); return; }
       const rows = await sql.unsafe(
-        `UPDATE checklist_items ci SET text = $1
+        `UPDATE checklist_items ci SET text = $1, mtf_timeframe = $2
          FROM checklists c
-         WHERE ci.id = $2 AND c.id = ci.checklist_id AND c.user_id = $3
+         WHERE ci.id = $3 AND c.id = ci.checklist_id AND c.user_id = $4
          RETURNING ci.id`,
-        [text, id, userId]
+        [text, mtfTimeframe, id, userId]
       );
       if (!rows[0]) { res.status(404).json({ error: 'Checklist item not found' }); return; }
       res.status(200).json({ id });

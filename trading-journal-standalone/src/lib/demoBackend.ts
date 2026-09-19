@@ -175,10 +175,13 @@ function buildSeed(): Store {
     active: true,
     account_ids: [],
     items: [
-      { id: nextId(), checklist_id: checklistId, text: 'Confirmed BOS on the 15m before entry', sort_order: 0, active: true },
-      { id: nextId(), checklist_id: checklistId, text: 'Asia session liquidity swept', sort_order: 1, active: true },
-      { id: nextId(), checklist_id: checklistId, text: 'Risking 1% or less', sort_order: 2, active: true },
-      { id: nextId(), checklist_id: checklistId, text: 'Checked the economic calendar for red-folder news', sort_order: 3, active: true },
+      // The 15m rule is linked to a timeframe on purpose - demonstrates the
+      // "Missing rule on 15M" warning in TradeDetailPanel for anyone poking
+      // around the demo without having set this up themselves.
+      { id: nextId(), checklist_id: checklistId, text: 'Confirmed BOS on the 15m before entry', sort_order: 0, active: true, mtf_timeframe: '15M' },
+      { id: nextId(), checklist_id: checklistId, text: 'Asia session liquidity swept', sort_order: 1, active: true, mtf_timeframe: null },
+      { id: nextId(), checklist_id: checklistId, text: 'Risking 1% or less', sort_order: 2, active: true, mtf_timeframe: null },
+      { id: nextId(), checklist_id: checklistId, text: 'Checked the economic calendar for red-folder news', sort_order: 3, active: true, mtf_timeframe: null },
     ],
   };
   account.checklist_id = checklistId;
@@ -1094,7 +1097,7 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
       checkAndConsumeCap(store, 'checklistItems');
       const cl = store.checklists.find(c => c.id === b.checklist_id);
       if (!cl) throw new Error('Checklist not found');
-      const item: ChecklistItem = { id: nextId(), checklist_id: b.checklist_id, text: b.text, sort_order: cl.items.length, active: true };
+      const item: ChecklistItem = { id: nextId(), checklist_id: b.checklist_id, text: b.text, sort_order: cl.items.length, active: true, mtf_timeframe: b.mtf_timeframe ?? null };
       cl.items.push(item);
       return item;
     }
@@ -1114,7 +1117,7 @@ export async function handleDemoRequest(method: string, url: string, body?: unkn
       const id = Number(params.get('id'));
       for (const cl of store.checklists) {
         const item = cl.items.find(i => i.id === id);
-        if (item) { item.text = b.text; return item; }
+        if (item) { item.text = b.text; item.mtf_timeframe = b.mtf_timeframe ?? null; return item; }
       }
       return { ok: true };
     }
