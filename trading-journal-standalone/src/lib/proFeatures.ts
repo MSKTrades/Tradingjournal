@@ -106,6 +106,6 @@ export const PRO_FEATURES: Record<ProFeatureKey, { message: string }> = {
   // for this reason, rather than going through ProLocked/hasProAccess like
   // every other badge in this file.
   broker_connect: {
-    message: `Connect Broker (auto-sync from a real MT5 account) is a Pro feature, capped at 2 connected accounts per subscriber - and unlike every other Pro feature, it stays Pro-only even during the free launch promo, since it costs us real money per connection.`,
+    message: `Connect Broker (auto-sync from a real MT5 account) is a Pro feature, capped at 2 connected accounts per subscriber - and unlike every other Pro feature, it stays Pro-only even during the free launch promo.`,
   },
 };

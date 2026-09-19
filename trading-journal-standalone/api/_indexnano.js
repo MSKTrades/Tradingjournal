@@ -22,31 +22,27 @@
 // PipEcho's own database - only IndexNano's own connection_id is stored
 // going forward (see the mt_connections table in schema.sql). Every
 // function below other than connectAccount takes that id, never a password.
+// Use a "Read Only" scoped API key when generating INDEXNANO_API_KEY (their
+// dashboard's API Access section offers Read Only vs Trade and Read) - this
+// integration never places, modifies, or closes a trade, only reads
+// account summary and closed-order history, so a read-only key means a
+// leaked key still can't touch anyone's actual positions.
 //
-// IMPORTANT - field names in fetchClosedOrders'/toTradeRow's mapping are a
-// best-effort reconstruction from IndexNano's docs (which describe the
-// response in prose, not a literal JSON sample) rather than a verified real
-// response. mapClosedOrder() below checks several plausible key-name
-// variants (their one confirmed example, the `sort=CloseTime` parameter in
-// the docs, points at PascalCase field names) and falls back gracefully,
-// but this WILL need a once-over against a real response the first time a
-// real account is connected and synced - see that function's own comment.
+// Field names and endpoint shapes below are taken directly from IndexNano's
+// own API reference (indexnano_api.txt, dated their docs' example year) -
+// no more guessing casing, this has been verified against a real doc dump.
 
-function getConfig() {
+const BASE_URL = 'https://mt-api.indexnano.com';
+
+function getApiKey() {
   const apiKey = process.env.INDEXNANO_API_KEY;
-  const baseUrl = process.env.INDEXNANO_BASE_URL;
   if (!apiKey) throw new Error('INDEXNANO_API_KEY environment variable is not set');
-  // IndexNano's own docs note the base URL is per-account/dynamic ("our
-  // infrastructure routes you to the most optimal server"), handed out on
-  // their dashboard after signup rather than a single fixed global host
-  // like MetaApi's - so unlike MetaApi there's no hardcoded default here.
-  if (!baseUrl) throw new Error('INDEXNANO_BASE_URL environment variable is not set (find yours at app.indexnano.com)');
-  return { apiKey, baseUrl: baseUrl.replace(/\/+$/, '') };
+  return apiKey;
 }
 
 async function indexNanoFetch(path, opts = {}) {
-  const { apiKey, baseUrl } = getConfig();
-  const res = await fetch(`${baseUrl}${path}`, {
+  const apiKey = getApiKey();
+  const res = await fetch(`${BASE_URL}${path}`, {
     ...opts,
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...(opts.headers || {}) },
   });
@@ -54,6 +50,11 @@ async function indexNanoFetch(path, opts = {}) {
   let body = null;
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
   if (!res.ok) {
+    // 402 specifically means IndexNano's own prepaid credit balance ran
+    // dry - that's PipEcho's billing problem with its vendor, not something
+    // the end user did wrong, so callers should catch this status and show
+    // a generic "try again later" instead of surfacing "insufficient
+    // credits" to a trader. See handleMtSync in api/accounts.ts.
     const message = (body && (body.message || body.error)) || `IndexNano request failed (${res.status})`;
     const err = new Error(message);
     err.status = res.status;
@@ -89,12 +90,26 @@ export async function getAccountSummary(connectionId) {
   return await indexNanoFetch(`/v1/AccountSummary?id=${encodeURIComponent(connectionId)}`, { method: 'GET' });
 }
 
-/** Resumes a paused connection (or confirms an already-active one) before a
- * sync - IndexNano bills per connected hour, so every sync explicitly
- * resumes right before pulling data and pauseAccount() below explicitly
- * re-pauses right after, rather than leaving the connection deployed
- * between syncs. See api/accounts.ts's handleMtSync. */
+/** Resumes a paused connection before a sync - IndexNano bills per connected
+ * hour, so every sync explicitly resumes right before pulling data and
+ * pauseAccount() below explicitly re-pauses right after, rather than
+ * leaving the connection deployed between syncs. Per the verified docs,
+ * resume/pause are the SAME endpoint (POST /v1/deployment?id=), just with
+ * {"status": true} vs {"status": false} in the body - not two different
+ * endpoints as originally guessed. See api/accounts.ts's handleMtSync. */
 export async function resumeAccount(connectionId) {
+  return await indexNanoFetch(`/v1/deployment?id=${encodeURIComponent(connectionId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ status: true }),
+  });
+}
+
+/** Checks (and reconnects, if needed) a connection that may have dropped -
+ * a distinct purpose from resumeAccount/pauseAccount's deliberate metering
+ * on/off above. Not currently called anywhere; kept available in case
+ * handleMtStatus ever wants to surface a "still reachable" signal beyond
+ * what AccountSummary implies. */
+export async function checkConnection(connectionId) {
   return await indexNanoFetch(`/v1/CheckConnect?id=${encodeURIComponent(connectionId)}`, { method: 'GET' });
 }
 
@@ -105,7 +120,10 @@ export async function resumeAccount(connectionId) {
  * for a connection we've already unlinked locally). Best-effort by design -
  * see both call sites in api/accounts.ts. */
 export async function pauseAccount(connectionId) {
-  return await indexNanoFetch(`/v1/deployment?id=${encodeURIComponent(connectionId)}`, { method: 'POST' });
+  return await indexNanoFetch(`/v1/deployment?id=${encodeURIComponent(connectionId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ status: false }),
+  });
 }
 
 /**
@@ -140,8 +158,10 @@ export async function fetchClosedOrders(connectionId, startTime, endTime) {
   return [];
 }
 
-/** Reads the first present key from `obj` out of a list of candidate names -
- * see the field-name uncertainty note at the top of this file. */
+/** Reads the first present key from `obj` out of a list of candidate names,
+ * preferring the confirmed real casing first (see this file's header
+ * comment) with a couple of defensive fallbacks after it in case IndexNano
+ * ever changes casing on us. */
 function pick(obj, ...keys) {
   for (const k of keys) {
     if (obj[k] !== undefined && obj[k] !== null) return obj[k];
@@ -152,32 +172,36 @@ function pick(obj, ...keys) {
 /**
  * Normalizes one closed order from fetchClosedOrders into the same shape
  * api/_metaapi.js's groupClosedPositions() used to produce, so
- * toTradeRow() below can stay unchanged. See this file's header comment -
- * the exact key names here are a best-effort guess (PascalCase, inferred
- * from the `sort=CloseTime` example in IndexNano's own docs) and should be
- * double-checked against a real response on the first live sync; nothing
- * here throws on a missing field; it just comes through as null so a sync
- * degrades gracefully instead of crashing.
+ * toTradeRow() below can stay unchanged. Field names are the confirmed
+ * camelCase ones from IndexNano's own "Get Closed Orders by Date
+ * (Pagination)" example in indexnano_api.txt: ticket, symbol, orderType
+ * ("Buy"/"Sell"/"BuyLimit"/"SellLimit"/"BuyStop"/"SellStop"), lots (not
+ * "volume"), openPrice, openTime, closePrice, closeTime, profit,
+ * commission, swap. PascalCase fallbacks are kept defensively in case a
+ * future IndexNano API version changes casing, but nothing here should
+ * currently be falling through to them. Nothing throws on a missing field;
+ * it just comes through as null so a sync degrades gracefully instead of
+ * crashing.
  */
 export function mapClosedOrder(o) {
-  const direction = String(pick(o, 'Type', 'type', 'Direction', 'direction') || '').toLowerCase();
-  const openTime = pick(o, 'OpenTime', 'openTime', 'open_time');
-  const closeTime = pick(o, 'CloseTime', 'closeTime', 'close_time');
+  const orderType = String(pick(o, 'orderType', 'OrderType', 'type', 'Type') || '').toLowerCase();
+  const openTime = pick(o, 'openTime', 'OpenTime', 'open_time');
+  const closeTime = pick(o, 'closeTime', 'CloseTime', 'close_time');
   return {
-    positionId: String(pick(o, 'Ticket', 'ticket', 'Id', 'id', 'OrderId', 'order_id') ?? ''),
-    symbol: pick(o, 'Symbol', 'symbol'),
-    direction: direction.includes('sell') || direction.includes('short') ? 'Short' : 'Long',
-    entryPrice: Number(pick(o, 'OpenPrice', 'openPrice', 'open_price')) || 0,
-    exitPrice: Number(pick(o, 'ClosePrice', 'closePrice', 'close_price')) || 0,
+    positionId: String(pick(o, 'ticket', 'Ticket', 'id', 'Id', 'order_id') ?? ''),
+    symbol: pick(o, 'symbol', 'Symbol'),
+    direction: orderType.includes('sell') ? 'Short' : 'Long',
+    entryPrice: Number(pick(o, 'openPrice', 'OpenPrice', 'open_price')) || 0,
+    exitPrice: Number(pick(o, 'closePrice', 'ClosePrice', 'close_price')) || 0,
     openBrokerTime: openTime,
     closeBrokerTime: closeTime,
     openTimeIso: openTime,
     closeTimeIso: closeTime,
-    volume: Number(pick(o, 'Volume', 'volume', 'Lots', 'lots')) || 0,
+    volume: Number(pick(o, 'lots', 'Lots', 'volume', 'Volume')) || 0,
     netProfit: Math.round(
-      ((Number(pick(o, 'Profit', 'profit')) || 0) +
-        (Number(pick(o, 'Commission', 'commission')) || 0) +
-        (Number(pick(o, 'Swap', 'swap')) || 0)) * 100
+      ((Number(pick(o, 'profit', 'Profit')) || 0) +
+        (Number(pick(o, 'commission', 'Commission')) || 0) +
+        (Number(pick(o, 'swap', 'Swap')) || 0)) * 100
     ) / 100,
     raw: o,
   };
