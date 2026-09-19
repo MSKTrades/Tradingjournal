@@ -7,8 +7,8 @@
  * checkpoint dates) here if the timeline ever shifts — nothing else in the
  * app needs to change.
  */
-export const PROMO_END_DATE = '2026-11-30';
-export const PROMO_END_LABEL = 'November 30, 2026';
+export const PROMO_END_DATE = '2026-12-31';
+export const PROMO_END_LABEL = 'December 31, 2026';
 
 export type PromoCheckpoint = {
   id: string;
@@ -24,20 +24,20 @@ export type PromoCheckpoint = {
  * only sees the November reminder, not a backlog of three. */
 export const REMINDER_CHECKPOINTS: PromoCheckpoint[] = [
   {
-    id: 'promo-2026-09-30',
-    date: '2026-09-30',
+    id: 'promo-2026-10-31',
+    date: '2026-10-31',
     title: 'Quick heads up about your free Pro access',
     body: `You've had full Pro access — unlimited trading accounts, unlimited strategy playbooks — at no cost as part of our launch. That continues through ${PROMO_END_LABEL}. No action needed today; just giving you plenty of notice before anything changes.`,
   },
   {
-    id: 'promo-2026-10-31',
-    date: '2026-10-31',
+    id: 'promo-2026-11-30',
+    date: '2026-11-30',
     title: 'One month left on free Pro access',
     body: `Just a reminder: the free launch access to Pro features ends ${PROMO_END_LABEL}. If you're using more than one trading account or strategy playbook, you'll want to upgrade before then to keep that access without interruption.`,
   },
   {
-    id: 'promo-2026-11-15',
-    date: '2026-11-15',
+    id: 'promo-2026-12-15',
+    date: '2026-12-15',
     title: 'Two weeks left on free Pro access',
     body: `Free access to Pro features wraps up on ${PROMO_END_LABEL}. Upgrade now to lock in unlimited accounts and strategy playbooks so nothing changes for you when the promo ends.`,
   },

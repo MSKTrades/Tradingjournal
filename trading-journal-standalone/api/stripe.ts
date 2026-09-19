@@ -38,7 +38,7 @@ function getAppUrl(req: VercelRequest) {
 // they drive two different things (this one delays the first real charge on
 // a brand-new subscription; that one drives the Pricing page copy and the
 // in-app reminder popups) but are meant to always describe the same date.
-const PROMO_END_DATE = '2026-11-30';
+const PROMO_END_DATE = '2026-12-31';
 
 async function readJsonBody(req: VercelRequest): Promise<any> {
   const raw = await readRawBody(req);

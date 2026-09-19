@@ -6,7 +6,9 @@ import { Trash2 } from 'lucide-react';
 import { Account, Checklist } from '../data/types';
 import { AccountPatch, NewAccountPayload } from '../../lib/accounts';
 import { api, useFetch } from '../../lib/api';
-import BrokerConnect from './BrokerConnect';
+// BrokerConnect import left out on purpose - see the comment further down
+// where it used to be rendered (MetaApi pricing put auto-sync on hold).
+// import BrokerConnect from './BrokerConnect';
 import ProBadge from '../../components/ProBadge';
 import ProNotice from '../../components/ProNotice';
 
@@ -313,13 +315,17 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
 
           {/* Connect a real MT4/MT5 broker account (FTMO, The5ers, or any
               other prop firm/broker on those platforms) so trades sync in
-              automatically instead of being typed by hand. Only shown once
-              the account already exists (same reasoning as the risk limits
-              above - there's nothing to connect yet on a still-unsaved
-              account), and lives in its own component since connecting,
-              syncing, and disconnecting each have their own request/loading
-              state that doesn't belong mixed into this form's. */}
-          {account && <BrokerConnect accountId={account.id} />}
+              automatically instead of being typed by hand. Temporarily
+              hidden (not deleted) - this runs on MetaApi.cloud, and their
+              pricing doesn't pencil out against our own subscription price
+              yet, so auto-sync is on hold in favor of the CSV/statement
+              Import Trades flow (see ImportTradesDialog) as the supported
+              way to get trades in for now. Re-enable by uncommenting the
+              line below once a cheaper broker-sync provider is lined up -
+              nothing else needs to change, BrokerConnect and its API
+              routes (api/accounts.ts's mt_connect/mt_status/mt_sync/
+              mt_disconnect, api/_metaapi.js) are untouched. */}
+          {/* {account && <BrokerConnect accountId={account.id} />} */}
 
           {/* Public Track Record - a shareable, unguessable public URL
               showing a read-only summary of this account's performance to
