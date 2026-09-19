@@ -2,10 +2,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomBytes } from 'node:crypto';
 import { db, withApi, recalcAccountCapital } from './_db.js';
 import { requireUserId, ownsAccount } from './_auth.js';
-import { provisionAccount, getAccountStatus, removeAccount, fetchDealsByTimeRange, groupClosedPositions, toTradeRow } from './_metaapi.js';
+import { connectAccount, getAccountSummary, resumeAccount, pauseAccount, fetchClosedOrders, mapClosedOrder, toTradeRow } from './_indexnano.js';
 
-// --- MT4/MT5 broker sync (FTMO, The5ers, or any other prop firm/broker on
-// MT4 or MT5, via MetaApi.cloud) ---------------------------------------
+// --- MT5 broker sync (FTMO, The5ers, or any other prop firm/broker on
+// MT5, via IndexNano's pay-as-you-go API - see api/_indexnano.js) --------
 //
 // Lives here, as resource= branches on the accounts endpoint, rather than as
 // its own api/*.ts file, because the Vercel Hobby plan caps a project at 12
@@ -15,29 +15,60 @@ import { provisionAccount, getAccountStatus, removeAccount, fetchDealsByTimeRang
 // plain account CRUD above it is.
 //
 // The investor password from the Connect Broker form passes through
-// mt_connect below and into provisionAccount() in _metaapi.js, and nowhere
+// mt_connect below and into connectAccount() in _indexnano.js, and nowhere
 // else - it is never written to a variable that outlives that one request,
 // and never touches the database. See mt_connections in schema.sql.
+//
+// Pro-gating is enforced here, server-side, deliberately unlike every other
+// Pro feature in this codebase (see src/lib/proFeatures.ts's header comment
+// - "nothing is hidden and nothing is blocked today" for everything else,
+// because every other Pro feature costs PipEcho nothing extra to leave
+// open during the free launch promo). Broker sync is different: each
+// connected account costs real IndexNano dollars per hour, so it does NOT
+// go through hasProAccess()/isPromoActive() the way a client-side ProLocked
+// badge would - a Free account, even during the promo, cannot connect a
+// broker here. requireRealProPlan() below checks users.plan directly
+// (only 'pro', written by api/stripe.ts's webhook on a real subscription -
+// trialing/active/past_due all count, see syncSubscriptionToUser there).
+// MAX_BROKER_CONNECTIONS_PER_USER caps it further even for real Pro
+// subscribers, since PipEcho's "unlimited trading accounts" Pro perk would
+// otherwise let one subscriber connect an unbounded number of billed
+// IndexNano accounts against a flat subscription price.
+
+const MAX_BROKER_CONNECTIONS_PER_USER = 2;
+
+async function requireRealProPlan(sql: ReturnType<typeof db>, userId: number) {
+  const rows = await sql.unsafe('SELECT plan FROM users WHERE id = $1', [userId]);
+  if (rows[0]?.plan !== 'pro') {
+    throw new Error('Connect Broker is a Pro feature - upgrade to Pro to sync trades in from a real MT5 account.');
+  }
+}
 
 async function handleMtConnect(sql: ReturnType<typeof db>, userId: number, p: any) {
   const accountId = Number(p?.account_id);
   if (!accountId || !(await ownsAccount(sql, accountId, userId))) throw new Error('Account not found');
   const { login, password, server, platform, name } = p ?? {};
-  if (!login || !password || !server || (platform !== 'mt4' && platform !== 'mt5')) {
-    throw new Error('login, password, server, and platform (mt4 or mt5) are all required');
+  if (!login || !password || !server || platform !== 'mt5') {
+    throw new Error('login, password, server are required, and platform must be mt5 (MT4 auto-sync is not supported right now - use CSV/statement import instead)');
   }
+
+  await requireRealProPlan(sql, userId);
 
   const existing = await sql.unsafe('SELECT id FROM mt_connections WHERE account_id = $1', [accountId]);
   if (existing[0]) throw new Error('This account is already connected to a broker. Disconnect it first to reconnect.');
 
-  const provisioned = await provisionAccount({ login, password, server, platform, name });
-  const state = String(provisioned.state || 'provisioning').toLowerCase();
+  const countRows = await sql.unsafe('SELECT COUNT(*)::int AS n FROM mt_connections WHERE user_id = $1', [userId]);
+  if ((countRows[0]?.n ?? 0) >= MAX_BROKER_CONNECTIONS_PER_USER) {
+    throw new Error(`You can connect up to ${MAX_BROKER_CONNECTIONS_PER_USER} broker accounts. Disconnect one before adding another.`);
+  }
+
+  const connected = await connectAccount({ login, password, server });
 
   const rows = await sql.unsafe(
-    `INSERT INTO mt_connections (account_id, user_id, metaapi_account_id, platform, login, server, state)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, account_id, platform, login, server, state, last_synced_at, created_at`,
-    [accountId, userId, provisioned.id, platform, String(login), String(server), state]
+    `INSERT INTO mt_connections (account_id, user_id, provider, connection_id, platform, login, server, state)
+     VALUES ($1, $2, 'indexnano', $3, $4, $5, $6, 'deployed')
+     RETURNING id, account_id, provider, platform, login, server, state, last_synced_at, created_at`,
+    [accountId, userId, connected.connection_id, platform, String(login), String(server)]
   );
   return rows[0];
 }
@@ -45,27 +76,23 @@ async function handleMtConnect(sql: ReturnType<typeof db>, userId: number, p: an
 async function handleMtStatus(sql: ReturnType<typeof db>, userId: number, accountId: number) {
   if (!(await ownsAccount(sql, accountId, userId))) throw new Error('Account not found');
   const rows = await sql.unsafe(
-    `SELECT id, account_id, metaapi_account_id, platform, login, server, state, region, last_error, last_synced_at, created_at
+    `SELECT id, account_id, connection_id, provider, platform, login, server, state, region, last_error, last_synced_at, created_at
      FROM mt_connections WHERE account_id = $1`,
     [accountId]
   );
   const conn = rows[0];
   if (!conn) return { connected: false };
-  // metaapi_account_id is only needed locally to call MetaApi below - not
+  // connection_id is only needed locally to call IndexNano below - not
   // something the client needs back.
-  const { metaapi_account_id, ...connPublic } = conn;
+  const { connection_id, ...connPublic } = conn;
 
-  // Best-effort refresh from MetaApi - if this fails (e.g. temporary
-  // outage), still return what we last knew locally rather than erroring
-  // the whole status check out.
+  // Best-effort refresh from IndexNano - if this fails (e.g. temporary
+  // outage, or the connection is currently paused between syncs), still
+  // return what we last knew locally rather than erroring the whole status
+  // check out.
   try {
-    const remote = await getAccountStatus(metaapi_account_id);
-    const newState = String(remote.state || conn.state).toLowerCase();
-    const newRegion = remote.region ?? conn.region;
-    if (newState !== conn.state || newRegion !== conn.region) {
-      await sql.unsafe('UPDATE mt_connections SET state = $1, region = $2 WHERE id = $3', [newState, newRegion, conn.id]);
-    }
-    return { connected: true, ...connPublic, state: newState, region: newRegion, connection_status: remote.connectionStatus ?? null };
+    const remote = await getAccountSummary(connection_id);
+    return { connected: true, ...connPublic, connection_status: remote ? 'ok' : null };
   } catch (err: any) {
     return { connected: true, ...connPublic, refresh_error: err.message };
   }
@@ -90,8 +117,19 @@ async function handleMtSync(sql: ReturnType<typeof db>, userId: number, accountI
   // revisiting if that turns out not to be true in practice.
   const endTime = new Date();
   const startTime = new Date(endTime.getTime() - 90 * 24 * 60 * 60 * 1000);
-  const deals = await fetchDealsByTimeRange(conn.metaapi_account_id, conn.region, startTime, endTime);
-  const closedPositions = groupClosedPositions(deals);
+
+  // Resume right before pulling data, pause again right after (in the
+  // finally below) - IndexNano bills per connected hour, so a sync should
+  // never leave the connection deployed longer than the sync itself takes.
+  // See api/_indexnano.js's resumeAccount/pauseAccount doc comments.
+  await resumeAccount(conn.connection_id);
+  let orders: any[];
+  try {
+    orders = await fetchClosedOrders(conn.connection_id, startTime, endTime);
+  } finally {
+    try { await pauseAccount(conn.connection_id); } catch { /* best-effort - see handleMtDisconnect below */ }
+  }
+  const closedPositions = orders.map(mapClosedOrder);
 
   let synced = 0;
   for (const pos of closedPositions) {
@@ -121,7 +159,7 @@ async function handleMtSync(sql: ReturnType<typeof db>, userId: number, accountI
   if (synced > 0) await recalcAccountCapital(sql, accountId);
   await sql.unsafe('UPDATE mt_connections SET last_synced_at = now(), last_error = NULL WHERE id = $1', [conn.id]);
 
-  return { synced, checked: deals.length };
+  return { synced, checked: orders.length };
 }
 
 async function handleMtDisconnect(sql: ReturnType<typeof db>, userId: number, accountId: number) {
@@ -130,9 +168,12 @@ async function handleMtDisconnect(sql: ReturnType<typeof db>, userId: number, ac
   const conn = rows[0];
   if (!conn) throw new Error('This account is not connected to a broker');
 
-  // Best-effort on MetaApi's side - if their API is briefly unavailable, we
-  // still want to be able to unlink locally rather than get stuck.
-  try { await removeAccount(conn.metaapi_account_id); } catch { /* ignore - see above */ }
+  // Best-effort on IndexNano's side - if their API is briefly unavailable,
+  // we still want to be able to unlink locally rather than get stuck. Pause
+  // (rather than a hard delete - IndexNano's docs don't describe one) stops
+  // the metered clock immediately; a paused connection auto-disconnects on
+  // their side after 7 idle days on its own.
+  if (conn.connection_id) { try { await pauseAccount(conn.connection_id); } catch { /* ignore - see above */ } }
   await sql.unsafe('DELETE FROM mt_connections WHERE id = $1', [conn.id]);
 
   // Trades already pulled in stay exactly as they are (source='mt_sync' is

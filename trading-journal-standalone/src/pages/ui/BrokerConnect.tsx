@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Input, Label, Select, Badge } from '../../lib/ui/form';
+import { Link } from 'react-router-dom';
+import { Input, Label, Badge } from '../../lib/ui/form';
 import { Button } from '../../lib/ui/button';
-import { Link2, RefreshCw, Unlink } from 'lucide-react';
+import { Link2, Lock, RefreshCw, Unlink } from 'lucide-react';
 import { api } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
+import { PRO_FEATURES } from '../../lib/proFeatures';
 
 type ConnectionStatus = {
   connected: boolean;
@@ -15,18 +18,56 @@ type ConnectionStatus = {
   refresh_error?: string;
 };
 
-type FormState = { platform: 'mt4' | 'mt5'; login: string; server: string; password: string };
+type FormState = { login: string; server: string; password: string };
 
 function emptyForm(): FormState {
-  return { platform: 'mt5', login: '', server: '', password: '' };
+  return { login: '', server: '', password: '' };
 }
 
 /** Renders inside AccountDialog (only for an existing account) — connects
- * this PipEcho account to a real MT4/MT5 broker account via MetaApi.cloud so
- * trades sync in instead of being typed by hand, and shows/manages that
- * connection once it exists. See api/accounts.ts's mt_connect/mt_status/
- * mt_sync/mt_disconnect and api/_metaapi.js for the server side of this. */
+ * this PipEcho account to a real MT5 broker account via IndexNano's
+ * pay-as-you-go API so trades sync in instead of being typed by hand, and
+ * shows/manages that connection once it exists. See api/accounts.ts's
+ * mt_connect/mt_status/mt_sync/mt_disconnect and api/_indexnano.js for the
+ * server side of this. MT4 isn't offered here — IndexNano is MT5-only; an
+ * MT4 account still goes through CSV/statement import (ImportTradesDialog).
+ *
+ * Pro-gated, but deliberately NOT through ProLocked/hasProAccess like every
+ * other Pro badge in this app — real subscription only (user?.plan ===
+ * 'pro'), even during the free launch promo, because every connected
+ * account costs PipEcho real money via IndexNano. See the PRO_FEATURES
+ * .broker_connect message in proFeatures.ts and requireRealProPlan in
+ * api/accounts.ts (the real, server-side enforcement this UI check mirrors -
+ * a request that skipped this component entirely would still be rejected
+ * there). */
 export default function BrokerConnect({ accountId }: { accountId: number }) {
+  const { user } = useAuth();
+  const isRealPro = user?.plan === 'pro';
+
+  if (!isRealPro) {
+    return (
+      <div className="flex flex-col gap-2 rounded-md border border-input p-3">
+        <div className="flex items-center gap-2">
+          <Link2 className="w-3.5 h-3.5 text-muted-foreground" />
+          <Label>Connect Broker</Label>
+        </div>
+        <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+          <Lock className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-muted-foreground">{PRO_FEATURES.broker_connect.message}</p>
+            <Link to="/billing" className="text-xs font-semibold text-primary hover:underline w-fit">
+              Upgrade to Pro
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <BrokerConnectForm accountId={accountId} />;
+}
+
+function BrokerConnectForm({ accountId }: { accountId: number }) {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -61,7 +102,7 @@ export default function BrokerConnect({ accountId }: { accountId: number }) {
       await api.post('/accounts', {
         resource: 'mt_connect',
         account_id: accountId,
-        platform: form.platform,
+        platform: 'mt5',
         login: form.login.trim(),
         server: form.server.trim(),
         password: form.password,
@@ -145,26 +186,20 @@ export default function BrokerConnect({ accountId }: { accountId: number }) {
       ) : (
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted-foreground">
-            Pull closed trades in automatically from a real MT4/MT5 account (FTMO, The5ers, or any other broker/prop
-            firm running MT4 or MT5) instead of typing them in by hand. Use your account's investor (read-only)
-            password, never the master one — PipEcho passes it once to set up the connection and never stores it.
+            Pull closed trades in automatically from a real MT5 account (FTMO, The5ers, or any other broker/prop firm
+            running MT5) instead of typing them in by hand. Use your account's investor (read-only) password, never
+            the master one — PipEcho passes it once to set up the connection and never stores it. MT4 accounts aren't
+            supported here yet — use CSV/statement import instead. You can connect up to 2 broker accounts.
           </p>
           <div className="grid grid-cols-2 gap-2">
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Platform</Label>
-              <Select value={form.platform} onChange={(e) => set('platform', e.target.value as 'mt4' | 'mt5')}>
-                <option value="mt5">MT5</option>
-                <option value="mt4">MT4</option>
-              </Select>
-            </div>
             <div className="flex flex-col gap-1">
               <Label className="text-xs">Login (account number)</Label>
               <Input value={form.login} onChange={(e) => set('login', e.target.value)} placeholder="e.g. 12345678" />
             </div>
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label className="text-xs">Server</Label>
-            <Input value={form.server} onChange={(e) => set('server', e.target.value)} placeholder="e.g. FTMO-Server or ICMarketsSC-Demo" />
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Server</Label>
+              <Input value={form.server} onChange={(e) => set('server', e.target.value)} placeholder="e.g. FTMO-Server" />
+            </div>
           </div>
           <div className="flex flex-col gap-1">
             <Label className="text-xs">Investor Password</Label>

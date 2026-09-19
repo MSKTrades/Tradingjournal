@@ -794,33 +794,53 @@ CREATE INDEX IF NOT EXISTS idx_chart_drawings_dataset ON chart_drawings (dataset
 CREATE INDEX IF NOT EXISTS idx_chart_drawings_user ON chart_drawings (user_id);
 
 -- One row per PipEcho account connected to a real MT4/MT5 broker account
--- (FTMO, The5ers, or any other prop firm/broker running MT4 or MT5) via
--- MetaApi.cloud, so trades can be pulled in automatically instead of typed
--- by hand. Deliberately, there is no password column here anywhere - the
--- investor password the user types into the "Connect Broker" form is sent
--- once to MetaApi to provision the account and is never written to this
--- database. metaapi_account_id is MetaApi's own reference to that
--- provisioned account, and everything after the initial connect (status
--- checks, syncing deals) is done by looking that id up again, not by
--- re-authenticating with a stored password. Needs both accounts and users
--- to already exist, which is why this lives down here rather than next to
--- the accounts table above - users isn't defined until this point in the
--- file.
+-- (FTMO, The5ers, or any other prop firm/broker running MT4 or MT5).
+-- Deliberately, there is no password column here anywhere - the investor
+-- password the user types into the "Connect Broker" form is sent once to
+-- the provider to provision the account and is never written to this
+-- database. Everything after the initial connect (status checks, syncing
+-- deals) is done by looking connection_id/metaapi_account_id up again, not
+-- by re-authenticating with a stored password. Needs both accounts and
+-- users to already exist, which is why this lives down here rather than
+-- next to the accounts table above - users isn't defined until this point
+-- in the file.
+--
+-- provider/connection_id (added when the broker-sync backend moved from
+-- MetaApi.cloud to IndexNano - see api/_indexnano.js): MetaApi's pricing
+-- ($30-100/mo base subscription before a single account is even connected)
+-- didn't work against PipEcho's own subscription price, so new connections
+-- go through IndexNano's pay-as-you-go MT5 API instead (no base fee, ~$1-2/
+-- connected-account/month at 1-2 syncs/day - see the Connect Broker Pro-
+-- gating comment in api/accounts.ts for the cost reasoning). metaapi_account_id
+-- is left in place (now nullable) rather than removed, in case MetaApi is
+-- ever revisited for MT4 (IndexNano is MT5-only) - api/_metaapi.js is still
+-- there, just unused by the current mt_connect flow.
 CREATE TABLE IF NOT EXISTS mt_connections (
   id                  SERIAL PRIMARY KEY,
   account_id          INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  metaapi_account_id  TEXT NOT NULL,          -- MetaApi's id for the provisioned account
-  platform            TEXT NOT NULL,          -- 'mt4' | 'mt5'
+  metaapi_account_id  TEXT,                    -- MetaApi's id for the provisioned account (legacy/unused - see comment above)
+  provider            TEXT NOT NULL DEFAULT 'indexnano',  -- 'indexnano' | 'metaapi'
+  connection_id       TEXT,                    -- IndexNano's connection_id for this account
+  platform            TEXT NOT NULL,          -- 'mt4' | 'mt5' (IndexNano only accepts 'mt5' today)
   login               TEXT NOT NULL,          -- broker account number (not secret)
   server              TEXT NOT NULL,          -- broker's MT4/5 server name, e.g. "FTMO-Server"
-  region              TEXT,                    -- MetaApi region this account was provisioned into
+  region              TEXT,                    -- MetaApi region this account was provisioned into (legacy - see comment above)
   state               TEXT NOT NULL DEFAULT 'provisioning',   -- provisioning | deployed | error | removed
   last_error          TEXT,
   last_synced_at      TIMESTAMPTZ,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(account_id)  -- one broker connection per PipEcho account, keeps the UI/flow simple for v1
 );
+-- Self-heal for a database where mt_connections already existed before
+-- provider/connection_id were added (CREATE TABLE IF NOT EXISTS is a no-op
+-- against an existing table) - same reasoning as every other ALTER in this
+-- file. metaapi_account_id's NOT NULL is also dropped here since new rows
+-- (provider='indexnano') populate connection_id instead and leave that
+-- column null - safe to run even if it's already nullable.
+ALTER TABLE mt_connections ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'indexnano';
+ALTER TABLE mt_connections ADD COLUMN IF NOT EXISTS connection_id TEXT;
+ALTER TABLE mt_connections ALTER COLUMN metaapi_account_id DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_mt_connections_user ON mt_connections (user_id);
 

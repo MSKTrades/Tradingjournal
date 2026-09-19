@@ -16,7 +16,13 @@ import { useAuth } from '../lib/auth';
 // Launch promo: every signup gets full Pro-level access free through
 // PROMO_END_LABEL (see src/lib/promo.ts — that's also what drives the
 // in-app reminder popups as the date approaches). Nothing here is enforced
-// in the backend, so this is purely the messaging layer.
+// in the backend, so this is purely the messaging layer — EXCEPT Connect
+// Broker (see its line in the Pro feature list below), which is the one
+// feature that costs PipEcho real money per use (IndexNano's per-connected-
+// hour fee). It's the only Pro feature that's actually gated server-side
+// (api/accounts.ts's requireRealProPlan) and the only one that does NOT
+// open up for free during the promo — every other line here really is just
+// messaging today, but that one is real.
 //
 // The Pro feature list below is the source of truth this page pitches —
 // it should stay in sync with src/lib/proFeatures.ts, which is what
@@ -61,6 +67,7 @@ const PLANS = [
       'R-Multiple Distribution',
       'Vision Board (wins/losses pattern + comment narrative analysis)',
       'Chart Replay & Backtesting — unlimited history',
+      'Connect Broker (auto-sync from a real MT5 account, up to 2 accounts)',
       'Priority support',
     ],
   },

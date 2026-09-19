@@ -6,9 +6,7 @@ import { Trash2 } from 'lucide-react';
 import { Account, Checklist } from '../data/types';
 import { AccountPatch, NewAccountPayload } from '../../lib/accounts';
 import { api, useFetch } from '../../lib/api';
-// BrokerConnect import left out on purpose - see the comment further down
-// where it used to be rendered (MetaApi pricing put auto-sync on hold).
-// import BrokerConnect from './BrokerConnect';
+import BrokerConnect from './BrokerConnect';
 import ProBadge from '../../components/ProBadge';
 import ProNotice from '../../components/ProNotice';
 
@@ -313,19 +311,19 @@ export default function AccountDialog({ open, account, onSave, onDelete, onClose
             </div>
           )}
 
-          {/* Connect a real MT4/MT5 broker account (FTMO, The5ers, or any
-              other prop firm/broker on those platforms) so trades sync in
-              automatically instead of being typed by hand. Temporarily
-              hidden (not deleted) - this runs on MetaApi.cloud, and their
-              pricing doesn't pencil out against our own subscription price
-              yet, so auto-sync is on hold in favor of the CSV/statement
-              Import Trades flow (see ImportTradesDialog) as the supported
-              way to get trades in for now. Re-enable by uncommenting the
-              line below once a cheaper broker-sync provider is lined up -
-              nothing else needs to change, BrokerConnect and its API
-              routes (api/accounts.ts's mt_connect/mt_status/mt_sync/
-              mt_disconnect, api/_metaapi.js) are untouched. */}
-          {/* {account && <BrokerConnect accountId={account.id} />} */}
+          {/* Connect a real MT5 broker account (FTMO, The5ers, or any other
+              prop firm/broker running MT5) so trades sync in automatically
+              instead of being typed by hand - now via IndexNano's
+              pay-as-you-go API (see api/_indexnano.js) rather than
+              MetaApi.cloud, whose $30-100/mo base subscription didn't
+              pencil out against our own subscription price. Only shown once
+              the account already exists (same reasoning as the risk limits
+              above - there's nothing to connect yet on a still-unsaved
+              account). BrokerConnect itself handles the real-Pro-only gate
+              (see that file's header comment for why it doesn't just use
+              ProLocked like everything else) and the 2-connections-per-user
+              cap is enforced server-side in api/accounts.ts. */}
+          {account && <BrokerConnect accountId={account.id} />}
 
           {/* Public Track Record - a shareable, unguessable public URL
               showing a read-only summary of this account's performance to

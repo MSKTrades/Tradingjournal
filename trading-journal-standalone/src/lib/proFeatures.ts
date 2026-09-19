@@ -51,7 +51,8 @@ export type ProFeatureKey =
   | 'weekly_digest'
   | 'r_multiple_distribution'
   | 'public_track_record'
-  | 'vision_board';
+  | 'vision_board'
+  | 'broker_connect';
 
 /** What each Pro feature actually is, in plain language — shown in the
  * badge's tooltip and in the fuller ProNotice banner. Keep this list in
@@ -94,5 +95,17 @@ export const PRO_FEATURES: Record<ProFeatureKey, { message: string }> = {
   },
   vision_board: {
     message: 'Vision Board (your wins/losses pattern view, including the timeframe and comment-narrative analysis) is a Pro feature.',
+  },
+  // Deliberately excluded from hasProAccess()'s "everyone gets it during the
+  // promo" rule - see the header comment on Connect Broker's gating in
+  // api/accounts.ts (requireRealProPlan). Every other key above still opens
+  // up for free while the promo runs; this one only opens for a real paid
+  // subscription, because unlike the others it costs PipEcho real money
+  // (IndexNano's per-connected-hour fee) every time it's used, not just
+  // server storage. BrokerConnect.tsx checks user?.plan === 'pro' directly
+  // for this reason, rather than going through ProLocked/hasProAccess like
+  // every other badge in this file.
+  broker_connect: {
+    message: `Connect Broker (auto-sync from a real MT5 account) is a Pro feature, capped at 2 connected accounts per subscriber - and unlike every other Pro feature, it stays Pro-only even during the free launch promo, since it costs us real money per connection.`,
   },
 };
