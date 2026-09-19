@@ -17,7 +17,7 @@
 import type { ReactNode } from 'react';
 import {
   ChecklistVisual, RiskGuardrailVisual, SyncVisual, LedgerVisual, DigestVisual,
-  HtfBiasVisual, TrackRecordVisual, CustomFieldsVisual, BacktestVisual,
+  HtfBiasVisual, TrackRecordVisual, CustomFieldsVisual, BacktestVisual, VisionBoardVisual,
 } from '../ui/featureVisuals';
 import type { FeatureSlide } from '../ui/FeatureCarousel';
 
@@ -72,32 +72,32 @@ export const FEATURE_DETAILS: Record<string, FeatureDetailContent> = {
   },
 
   'chart-replay-backtesting': {
-    intro: "Still being built — not available in the app yet, so here's what it'll do once it ships: pull real historical candle data and let you step through it bar-by-bar, so you can rehearse a setup and see exactly where you would have entered, where you'd have been stopped out, and where it would have run — before a single dollar of live capital is at risk.",
+    intro: "Chart Replay & Backtesting is live for every account: pull real historical candle data (fetched straight from Dukascopy), step through it bar-by-bar, and log practice trades that resolve themselves the instant price actually touches your stop or target — so you see exactly where you would have entered, where you'd have been stopped out, and where it would have run, before a single dollar of live capital is at risk.",
     body: [
-      "Backtesting by scrolling a static chart has a quiet flaw: your eye already knows what happens next, so every entry looks obvious in hindsight. Bar-by-bar replay is the fix — the chart only reveals what a live trader would have actually seen at that moment, which is the only way a backtest result means anything.",
-      "The plan is real historical candles (the same kind of price data you'd pull from TradingView, MT4/5, or Dukascopy), not a synthetic approximation, replayed at a pace you control. Free accounts will get up to 6 months of history to test against; Pro extends that to unlimited — Chart Replay & Backtesting itself will be free for every account once it ships, the history window is the only thing the Pro plan adds.",
-      "Once it's live, a completed replay session will be able to save directly into the Journal as a logged trade — so a backtested setup and a live one sit in the exact same table, gradeable by the exact same Strategy Playbook.",
+      "Backtesting by scrolling a static chart has a quiet flaw: your eye already knows what happens next, so every entry looks obvious in hindsight. Bar-by-bar replay is the fix — the chart only reveals what a live trader would have actually seen at that moment, one candle at a time, which is the only way a backtest result means anything.",
+      "It's built on the same charting engine as the rest of the app (TradingView's charting library), not a simplified stand-in, with real drawing tools and a practice-trade log that sits deliberately separate from your real Journal. Create a session against a fetched dataset, pick a start date and starting capital, then play, pause, or step through candle by candle at whatever speed you want.",
+      "Log a practice trade at any point — direction, entry, SL, TP, position size — and it auto-resolves the moment a later candle's high or low actually touches your stop or target, exactly like a real fill. A separate Trade Replay tab lets you review a session afterward too. Free accounts get up to 6 months of history to fetch and test against; Pro extends that to unlimited — Chart Replay & Backtesting itself is free for every account, the history window is the only thing the Pro plan adds.",
     ],
     howItWorks: [
-      { title: 'Pick a pair and a starting point', desc: 'Real historical candle data, loaded from whatever point in the past you want to rehearse against.' },
-      { title: 'Step forward bar by bar', desc: 'Advance one candle at a time — no peeking at what happens next, the same information a live trader would have had.' },
-      { title: 'Mark a hypothetical entry', desc: 'Place where you would have entered and where you\'d have been stopped out, and watch it play out in real price action.' },
-      { title: 'Log the result', desc: 'A finished replay session will save into the Journal like any other trade, so it\'s gradeable by a Strategy Playbook the same way.' },
+      { title: 'Fetch a dataset', desc: 'Pull real historical candle data for a pair straight from Dukascopy — one click, no manual CSV wrangling.' },
+      { title: 'Create a backtest session', desc: 'Pick a start date and starting capital against that dataset — a session remembers exactly where it left off.' },
+      { title: 'Step or play through candle by candle', desc: 'Advance one bar at a time or hit play at a chosen speed — no peeking at what happens next, the same information a live trader would have had.' },
+      { title: 'Log a practice trade and let it resolve itself', desc: 'Direction, entry, SL, TP, position size — the trade auto-closes the instant a later candle actually touches your stop or target.' },
     ],
     example: {
       title: 'Why this matters for a setup like London Reversal',
-      text: "A strategy that depends on session timing — like waiting for an Asia liquidity sweep before a London entry — is exactly the kind of setup a static chart backtest quietly lies about, because it's easy to eyeball \"yes, that was the sweep\" once you already know price reversed afterward. Bar-by-bar replay removes that hindsight: you only see what's already printed, so a session-based rule actually gets tested under the same blind conditions it'll face live.",
+      text: "A strategy that depends on session timing — like waiting for an Asia liquidity sweep before a London entry — is exactly the kind of setup a static chart backtest quietly lies about, because it's easy to eyeball \"yes, that was the sweep\" once you already know price reversed afterward. Bar-by-bar replay removes that hindsight: you only see what's already printed, and the auto-resolve logic means the win or loss is decided by the same SL/TP touch a live fill would use, not a generous eyeball call after the fact.",
     },
     highlights: [
-      { title: 'Real historical candles', desc: 'Not a synthetic chart — the same kind of price data you\'d pull from TradingView, MT4/5, or Dukascopy, replayed bar by bar.' },
-      { title: 'Rehearse before you risk', desc: 'Mark up a chart, place a hypothetical entry, and see how it would have actually played out — no live capital involved.' },
-      { title: 'Free gets 6 months, Pro gets unlimited', desc: 'Chart Replay & Backtesting itself will be free for every account — the history window will be the only thing the Pro plan extends.' },
+      { title: 'Real historical candles', desc: 'Fetched straight from Dukascopy, not a synthetic approximation, replayed bar by bar at whatever speed you choose.' },
+      { title: 'Trades resolve themselves', desc: 'Log a practice trade and it auto-closes the moment a later candle\'s high or low actually touches your stop or target — no manual grading.' },
+      { title: 'Free gets 6 months, Pro gets unlimited', desc: 'Chart Replay & Backtesting itself is free for every account — the history window is the only thing the Pro plan extends.' },
     ],
     slides: [
-      { kind: 'component', render: () => <BacktestVisual />, caption: "A preview of the replay control once it ships — this feature isn't live in the app yet." },
+      { kind: 'component', render: () => <BacktestVisual />, caption: 'Step through real historical candles bar-by-bar — sign in to try it with real Dukascopy data.' },
     ],
     ctaHref: '/signup',
-    ctaLabel: 'Sign up free for early access',
+    ctaLabel: 'Sign up free to try it',
   },
 
   'performance-analytics': {
@@ -396,5 +396,34 @@ export const FEATURE_DETAILS: Record<string, FeatureDetailContent> = {
     ],
     ctaHref: '/demo/app/journal',
     ctaLabel: 'Try it in the demo',
+  },
+
+  'vision-board': {
+    intro: "Vision Board puts your latest 10 winning trades and latest 10 losing trades side by side, chart screenshots included, and then does the part that's tedious to do by eye: it finds what the wins actually have in common, what the losses actually have in common, and which specific combinations of conditions have been the best and worst performers across your real history.",
+    body: [
+      "Scrolling back through a month of trades looking for a pattern is slow and biased toward whatever's most memorable, not what's most common. Vision Board is built to answer \"what do my wins actually look like\" without that scroll — your most recent winners and losers, screenshots and all, in one place, so the visual pattern (a session, a candle structure, a bias alignment) is something your eyes can actually catch in seconds.",
+      "Underneath the screenshots, a common-patterns pass looks at tags, sessions, weekday, time-of-day bucket, and HTF bias across each column separately, and surfaces anything that shows up in a real majority of that column's trades — not a coincidence in two trades, a genuine pattern with enough sample behind it to mean something.",
+      "A second pass goes further: it tests two- and three-way combinations of conditions — say, London session and a bullish HTF bias, or a specific strategy tag and a specific weekday — against your full trade history, and surfaces the combinations with the best and worst results, each backed by a minimum sample size so a lucky streak of two trades doesn't masquerade as an edge. This is a Pro feature, since it needs a real trading history with real chart screenshots to have anything to show.",
+    ],
+    howItWorks: [
+      { title: 'Log trades with chart screenshots, same as always', desc: 'Nothing extra to do — Vision Board reads from the same trades and screenshots already in your Journal.' },
+      { title: 'See your latest wins and losses side by side', desc: 'The 10 most recent winners and the 10 most recent losers, screenshots included, in two columns.' },
+      { title: 'Common patterns surface automatically', desc: 'Tags, session, weekday, time bucket, and HTF bias — anything that shows up in a real majority of a column\'s trades gets called out.' },
+      { title: 'Best and worst combinations, ranked', desc: 'Two- and three-way condition combinations tested against your full history, each backed by a minimum sample size before it counts.' },
+    ],
+    example: {
+      title: 'In practice: catching a session bias you didn\'t know you had',
+      text: "Say your last 10 losing trades share one thing you hadn\'t consciously noticed: 7 of them were taken outside the London session, with no confirmed break of structure on the entry timeframe. Vision Board's common-patterns pass surfaces exactly that — \"London session · 2/2\" style chips on the pattern that's actually there — turning a vague feeling of \"my outside-session trades don't feel as clean\" into a specific, countable fact backed by your own trade history, not a hunch.",
+    },
+    highlights: [
+      { title: 'Wins and losses, side by side', desc: 'Your latest 10 winning and 10 losing trades with chart screenshots, in one view built for actually looking at.' },
+      { title: 'Patterns found automatically', desc: 'Tags, session, weekday, time bucket, and HTF bias — majority patterns surfaced without scrolling back through weeks of trades by hand.' },
+      { title: 'Best/worst combinations, not just single conditions', desc: 'Two- and three-way condition combinations ranked by real performance, each backed by a minimum sample size.' },
+    ],
+    slides: [
+      { kind: 'component', render: () => <VisionBoardVisual />, caption: 'A compact look at the wins/losses layout — real screenshots appear per-card in the actual app.' },
+    ],
+    ctaHref: '/signup',
+    ctaLabel: 'Sign up free to build your Vision Board',
   },
 };

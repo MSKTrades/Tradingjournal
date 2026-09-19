@@ -139,6 +139,36 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* A small, deliberately lightweight CTA strip - not another full
+          section like the ones below, just a single eye-catching row
+          pointing straight at /demo/app. The live demo is the single
+          highest-converting element on the site per the marketing strategy,
+          so it gets called out twice on this page (here, and again inline
+          in the header nav via LiveDemoNavLink) rather than relying on the
+          hero button alone to carry that weight. */}
+      <section className="px-6 pb-4">
+        <div className="max-w-4xl mx-auto">
+          <Link
+            to="/demo/app"
+            className="group flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-primary/30 bg-gradient-to-r from-primary/10 via-accent to-primary/10 px-6 py-5 hover:border-primary/50 transition-colors"
+          >
+            <div className="flex items-center gap-3 text-center sm:text-left">
+              <span className="relative hidden sm:flex h-2.5 w-2.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-75 animate-ping" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
+              </span>
+              <div>
+                <p className="font-semibold text-sm sm:text-base">See PipEcho running live — no signup needed</p>
+                <p className="text-sm text-muted-foreground">A real app, real sample data, ready in one click.</p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full bg-primary text-primary-foreground text-sm font-semibold px-5 py-2.5 group-hover:opacity-90 transition-opacity">
+              Launch Live Demo <ArrowRight className="w-3.5 h-3.5" />
+            </span>
+          </Link>
+        </div>
+      </section>
+
       <section className="px-6 pb-20">
         <div className="max-w-3xl mx-auto">
           <div className="text-center mb-8">

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   BookOpen, History, Settings2, ListChecks, RefreshCw, Landmark, TrendingUp,
-  Globe, ChevronDown,
+  Globe, Images, ChevronDown,
 } from 'lucide-react';
 import { LogoMark } from '../../components/Logo';
 import { Button } from '../../lib/ui/button';
@@ -16,10 +16,35 @@ import { featureSlug } from '../../lib/featureSlug';
 import ComingSoonBadge from '../../components/ComingSoonBadge';
 
 const NAV_LINKS = [
-  { to: '/demo/app', label: 'Live Demo' },
   { to: '/pricing', label: 'Pricing' },
   { to: '/blog', label: 'Blog' },
 ];
+
+/** Live Demo is deliberately not just another entry in NAV_LINKS - it's the
+ * single highest-converting element on the site (see the Landing page's own
+ * comment on LiveDemoBanner), so the header nav gives it a distinct pill
+ * treatment - a filled/tinted background and a small pulsing "live" dot -
+ * instead of blending in as plain text next to Pricing and Blog. */
+function LiveDemoNavLink() {
+  const location = useLocation();
+  const active = location.pathname.startsWith('/demo/app');
+  return (
+    <Link
+      to="/demo/app"
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold border transition-colors ${
+        active
+          ? 'bg-primary text-primary-foreground border-primary'
+          : 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20'
+      }`}
+    >
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="absolute inline-flex h-full w-full rounded-full bg-current opacity-75 animate-ping" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-current" />
+      </span>
+      Live Demo
+    </Link>
+  );
+}
 
 // The header's "Features" mega-menu (FX Replay-style: two labeled columns,
 // each entry an icon + title + one-line description). Deliberately a
@@ -48,6 +73,7 @@ const FEATURE_MENU: {
       { icon: RefreshCw, title: 'MT4/MT5 Auto-Sync', desc: 'Closed trades import themselves from your broker.' },
       { icon: Landmark, title: 'Prop Firm Ledger & Challenge Simulator', desc: 'Fees, payouts, and a rules stress-test in one place.' },
       { icon: TrendingUp, title: 'Performance Analytics', desc: 'Win rate, R, profit factor — what\'s actually working.' },
+      { icon: Images, title: 'Vision Board', desc: 'Latest wins and losses, side by side, with what they share.' },
       { icon: Globe, title: 'Public Track Record', desc: 'A shareable results page, no login required.' },
     ],
   },
@@ -149,6 +175,7 @@ export function MarketingHeader() {
         </Link>
         <nav className="hidden sm:flex items-center gap-1">
           <FeaturesMenu />
+          <LiveDemoNavLink />
           {NAV_LINKS.map(link => (
             <Link
               key={link.to}

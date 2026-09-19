@@ -221,17 +221,40 @@ export default function Layout({ children, demoMode = false }: { children: React
             {collapsed ? <PanelLeftOpen className="w-[18px] h-[18px] shrink-0" /> : <PanelLeftClose className="w-[18px] h-[18px] shrink-0" />}
             {!collapsed && <span>Collapse</span>}
           </button>
-          <button
-            onClick={handleLogout}
-            title={collapsed ? (demoMode ? 'Exit demo' : (user?.email ? `Log out (${user.email})` : 'Log out')) : undefined}
-            className={cn(
-              'flex items-center gap-3 rounded-md text-sm font-medium text-sidebar-muted hover:text-sidebar-foreground hover:bg-white/5 transition-colors w-full',
-              collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
-            )}
-          >
-            {demoMode ? <DoorOpen className="w-[18px] h-[18px] shrink-0" /> : <LogOut className="w-[18px] h-[18px] shrink-0" />}
-            {!collapsed && <span className="truncate">{demoMode ? 'Exit demo' : (user?.email ?? 'Log out')}</span>}
-          </button>
+          {/* Exit Demo gets a visually distinct treatment from every other
+              sidebar utility button above it (theme/feedback/contact/
+              collapse, all plain sidebar-muted text) - it's the one button
+              here that isn't a settings toggle, it's the way out of the
+              sandbox entirely, so it borrows the same primary/orange tint
+              the "You're in the full demo" banner above the page content
+              already uses, plus a top divider, so it reads as a distinct,
+              deliberate action rather than one more item in a settings
+              list a visitor could easily scroll past. Real logged-in
+              Log out (demoMode false) is untouched. */}
+          {demoMode ? (
+            <button
+              onClick={handleLogout}
+              title={collapsed ? 'Exit demo' : undefined}
+              className={cn(
+                'flex items-center gap-3 rounded-md text-sm font-semibold text-primary bg-primary/10 hover:bg-primary/20 border border-primary/30 transition-colors w-full mt-2',
+                collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
+              )}
+            >
+              <DoorOpen className="w-[18px] h-[18px] shrink-0" />
+              {!collapsed && <span className="truncate">Exit demo</span>}
+            </button>
+          ) : (
+            <button
+              onClick={handleLogout}
+              className={cn(
+                'flex items-center gap-3 rounded-md text-sm font-medium text-sidebar-muted hover:text-sidebar-foreground hover:bg-white/5 transition-colors w-full',
+                collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
+              )}
+            >
+              <LogOut className="w-[18px] h-[18px] shrink-0" />
+              {!collapsed && <span className="truncate">{user?.email ?? 'Log out'}</span>}
+            </button>
+          )}
         </div>
       </aside>
 
@@ -249,6 +272,16 @@ export default function Layout({ children, demoMode = false }: { children: React
             <div className="flex items-center gap-2 shrink-0">
               <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Reset demo</Button>
               <Link to="/signup"><Button size="sm">Sign up free</Button></Link>
+              {/* Repeats the sidebar's Exit demo button here too - this
+                  banner is the one piece of demo chrome guaranteed visible
+                  on every page regardless of scroll position or sidebar
+                  collapse state, so "how do I get out of this" has an
+                  answer right where a visitor's eyes already are. */}
+              <Link to="/" className="hidden sm:block">
+                <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground">
+                  <DoorOpen className="w-3.5 h-3.5" /> Exit demo
+                </Button>
+              </Link>
             </div>
           </div>
         )}

@@ -9,7 +9,7 @@
 // rather than a picture of it. Sample numbers only - nothing here reads
 // from or writes to any account.
 import { useEffect, useRef, useState } from 'react';
-import { Check, RefreshCw, ChevronLeft, ChevronRight, Plus, Copy, Play, Pause, RotateCcw } from 'lucide-react';
+import { Check, RefreshCw, ChevronLeft, ChevronRight, Plus, Copy, Play, Pause, RotateCcw, TrendingUp, TrendingDown } from 'lucide-react';
 import { Button } from '../../lib/ui/button';
 import { Switch, Input, Select } from '../../lib/ui/form';
 
@@ -401,6 +401,67 @@ export function BacktestVisual() {
         ))}
       </div>
       <p className="text-xs text-muted-foreground mt-4">Step through real historical candles bar-by-bar and rehearse an entry before it's ever live.</p>
+    </div>
+  );
+}
+
+// --- Vision Board ------------------------------------------------------------
+// A compact stand-in for the real Wins/Losses side-by-side board
+// (VisionBoard.tsx) - same shape (a shared-pattern chip above a short list
+// of trades) but without real chart screenshots, since a marketing page has
+// no actual account to pull them from. The real page's own empty state for
+// a trade with no screenshot attached ("No screenshot on this trade") is an
+// authentic piece of its UI, not a placeholder invented for this widget -
+// see TradeCard in VisionBoard.tsx.
+const VISION_WINS = [
+  { pair: 'GBPUSD', rr: '+2.7R' },
+  { pair: 'GBPUSD', rr: '+3.3R' },
+];
+const VISION_LOSSES = [
+  { pair: 'GBPUSD', rr: '-1.0R' },
+  { pair: 'EURUSD', rr: '-1.4R' },
+];
+export function VisionBoardVisual() {
+  return (
+    <div className={CARD}>
+      <p className="text-sm font-semibold mb-4">Latest wins and losses, side by side</p>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <div className="flex items-center gap-1.5 mb-2">
+            <TrendingUp className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+            <span className="text-xs font-semibold text-green-700 dark:text-green-400">Wins</span>
+          </div>
+          <span className="inline-block text-[11px] font-medium bg-green-600/10 text-green-700 dark:text-green-400 border border-green-600/20 rounded-full px-2 py-0.5 mb-2">
+            London session &middot; 2/2
+          </span>
+          <div className="flex flex-col gap-1.5">
+            {VISION_WINS.map((t, i) => (
+              <div key={i} className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
+                <span>{t.pair}</span>
+                <span className="text-green-600 dark:text-green-400 font-medium">{t.rr}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="flex items-center gap-1.5 mb-2">
+            <TrendingDown className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />
+            <span className="text-xs font-semibold text-red-600 dark:text-red-400">Losses</span>
+          </div>
+          <span className="inline-block text-[11px] font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 rounded-full px-2 py-0.5 mb-2">
+            No confirmed BOS &middot; 2/2
+          </span>
+          <div className="flex flex-col gap-1.5">
+            {VISION_LOSSES.map((t, i) => (
+              <div key={i} className="flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-xs">
+                <span>{t.pair}</span>
+                <span className="text-red-500 dark:text-red-400 font-medium">{t.rr}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground mt-4">Each card carries the real chart screenshot in the app — the chip above is the pattern they share.</p>
     </div>
   );
 }

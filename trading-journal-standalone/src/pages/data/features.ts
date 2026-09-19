@@ -10,7 +10,7 @@
 // be marketed publicly.
 import {
   BookOpen, History, TrendingUp, Settings2, ListChecks, AlertTriangle, Layers,
-  RefreshCw, Landmark, Mail, Compass, Globe, type LucideIcon,
+  RefreshCw, Landmark, Mail, Compass, Globe, Images, type LucideIcon,
 } from 'lucide-react';
 import { ProFeatureKey } from '../../lib/proFeatures';
 
@@ -90,5 +90,11 @@ export const FEATURES: FeatureSummary[] = [
     icon: Layers,
     title: 'Custom Fields & Tags',
     desc: 'Track the specific things your strategy cares about — confirmation candles, liquidity swept, session structure — without fighting a rigid template.',
+  },
+  {
+    icon: Images,
+    title: 'Vision Board',
+    desc: 'Your latest wins and losses side by side with their chart screenshots, plus what they actually have in common — the pattern your eyes would otherwise have to find by scrolling.',
+    pro: 'vision_board',
   },
 ];
