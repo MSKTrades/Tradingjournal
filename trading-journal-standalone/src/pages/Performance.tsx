@@ -224,15 +224,21 @@ function computeMtfByTimeframe(trades: Trade[]): PeriodRow[] {
 
 // One row per distinct FULL bias signature - every canonical timeframe that
 // was tagged on a trade, combined ("Daily: Bullish, 4H: Bearish, 1H:
-// Bullish"). Only timeframes actually set are part of the signature (an
-// untagged TF isn't assumed neutral - it's just not part of that trade's
-// picture), and a trade with nothing tagged at all doesn't appear here since
-// there's no combination to group it into. Sorted by profit factor
-// (untradeable/no-loss infinite-PF groups pushed to the end rather than
-// first, since a 1-trade 100%-win group topping the list by "infinite"
-// profit factor would be misleading) then by sample size, so the most
-// interesting AND most reliable combinations surface together - trade count
-// is always shown alongside so a thin sample is visible, not hidden.
+// Bullish"), PLUS the trade's own direction (Long/Short) as the leading
+// segment of that signature. Direction matters here because the same MTF
+// bias reads completely differently depending on which way the trade was
+// taken - "everything bearish, traded Short" is a with-trend setup, while
+// "everything bearish, traded Long" is counter-trend - so folding both into
+// one row would hide that distinction rather than reveal it. Only
+// timeframes actually set are part of the signature (an untagged TF isn't
+// assumed neutral - it's just not part of that trade's picture), and a
+// trade with nothing tagged at all doesn't appear here since there's no
+// combination to group it into. Sorted by profit factor (untradeable/no-loss
+// infinite-PF groups pushed to the end rather than first, since a 1-trade
+// 100%-win group topping the list by "infinite" profit factor would be
+// misleading) then by sample size, so the most interesting AND most
+// reliable combinations surface together - trade count is always shown
+// alongside so a thin sample is visible, not hidden.
 function computeMtfCombinations(trades: Trade[]): PeriodRow[] {
   const groups = new Map<string, Trade[]>();
   for (const t of trades) {
@@ -241,7 +247,8 @@ function computeMtfCombinations(trades: Trade[]): PeriodRow[] {
       .filter(tf => trends[tf])
       .map(tf => `${tf}: ${TREND_LABEL[trends[tf]!]}`);
     if (parts.length === 0) continue;
-    const key = parts.join(' · ');
+    const direction = t.direction === 'Short' ? 'Short' : 'Long';
+    const key = [direction, ...parts].join(' · ');
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(t);
   }
@@ -1290,6 +1297,8 @@ export default function Performance() {
                           <TableRow className="text-xs">
                             <TableHead>Combination</TableHead>
                             <TableHead className="text-center">Trades</TableHead>
+                            <TableHead className="text-center">Wins</TableHead>
+                            <TableHead className="text-center">Losses</TableHead>
                             <TableHead className="text-center">Win %</TableHead>
                             <TableHead className="text-center">Avg R</TableHead>
                             <TableHead className="text-center">Profit Factor</TableHead>
@@ -1301,6 +1310,8 @@ export default function Performance() {
                             <TableRow key={r.period} className="text-xs">
                               <TableCell className="font-medium max-w-xs">{r.period}</TableCell>
                               <TableCell className="text-center">{r.total_trades}</TableCell>
+                              <TableCell className="text-center text-green-600 dark:text-green-400">{r.wins}</TableCell>
+                              <TableCell className="text-center text-red-500 dark:text-red-400">{r.losses}</TableCell>
                               <TableCell className="text-center">{r.win_rate}%</TableCell>
                               <TableCell className="text-center">{r.avg_rr !== null ? `${r.avg_rr}R` : '—'}</TableCell>
                               <TableCell className="text-center">{fmtPF(r.profit_factor)}</TableCell>
