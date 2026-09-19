@@ -5,10 +5,20 @@ import { Input } from '../../lib/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../lib/ui/table';
 import { Button } from '../../lib/ui/button';
 import { X, Plus } from 'lucide-react';
-import { BacktestTrade, Tag, plColor } from '../data/types';
+import {
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip as RTooltip,
+} from 'recharts';
+import { BacktestTrade, BacktestSession, Tag, plColor, fmtMoney } from '../data/types';
 
 type Props = {
   trades: BacktestTrade[];
+  // Optional - when present, the trades are known to belong to one session
+  // with real starting capital, and the log adds a $ performance panel
+  // (current balance, $ P&L, $ profit factor, equity curve) alongside the
+  // existing R-based stats, plus Size %/P&L $ columns on the table. Without
+  // it (or for a session with zero closed trades) the log falls back to
+  // exactly its old R-only behavior.
+  session?: BacktestSession | null;
   allTags: Tag[];
   onCloseTrade: (trade: BacktestTrade) => void;
   onDeleteTrade: (id: number) => void;
@@ -115,7 +125,33 @@ function InlineTagEditor({ value, allTags, onChange, onCreateTag }: {
 // styled distinctly from the real Journal/Performance tables (same amber
 // "practice" accent used on the page header) so it never reads as if it's
 // part of the live trading record.
-export default function BacktestLog({ trades, allTags, onCloseTrade, onDeleteTrade, onUpdateTags, onCreateTag }: Props) {
+export default function BacktestLog({ trades, session, allTags, onCloseTrade, onDeleteTrade, onUpdateTags, onCreateTag }: Props) {
+  // $-based performance, computed from each trade's own server-recalculated
+  // gain_loss/end_capital (see recalcSessionCapital in api/_db.js) rather
+  // than re-deriving dollars from rr here - this can never disagree with
+  // what the session picker or Session Settings dialog shows, since they
+  // all read the same recalculated numbers.
+  const dollarStats = useMemo(() => {
+    if (!session) return null;
+    const closed = trades.filter(t => t.result != null && t.gain_loss != null);
+    if (closed.length === 0) {
+      return { currentBalance: session.current_balance, totalPnL: 0, profitFactor: null as number | null, curve: [] as { idx: number; balance: number }[] };
+    }
+    const chronological = [...closed].sort((a, b) => new Date(a.entry_time).getTime() - new Date(b.entry_time).getTime());
+    let totalPnL = 0;
+    let grossWin = 0;
+    let grossLoss = 0;
+    const curve: { idx: number; balance: number }[] = [{ idx: 0, balance: Number(session.initial_capital) }];
+    chronological.forEach((t, i) => {
+      const gl = Number(t.gain_loss ?? 0);
+      totalPnL += gl;
+      if (gl > 0) grossWin += gl; else grossLoss += Math.abs(gl);
+      curve.push({ idx: i + 1, balance: Number(t.end_capital ?? session.current_balance) });
+    });
+    const profitFactor = grossLoss > 0 ? Math.round((grossWin / grossLoss) * 100) / 100 : (grossWin > 0 ? null : 0);
+    return { currentBalance: session.current_balance, totalPnL: Math.round(totalPnL * 100) / 100, profitFactor, curve };
+  }, [trades, session]);
+
   const stats = useMemo(() => {
     const closed = trades.filter(t => t.result != null);
     const wins = closed.filter(t => t.result === 'Profit');
@@ -208,6 +244,52 @@ export default function BacktestLog({ trades, allTags, onCloseTrade, onDeleteTra
         </CardContent></Card>
       </div>
 
+      {dollarStats && (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <Card><CardContent className="pt-3 pb-2.5">
+              <p className="text-xs text-muted-foreground">Current Balance</p>
+              <p className="text-xl font-bold">{fmtMoney(dollarStats.currentBalance)}</p>
+              <p className="text-xs text-muted-foreground">started at {fmtMoney(session!.initial_capital)}</p>
+            </CardContent></Card>
+            <Card><CardContent className="pt-3 pb-2.5">
+              <p className="text-xs text-muted-foreground">Total P&amp;L ($)</p>
+              <p className={`text-xl font-bold ${plColor(dollarStats.totalPnL)}`}>
+                {dollarStats.totalPnL > 0 ? '+' : ''}{fmtMoney(dollarStats.totalPnL)}
+              </p>
+            </CardContent></Card>
+            <Card><CardContent className="pt-3 pb-2.5">
+              <p className="text-xs text-muted-foreground">Profit Factor ($)</p>
+              <p className="text-xl font-bold">{dollarStats.profitFactor == null ? '∞' : dollarStats.curve.length > 1 ? dollarStats.profitFactor.toFixed(2) : '—'}</p>
+            </CardContent></Card>
+          </div>
+
+          {dollarStats.curve.length > 2 && (
+            <Card>
+              <CardContent className="pt-4">
+                <p className="text-sm font-semibold mb-2">Session Equity Curve</p>
+                <div style={{ width: '100%', height: 160 }}>
+                  <ResponsiveContainer>
+                    <AreaChart data={dollarStats.curve} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="backtestEquityFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="currentColor" className="text-primary" stopOpacity={0.35} />
+                          <stop offset="100%" stopColor="currentColor" className="text-primary" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="idx" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={56} tickFormatter={(v) => fmtMoney(v)} domain={['auto', 'auto']} />
+                      <RTooltip formatter={(v: number) => [fmtMoney(v), 'Balance']} labelFormatter={(idx) => idx === 0 ? 'Start' : `After trade ${idx}`} />
+                      <Area type="monotone" dataKey="balance" stroke="currentColor" className="text-primary" strokeWidth={2} fill="url(#backtestEquityFill)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
       <Card>
         <CardContent className="pt-4">
           <p className="text-sm font-semibold mb-3">Trade Log</p>
@@ -225,6 +307,8 @@ export default function BacktestLog({ trades, allTags, onCloseTrade, onDeleteTra
                     <TableHead className="text-right">TP</TableHead>
                     <TableHead className="text-center">Result</TableHead>
                     <TableHead className="text-right">R</TableHead>
+                    <TableHead className="text-right">Size %</TableHead>
+                    {session && <TableHead className="text-right">P&amp;L $</TableHead>}
                     <TableHead>Tags</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
@@ -247,6 +331,14 @@ export default function BacktestLog({ trades, allTags, onCloseTrade, onDeleteTra
                       <TableCell className={`text-right font-mono ${plColor(t.rr)}`}>
                         {t.rr != null ? `${Number(t.rr) > 0 ? '+' : ''}${Number(t.rr).toFixed(2)}R` : '—'}
                       </TableCell>
+                      <TableCell className="text-right font-mono text-muted-foreground">
+                        {t.position_size != null ? `${Number(t.position_size)}%` : '—'}
+                      </TableCell>
+                      {session && (
+                        <TableCell className={`text-right font-mono ${plColor(t.gain_loss)}`}>
+                          {t.gain_loss != null ? `${Number(t.gain_loss) > 0 ? '+' : ''}${fmtMoney(t.gain_loss)}` : '—'}
+                        </TableCell>
+                      )}
                       <TableCell className="min-w-[140px]">
                         <InlineTagEditor value={t.tags ?? []} allTags={allTags} onChange={(tags) => onUpdateTags(t, tags)} onCreateTag={onCreateTag} />
                       </TableCell>

@@ -138,6 +138,82 @@ export async function recalcAccountCapital(sql, accountId) {
   );
 }
 
+// The same idea as recalcAccountCapital above, but for one backtest_sessions
+// run: recomputes the full capital chain for every backtest_trades row in
+// that session, in entry_time order, seeded from the session's
+// initial_capital. Call this after ANY insert/update/delete of a trade in
+// the session, or after the session's initial_capital changes - same
+// "always recompute the whole chain, never trust a client-sent number"
+// discipline as the real accounts.
+//
+// Deliberately simpler than recalcAccountCapital: no trade_number ordering
+// (practice trades don't have one), no mt_sync/csv_import special-casing
+// (there's no broker sync or CSV import into a backtest session, every row
+// here was either logged by hand or auto-resolved by SL/TP), and Breakeven
+// isn't a result this feature produces. A trade still open (result IS NULL)
+// contributes 0 - its start_capital snapshots the running balance at the
+// point it was placed, but nothing is treated as won or lost until it
+// actually resolves, so the running balance a new trade's position size %
+// gets applied against only ever reflects REALIZED P&L, never an open
+// trade's unrealized swing.
+export async function recalcSessionCapital(sql, sessionId) {
+  const sessionRows = await sql.unsafe('SELECT initial_capital FROM backtest_sessions WHERE id = $1', [sessionId]);
+  if (sessionRows.length === 0) return;
+  const startingBalance = Number(sessionRows[0].initial_capital ?? 0);
+
+  const trades = await sql.unsafe(
+    `SELECT id, position_size, result, rr FROM backtest_trades
+     WHERE session_id = $1
+     ORDER BY entry_time ASC, id ASC`,
+    [sessionId]
+  );
+  if (trades.length === 0) return;
+
+  let running = startingBalance;
+  const ids = [];
+  const startCaps = [];
+  const endCaps = [];
+  const gainLosses = [];
+  const gainLossPcts = [];
+
+  for (const t of trades) {
+    const startCap = running;
+    const dollarRisk = startCap * (Number(t.position_size) || 0) / 100;
+    const rrVal = t.rr != null ? Number(t.rr) : null;
+    // Same sign convention as recalcAccountCapital: a Loss's magnitude comes
+    // from the real rr (which this feature always computes as a negative
+    // number on a loss - see the auto-resolve/manual-close effects in
+    // Backtest.tsx), wrapped in -Math.abs(...) so a trade closed before rr
+    // was ever populated still falls back to a flat -dollarRisk rather than
+    // silently contributing 0.
+    const gainLoss = t.result === 'Loss' ? (rrVal != null ? -Math.abs(dollarRisk * rrVal) : -dollarRisk)
+                    : t.result === 'Profit' ? dollarRisk * (rrVal ?? 0)
+                    : 0; // still open - no realized P&L yet
+    const gainLossPct = startCap !== 0 ? (gainLoss / startCap * 100) : 0;
+    const endCap = startCap + gainLoss;
+
+    ids.push(t.id);
+    startCaps.push(Math.round(startCap * 100) / 100);
+    endCaps.push(Math.round(endCap * 100) / 100);
+    gainLosses.push(Math.round(gainLoss * 100) / 100);
+    gainLossPcts.push(Math.round(gainLossPct * 100) / 100);
+
+    running = endCap;
+  }
+
+  await sql.unsafe(
+    `UPDATE backtest_trades AS t SET
+       start_capital = u.start_capital,
+       end_capital = u.end_capital,
+       gain_loss = u.gain_loss,
+       gain_loss_pct = u.gain_loss_pct
+     FROM unnest($1::int[], $2::numeric[], $3::numeric[], $4::numeric[], $5::numeric[])
+       AS u(id, start_capital, end_capital, gain_loss, gain_loss_pct)
+     WHERE t.id = u.id`,
+    [ids, startCaps, endCaps, gainLosses, gainLossPcts]
+  );
+}
+
 export function withApi(fn) {
   return async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');

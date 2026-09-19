@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { TrendingUp, TrendingDown, Clock3, ImageOff, MessageSquare, X, BookOpen } from 'lucide-react';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { Trade, NoteBlock, TIMEFRAME_PRESETS, fmtMoney, fmtNum, plColor } from './data/types';
+import { Trade, NoteBlock, TIMEFRAME_PRESETS, MTF_TIMEFRAMES, TREND_LABEL, getTradeMtfTrends, fmtMoney, fmtNum, plColor } from './data/types';
 import ProBadge from '../components/ProBadge';
 import { stripCommentHtml } from './ui/NotesEditor';
 
@@ -45,6 +45,10 @@ function commonPatterns(trades: Trade[]): Pattern[] {
     if (weekday) bump(`${weekday}s`);
     const timeBucket = tradeTimeBucket(t);
     if (timeBucket) bump(`Executed ${timeBucket}`);
+    // Top-down bias tagged on this trade's screenshots (e.g. "4H: Bearish") -
+    // same treatment as everything else here, so "most of your losses were
+    // tagged 4H: Bearish" can surface as its own chip.
+    for (const bias of mtfBiasLabels(t)) bump(bias);
   }
 
   const threshold = Math.ceil(trades.length * 0.6);
@@ -88,6 +92,22 @@ function tradeSession(t: Trade): string | null {
   return t.closed_session || t.session_in || null;
 }
 
+// Each tagged top-down-bias timeframe on this trade, as "4H: Bearish"-style
+// labels - same MTF_TIMEFRAMES/getTradeMtfTrends this trade's screenshots
+// already carry (see NotesEditor's timeframe+trend picker) that Performance's
+// own MTF Bias tab groups on. Feeding these into commonPatterns/
+// tradeConditions below is what lets "what your wins have in common" and the
+// best/worst combinations panel surface bias on its own (e.g. "4H: Bearish"
+// showing up across most losses) AND bias combined with direction (e.g.
+// "Short + 4H: Bearish") - direction is already one of tradeConditions'
+// atomic conditions, so a bias label sitting alongside it in the same list
+// is enough for the existing 2-/3-way combination engine to find that pairing
+// on its own, with no separate analysis needed.
+function mtfBiasLabels(t: Trade): string[] {
+  const trends = getTradeMtfTrends(t);
+  return MTF_TIMEFRAMES.filter(tf => trends[tf]).map(tf => `${tf}: ${TREND_LABEL[trends[tf]!]}`);
+}
+
 // Weekday from the date the trade was placed (falling back to the date it
 // closed) - deliberately pinned to UTC so a trade logged near midnight
 // doesn't land on a different weekday depending on the viewer's own
@@ -118,9 +138,9 @@ function tradeTimeBucket(t: Trade): string | null {
 
 // --- Best & worst combinations ---------------------------------------------
 //
-// Which exact combinations of direction + session + day + time + tags
-// actually correlate with the highest (and lowest) win rate - e.g. "Short +
-// Tuesday + London session + 18:00–21:00" might genuinely win far more
+// Which exact combinations of direction + session + day + time + tags +
+// top-down bias actually correlate with the highest (and lowest) win rate -
+// e.g. "Short + 4H: Bearish + London session" might genuinely win far more
 // than your average, while some other combination loses far more. An
 // earlier version of this file showed direction/session/day/time as four
 // separate breakdowns; this replaces that with the actual thing that
@@ -176,6 +196,7 @@ function tradeConditions(t: Trade): string[] {
   for (const [group, options] of Object.entries(t.tag_selections ?? {})) {
     for (const opt of options) conds.push(`${group}: ${opt}`);
   }
+  for (const bias of mtfBiasLabels(t)) conds.push(bias);
   return Array.from(new Set(conds)).slice(0, 10);
 }
 
@@ -266,7 +287,7 @@ function ComboList({ combos, tone }: { combos: Combo[]; tone: 'win' | 'loss' }) 
   if (combos.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        Not enough matching trades yet — need at least {MIN_COMBO_SAMPLE} decided trades sharing the exact same combination of direction/session/day/time/tags.
+        Not enough matching trades yet — need at least {MIN_COMBO_SAMPLE} decided trades sharing the exact same combination of direction/session/day/time/tags/bias.
       </p>
     );
   }

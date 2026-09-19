@@ -168,6 +168,13 @@ export type Trade = {
 // timeframe, right after picking a canonical TF - see NotesEditor.tsx.
 export type MtfTrend = 'bullish' | 'bearish' | 'neutral';
 
+// Display label for each MtfTrend value - shared by every place that shows
+// a bias (TradeDetailPanel's pills, Performance's MTF Bias tab, Vision
+// Board's pattern chips and best/worst combinations) so "Bearish" is spelled
+// the same everywhere rather than each screen formatting the raw
+// lowercase value its own way.
+export const TREND_LABEL: Record<MtfTrend, string> = { bullish: 'Bullish', bearish: 'Bearish', neutral: 'Neutral' };
+
 export type NoteBlock =
   | { type: 'text'; value: string }
   | { type: 'image'; url: string; timeframe?: string; trend?: MtfTrend; comment?: string; checklistItemIds?: number[] };
@@ -646,9 +653,33 @@ export type Candle = {
   volume?: number;
 };
 
+// A "run" through one chart_datasets pair - its own starting capital, an
+// optional default risk % that auto-fills each new trade's Position Size
+// (still editable per trade on the log form), and a fixed start_time the
+// replay begins revealing from. You can have several of these against the
+// same pair. current_balance/trade_count/open_count are computed server-side
+// (see listSessions in api/backtest.ts) from the session's trades, not
+// stored columns - always the live number, never something that can drift
+// out of sync with the trades themselves. is_legacy marks the auto-created
+// session(s) a one-time migration wrapped pre-session practice trades into.
+export type BacktestSession = {
+  id: number;
+  dataset_id: number;
+  name: string | null;
+  initial_capital: number;
+  default_risk_pct: number | null;
+  start_time: string;
+  is_legacy: boolean;
+  created_at: string;
+  current_balance: number;
+  trade_count: number;
+  open_count: number;
+};
+
 export type BacktestTrade = {
   id: number;
   dataset_id: number;
+  session_id: number | null;
   direction: string;           // 'Long' | 'Short'
   entry_price: number;
   sl_price: number | null;
@@ -658,6 +689,17 @@ export type BacktestTrade = {
   exit_price: number | null;
   result: string | null;       // 'Profit' | 'Loss' | null while open
   rr: number | null;
+  // % of the session's running balance risked on this trade (same
+  // convention as the real Journal's trades.position_size) - not a lot
+  // size. Auto-filled from the session's default_risk_pct when you start a
+  // new trade, editable before you log it.
+  position_size: number | null;
+  // Capital-chain snapshot around this trade, computed server-side by
+  // recalcSessionCapital - never trust/send these from the client.
+  start_capital: number | null;
+  end_capital: number | null;
+  gain_loss: number | null;
+  gain_loss_pct: number | null;
   notes: string | null;
   tags: string[];              // shares the same reusable tag pool as trades.tags
   created_at: string;

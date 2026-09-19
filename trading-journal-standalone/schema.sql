@@ -645,20 +645,53 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
+-- A "run" through one chart_datasets pair: its own starting capital, an
+-- optional default risk % that auto-fills each new trade's Position Size
+-- (still editable per trade), and a fixed start_time - the candle timestamp
+-- replay begins revealing from. You can have several sessions against the
+-- same pair (different start points, different capital, different risk
+-- profiles to compare) - that's the whole point of pulling this out of the
+-- old one-dataset-at-a-time picker. is_legacy marks the auto-created
+-- catch-all session(s) a one-time migration wraps pre-session practice
+-- trades into (see the migration block further down) so nothing logged
+-- before sessions existed just disappears from the picker.
+CREATE TABLE IF NOT EXISTS backtest_sessions (
+  id                SERIAL PRIMARY KEY,
+  user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  dataset_id        INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
+  name              TEXT,
+  initial_capital   NUMERIC NOT NULL DEFAULT 10000,
+  default_risk_pct  NUMERIC,               -- optional; NULL = no auto-fill, type it per trade
+  start_time        TIMESTAMPTZ NOT NULL,  -- replay reveals candles from here forward
+  is_legacy         BOOLEAN NOT NULL DEFAULT false,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- One row per practice trade you place while stepping/playing through a
--- chart_datasets replay. entry_time/exit_time are candle timestamps *within
--- the replay*, not wall-clock time. result stays NULL while the trade is
--- still open in the replay (i.e. the replay hasn't reached a candle whose
--- high/low touches sl_price or tp_price yet, and you haven't closed it by
--- hand either). user_id scopes each row to whoever placed it - Backtest is
--- open to every signed-in user now, not just one admin account, and without
--- this a shared dataset's practice trades would be visible/editable by
--- anyone who opens that dataset. Lives here (after users, not next to
--- chart_datasets above) because it references users(id) - see the note left
--- in chart_datasets' section.
+-- chart_datasets replay, scoped to one backtest_sessions run. entry_time/
+-- exit_time are candle timestamps *within the replay*, not wall-clock time.
+-- result stays NULL while the trade is still open in the replay (i.e. the
+-- replay hasn't reached a candle whose high/low touches sl_price or
+-- tp_price yet, and you haven't closed it by hand either). user_id scopes
+-- each row to whoever placed it - Backtest is open to every signed-in user
+-- now, not just one admin account, and without this a shared dataset's
+-- practice trades would be visible/editable by anyone who opens that
+-- dataset. Lives here (after users, not next to chart_datasets above)
+-- because it references users(id) - see the note left in chart_datasets'
+-- section.
+--
+-- position_size/start_capital/end_capital/gain_loss/gain_loss_pct mirror
+-- the real `trades` table's capital-chain columns exactly (see the note on
+-- recalcAccountCapital in api/_db.js) - position_size is "% of the
+-- session's running balance risked on this trade" (not a lot size), and the
+-- other four are never trusted from the client, always recomputed
+-- server-side by recalcSessionCapital right after any insert/update/delete
+-- of a trade in the session, walking every trade in entry_time order from
+-- the session's initial_capital.
 CREATE TABLE IF NOT EXISTS backtest_trades (
   id            SERIAL PRIMARY KEY,
   dataset_id    INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
+  session_id    INTEGER REFERENCES backtest_sessions(id) ON DELETE CASCADE,
   user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   direction     TEXT NOT NULL DEFAULT 'Long',   -- 'Long' | 'Short'
   entry_price   NUMERIC NOT NULL,
@@ -669,9 +702,26 @@ CREATE TABLE IF NOT EXISTS backtest_trades (
   exit_price    NUMERIC,
   result        TEXT,                            -- 'Profit' | 'Loss' | null while open
   rr            NUMERIC,                          -- R-multiple actually achieved on close
+  position_size NUMERIC,                          -- % of session running balance risked, e.g. 1 = 1%
+  start_capital NUMERIC,                          -- session balance immediately before this trade
+  end_capital   NUMERIC,                          -- session balance immediately after this trade
+  gain_loss     NUMERIC,                          -- $ result (0/NULL contribution while still open)
+  gain_loss_pct NUMERIC,                          -- gain_loss as a % of start_capital
   notes         TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Self-heal for a database where backtest_trades/backtest_sessions already
+-- existed before this migration - CREATE TABLE IF NOT EXISTS is a no-op
+-- against an existing table, so a database that had backtest_trades before
+-- session_id/position_size/etc. were added here would otherwise never get
+-- them (same history as the user_id self-heal right below this block).
+ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES backtest_sessions(id) ON DELETE CASCADE;
+ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS position_size NUMERIC;
+ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS start_capital NUMERIC;
+ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS end_capital NUMERIC;
+ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS gain_loss NUMERIC;
+ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS gain_loss_pct NUMERIC;
 
 -- user_id is in the CREATE TABLE above, but that's only enough for a truly
 -- fresh database - CREATE TABLE IF NOT EXISTS is a no-op against a database

@@ -69,24 +69,27 @@ function generateTrades(candles: Candle[]): BacktestTrade[] {
   const iso = (i: number) => new Date(at(i).time * 1000).toISOString();
   return [
     {
-      id: 1, dataset_id: 1, direction: 'Long',
+      id: 1, dataset_id: 1, session_id: null, direction: 'Long',
       entry_price: at(100).close, sl_price: at(100).close - 0.002, tp_price: at(100).close + 0.004,
       entry_time: iso(100), exit_time: iso(300), exit_price: at(300).close,
       result: at(300).close > at(100).close ? 'Profit' : 'Loss', rr: 1.4,
+      position_size: null, start_capital: null, end_capital: null, gain_loss: null, gain_loss_pct: null,
       notes: null, tags: [], created_at: iso(100),
     },
     {
-      id: 2, dataset_id: 1, direction: 'Short',
+      id: 2, dataset_id: 1, session_id: null, direction: 'Short',
       entry_price: at(450).close, sl_price: at(450).close + 0.002, tp_price: at(450).close - 0.004,
       entry_time: iso(450), exit_time: iso(480), exit_price: at(480).close,
       result: at(480).close < at(450).close ? 'Profit' : 'Loss', rr: 0.8,
+      position_size: null, start_capital: null, end_capital: null, gain_loss: null, gain_loss_pct: null,
       notes: null, tags: [], created_at: iso(450),
     },
     {
-      id: 3, dataset_id: 1, direction: 'Long',
+      id: 3, dataset_id: 1, session_id: null, direction: 'Long',
       entry_price: at(520).close, sl_price: at(520).close - 0.0015, tp_price: at(520).close + 0.005,
       entry_time: iso(520), exit_time: null, exit_price: null,
       result: null, rr: null,
+      position_size: null, start_capital: null, end_capital: null, gain_loss: null, gain_loss_pct: null,
       notes: null, tags: [], created_at: iso(520),
     },
   ];

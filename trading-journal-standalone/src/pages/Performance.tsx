@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { useFetch } from '../lib/api';
 import { useAccount } from '../lib/accounts';
-import { fmtMoney, plColor, StrategyResult, Trade, Tag, TagGroup, MTF_TIMEFRAMES, MtfTimeframe, MtfTrend, getTradeMtfTrends } from './data/types';
+import { fmtMoney, plColor, StrategyResult, Trade, Tag, TagGroup, MTF_TIMEFRAMES, MtfTimeframe, TREND_LABEL, getTradeMtfTrends } from './data/types';
 import { computeDrawdown } from './data/risk';
 import PerformanceFilterBar, { PerfFilters, emptyFilters, matchesFilters, allTagsOnTrade, TagOption } from './ui/PerformanceFilterBar';
 import RMultipleDistribution from './ui/RMultipleDistribution';
@@ -203,8 +203,6 @@ function statsForGroup(period: string, group: Trade[]): PeriodRow {
     start_capital: 0, end_capital: 0, profit_factor, avg_rr,
   };
 }
-
-const TREND_LABEL: Record<MtfTrend, string> = { bullish: 'Bullish', bearish: 'Bearish', neutral: 'Neutral' };
 
 // One row per (timeframe, trend) pair that at least one trade was actually
 // tagged with - e.g. "4H — Bearish". Simpler and far less data-hungry than

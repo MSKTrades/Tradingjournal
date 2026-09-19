@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getHistoricalRates } from 'dukascopy-node';
 import { put } from '@vercel/blob';
-import { db, withApi } from './_db.js';
+import { db, withApi, recalcSessionCapital } from './_db.js';
 import { getUserFromRequest, isAdminEmail } from './_auth.js';
 
 // Chart Replay / Backtesting: three resources sharing one function (same
@@ -12,10 +12,18 @@ import { getUserFromRequest, isAdminEmail } from './_auth.js';
 //     candles live in Vercel Blob as JSON; this table just tracks
 //     pair/timeframe -> blob URL + metadata so the Backtest page has
 //     something to list and pick from).
+//   resource=sessions — a "run" through one dataset: its own starting
+//     capital, an optional default risk % that auto-fills each new trade's
+//     position size, and a fixed start_time the replay begins revealing
+//     from. You can have several sessions against the same pair. Deleting
+//     one cascades to its trades (ON DELETE CASCADE on backtest_trades.
+//     session_id).
 //   resource=trades   — practice trades you log while stepping/playing
-//     through a dataset's replay. Deliberately separate from the real
-//     `trades` table/API — no account_id, no capital-chain recalculation,
-//     this is rehearsal data, not money.
+//     through a dataset's replay, scoped to one session. Deliberately
+//     separate from the real `trades` table/API — no account_id — but DOES
+//     get its own capital-chain recalculation now (recalcSessionCapital,
+//     mirroring recalcAccountCapital) since a session has real starting
+//     capital and a position-size % per trade, same shape as a real account.
 //   resource=fetch     — pulls real candles directly from Dukascopy's free,
 //     no-signup public historical feed (via dukascopy-node) instead of
 //     requiring a manual CSV export/upload. The Backtest page's "Fetch Data"
@@ -234,11 +242,92 @@ async function fetchChunk(sql: ReturnType<typeof db>, p: any) {
 // scribbles on a shared dataset. chart_datasets itself (the actual candle
 // data) deliberately stays unscoped - that's real market data, the same
 // GBPUSD 1h candles for everyone, so sharing it is correct, not a bug.
-async function listTrades(sql: ReturnType<typeof db>, datasetId: number | null, userId: number) {
-  if (datasetId) {
+// --- Backtest sessions -------------------------------------------------
+
+async function listSessions(sql: ReturnType<typeof db>, userId: number, datasetId: number | null) {
+  const sessions = datasetId
+    ? await sql.unsafe('SELECT * FROM backtest_sessions WHERE user_id = $1 AND dataset_id = $2 ORDER BY created_at DESC', [userId, datasetId])
+    : await sql.unsafe('SELECT * FROM backtest_sessions WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
+  if (sessions.length === 0) return sessions;
+
+  // One extra query for trade counts/current balance across every session
+  // at once, rather than N+1 - the picker needs "42 trades, $10,420" per
+  // row without opening each session individually. current_balance mirrors
+  // recalcSessionCapital's own definition of "balance" (initial_capital +
+  // every closed trade's gain_loss so far) so this list can never disagree
+  // with what recalcSessionCapital itself would compute - COALESCE(SUM(...))
+  // over gain_loss rather than re-deriving it from position_size/rr here.
+  const ids = sessions.map((s: any) => s.id);
+  const stats = await sql.unsafe(
+    `SELECT session_id, COUNT(*)::int AS trade_count,
+            COUNT(*) FILTER (WHERE result IS NULL)::int AS open_count,
+            COALESCE(SUM(gain_loss), 0) AS realized_gain_loss
+     FROM backtest_trades WHERE session_id = ANY($1::int[]) GROUP BY session_id`,
+    [ids]
+  );
+  const statsBySession = new Map(stats.map((s: any) => [s.session_id, s]));
+  return sessions.map((s: any) => {
+    const stat = statsBySession.get(s.id);
+    const initialCapital = Number(s.initial_capital ?? 0);
+    return {
+      ...s,
+      trade_count: stat?.trade_count ?? 0,
+      open_count: stat?.open_count ?? 0,
+      current_balance: Math.round((initialCapital + Number(stat?.realized_gain_loss ?? 0)) * 100) / 100,
+    };
+  });
+}
+
+async function createSession(sql: ReturnType<typeof db>, p: any, userId: number) {
+  const datasetId = Number(p.dataset_id);
+  if (!datasetId || isNaN(datasetId)) throw new Error('dataset_id is required');
+  if (!p.start_time) throw new Error('start_time is required');
+  const initialCapital = p.initial_capital != null && p.initial_capital !== '' ? Number(p.initial_capital) : 10000;
+  if (isNaN(initialCapital) || initialCapital <= 0) throw new Error('initial_capital must be a positive number');
+  const riskPct = p.default_risk_pct != null && p.default_risk_pct !== '' ? Number(p.default_risk_pct) : null;
+  if (riskPct != null && (isNaN(riskPct) || riskPct <= 0)) throw new Error('default_risk_pct must be a positive number');
+
+  const rows = await sql.unsafe(
+    `INSERT INTO backtest_sessions (user_id, dataset_id, name, initial_capital, default_risk_pct, start_time)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [userId, datasetId, p.name?.trim() || null, initialCapital, riskPct, p.start_time]
+  );
+  return { ...rows[0], trade_count: 0, open_count: 0, current_balance: initialCapital };
+}
+
+async function updateSession(sql: ReturnType<typeof db>, id: number, p: any, userId: number) {
+  const initialCapital = p.initial_capital != null && p.initial_capital !== '' ? Number(p.initial_capital) : 10000;
+  if (isNaN(initialCapital) || initialCapital <= 0) throw new Error('initial_capital must be a positive number');
+  const riskPct = p.default_risk_pct != null && p.default_risk_pct !== '' ? Number(p.default_risk_pct) : null;
+  if (riskPct != null && (isNaN(riskPct) || riskPct <= 0)) throw new Error('default_risk_pct must be a positive number');
+
+  const rows = await sql.unsafe(
+    `UPDATE backtest_sessions SET name=$1, initial_capital=$2, default_risk_pct=$3
+     WHERE id=$4 AND user_id=$5
+     RETURNING *`,
+    [p.name?.trim() || null, initialCapital, riskPct, id, userId]
+  );
+  if (rows.length === 0) return null;
+  // initial_capital may have just changed - every trade's start/end capital
+  // in the chain depends on it, so the whole chain needs to be walked again
+  // (same reasoning as accounts.ts recalculating after starting_balance
+  // changes for a real account).
+  await recalcSessionCapital(sql, id);
+  return rows[0];
+}
+
+async function deleteSession(sql: ReturnType<typeof db>, id: number, userId: number) {
+  return sql.unsafe('DELETE FROM backtest_sessions WHERE id = $1 AND user_id = $2 RETURNING id', [id, userId]); // cascades to backtest_trades
+}
+
+// --- Practice trades -----------------------------------------------------
+
+async function listTrades(sql: ReturnType<typeof db>, sessionId: number | null, userId: number) {
+  if (sessionId) {
     return sql.unsafe(
-      'SELECT * FROM backtest_trades WHERE dataset_id = $1 AND user_id = $2 ORDER BY entry_time DESC, id DESC',
-      [datasetId, userId]
+      'SELECT * FROM backtest_trades WHERE session_id = $1 AND user_id = $2 ORDER BY entry_time DESC, id DESC',
+      [sessionId, userId]
     );
   }
   return sql.unsafe('SELECT * FROM backtest_trades WHERE user_id = $1 ORDER BY entry_time DESC, id DESC', [userId]);
@@ -247,17 +336,20 @@ async function listTrades(sql: ReturnType<typeof db>, datasetId: number | null, 
 async function addTrade(sql: ReturnType<typeof db>, p: any, userId: number) {
   const datasetId = Number(p.dataset_id);
   if (!datasetId || isNaN(datasetId)) throw new Error('dataset_id is required');
+  const sessionId = Number(p.session_id);
+  if (!sessionId || isNaN(sessionId)) throw new Error('session_id is required');
   if (p.entry_price == null) throw new Error('entry_price is required');
   if (!p.entry_time) throw new Error('entry_time is required');
 
   const rows = await sql.unsafe(
     `INSERT INTO backtest_trades
-       (dataset_id, direction, entry_price, sl_price, tp_price, entry_time, exit_time, exit_price, result, rr, notes, tags, user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)
+       (dataset_id, session_id, direction, entry_price, sl_price, tp_price, entry_time, exit_time, exit_price, result, rr, position_size, notes, tags, user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15)
      RETURNING *`,
     [
-      datasetId, p.direction ?? 'Long', p.entry_price, p.sl_price ?? null, p.tp_price ?? null,
-      p.entry_time, p.exit_time ?? null, p.exit_price ?? null, p.result ?? null, p.rr ?? null, p.notes ?? null,
+      datasetId, sessionId, p.direction ?? 'Long', p.entry_price, p.sl_price ?? null, p.tp_price ?? null,
+      p.entry_time, p.exit_time ?? null, p.exit_price ?? null, p.result ?? null, p.rr ?? null,
+      p.position_size ?? null, p.notes ?? null,
       // Raw array, not JSON.stringify()'d - the `::jsonb` cast above makes
       // the `postgres` driver serialize it itself; pre-stringifying would
       // double-encode it (see the note in api/trades/index.ts for the bug
@@ -266,23 +358,32 @@ async function addTrade(sql: ReturnType<typeof db>, p: any, userId: number) {
       userId,
     ]
   );
-  return rows[0];
+  // start_capital/end_capital/gain_loss/gain_loss_pct are never taken from
+  // the client - recalcSessionCapital fills them in from the session's
+  // initial_capital and every trade's position_size/result/rr, same
+  // discipline as recalcAccountCapital for real trades.
+  await recalcSessionCapital(sql, sessionId);
+  const fresh = await sql.unsafe('SELECT * FROM backtest_trades WHERE id = $1', [rows[0].id]);
+  return fresh[0];
 }
 
 async function updateTrade(sql: ReturnType<typeof db>, id: number, p: any, userId: number) {
   const rows = await sql.unsafe(
     `UPDATE backtest_trades SET
        direction=$1, entry_price=$2, sl_price=$3, tp_price=$4, entry_time=$5,
-       exit_time=$6, exit_price=$7, result=$8, rr=$9, notes=$10, tags=$11::jsonb
-     WHERE id=$12 AND user_id=$13
+       exit_time=$6, exit_price=$7, result=$8, rr=$9, position_size=$10, notes=$11, tags=$12::jsonb
+     WHERE id=$13 AND user_id=$14
      RETURNING *`,
     [
       p.direction ?? 'Long', p.entry_price, p.sl_price ?? null, p.tp_price ?? null, p.entry_time,
-      p.exit_time ?? null, p.exit_price ?? null, p.result ?? null, p.rr ?? null, p.notes ?? null, p.tags ?? [], id,
-      userId,
+      p.exit_time ?? null, p.exit_price ?? null, p.result ?? null, p.rr ?? null, p.position_size ?? null, p.notes ?? null,
+      p.tags ?? [], id, userId,
     ]
   );
-  return rows[0];
+  if (rows.length === 0) return null;
+  if (rows[0].session_id) await recalcSessionCapital(sql, rows[0].session_id);
+  const fresh = await sql.unsafe('SELECT * FROM backtest_trades WHERE id = $1', [id]);
+  return fresh[0];
 }
 
 const DRAWING_TYPES = ['trendline', 'horizontal', 'rectangle', 'fib'];
@@ -760,11 +861,71 @@ const SMC_ONLY_RESOURCES = new Set([
 // against the database - `ADD COLUMN IF NOT EXISTS` is a no-op once the
 // column exists, so this stays cheap and safe to leave in place
 // permanently rather than something to remember to remove later.
+// One-time backfill for practice trades logged before backtest_sessions
+// existed (session_id IS NULL): wraps each (user, dataset) pair that has
+// orphaned trades into its own auto-created "Legacy" session, then points
+// those trades at it - so old practice-trade history stays visible in the
+// new session picker instead of silently disappearing once the UI stops
+// showing a bare dataset picker. is_legacy=true lets the client show a
+// distinct label/badge for these and skip start_time-based replay
+// positioning (there's no single real "start point" to recover from the
+// old free-form slider, so the client falls back to its normal
+// deepest-reasonable-default heuristic for these instead). Idempotent via
+// the `WHERE session_id IS NULL` filter - once a (user, dataset) pair's
+// trades are migrated, a later call finds nothing left to do for it, so
+// this is safe to run from every cold-started serverless instance without
+// double-wrapping anything.
+async function migrateLegacyBacktestSessions(sql: ReturnType<typeof db>) {
+  const orphaned = await sql.unsafe(
+    `SELECT DISTINCT bt.user_id, bt.dataset_id, cd.pair, MIN(bt.entry_time) OVER (PARTITION BY bt.user_id, bt.dataset_id) AS earliest_entry
+     FROM backtest_trades bt
+     JOIN chart_datasets cd ON cd.id = bt.dataset_id
+     WHERE bt.session_id IS NULL`
+  );
+  for (const row of orphaned) {
+    const sessionRows = await sql.unsafe(
+      `INSERT INTO backtest_sessions (user_id, dataset_id, name, initial_capital, default_risk_pct, start_time, is_legacy)
+       VALUES ($1, $2, $3, 10000, NULL, $4, true)
+       RETURNING id`,
+      [row.user_id, row.dataset_id, `${row.pair} (Legacy)`, row.earliest_entry]
+    );
+    const sessionId = sessionRows[0].id;
+    await sql.unsafe(
+      `UPDATE backtest_trades SET session_id = $1 WHERE session_id IS NULL AND user_id = $2 AND dataset_id = $3`,
+      [sessionId, row.user_id, row.dataset_id]
+    );
+    await recalcSessionCapital(sql, sessionId);
+  }
+}
+
 let _backtestSchemaEnsured = false;
 async function ensureBacktestSchema(sql: ReturnType<typeof db>) {
   if (_backtestSchemaEnsured) return;
   await sql.unsafe(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE`);
   await sql.unsafe(`ALTER TABLE chart_drawings ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE`);
+  // Brand new table (not an ALTER-on-existing-table case) - CREATE TABLE IF
+  // NOT EXISTS genuinely creates it the first time this runs against a
+  // database that predates backtest sessions.
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS backtest_sessions (
+      id                SERIAL PRIMARY KEY,
+      user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      dataset_id        INTEGER NOT NULL REFERENCES chart_datasets(id) ON DELETE CASCADE,
+      name              TEXT,
+      initial_capital   NUMERIC NOT NULL DEFAULT 10000,
+      default_risk_pct  NUMERIC,
+      start_time        TIMESTAMPTZ NOT NULL,
+      is_legacy         BOOLEAN NOT NULL DEFAULT false,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await sql.unsafe(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES backtest_sessions(id) ON DELETE CASCADE`);
+  await sql.unsafe(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS position_size NUMERIC`);
+  await sql.unsafe(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS start_capital NUMERIC`);
+  await sql.unsafe(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS end_capital NUMERIC`);
+  await sql.unsafe(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS gain_loss NUMERIC`);
+  await sql.unsafe(`ALTER TABLE backtest_trades ADD COLUMN IF NOT EXISTS gain_loss_pct NUMERIC`);
+  await migrateLegacyBacktestSessions(sql);
   _backtestSchemaEnsured = true;
 }
 
@@ -785,10 +946,16 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
 
   if (req.method === 'GET') {
     if (resource === 'datasets') { res.status(200).json(await listDatasets(sql)); return; }
-    if (resource === 'trades') {
+    if (resource === 'sessions') {
       const datasetIdParam = req.query.dataset_id;
-      const datasetId = datasetIdParam ? Number(Array.isArray(datasetIdParam) ? datasetIdParam[0] : datasetIdParam) : null;
-      res.status(200).json(await listTrades(sql, datasetId && !isNaN(datasetId) ? datasetId : null, userId));
+      const datasetId = datasetIdParam ? Number(Array.isArray(datasetIdParam) ? datasetIdParam[0] : datasetIdParam) : NaN;
+      res.status(200).json(await listSessions(sql, userId, datasetId && !isNaN(datasetId) ? datasetId : null));
+      return;
+    }
+    if (resource === 'trades') {
+      const sessionIdParam = req.query.session_id;
+      const sessionId = sessionIdParam ? Number(Array.isArray(sessionIdParam) ? sessionIdParam[0] : sessionIdParam) : null;
+      res.status(200).json(await listTrades(sql, sessionId && !isNaN(sessionId) ? sessionId : null, userId));
       return;
     }
     if (resource === 'drawings') {
@@ -826,9 +993,10 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json(await listSmcChartMarkups(sql, pair ? String(pair).trim().toUpperCase() : null, timeframe ? String(timeframe).trim() : null));
       return;
     }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", "smc_candles", "smc_candles_tf", "smc_markups", or "smc_chart_markups"' });
+    res.status(400).json({ error: 'resource must be "datasets", "sessions", "trades", "drawings", "smc_candles", "smc_candles_tf", "smc_markups", or "smc_chart_markups"' });
   } else if (req.method === 'POST') {
     if (resource === 'datasets') { res.status(200).json(await upsertDataset(sql, req.body)); return; }
+    if (resource === 'sessions') { res.status(200).json(await createSession(sql, req.body, userId)); return; }
     if (resource === 'trades') { res.status(200).json(await addTrade(sql, req.body, userId)); return; }
     if (resource === 'fetch') { res.status(200).json(await fetchChunk(sql, req.body)); return; }
     if (resource === 'drawings') { res.status(200).json(await addDrawing(sql, req.body, userId)); return; }
@@ -854,20 +1022,32 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       }
       return;
     }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", "fetch", "drawings", "smc_markups", or "smc_chart_analyze"' });
+    res.status(400).json({ error: 'resource must be "datasets", "sessions", "trades", "fetch", "drawings", "smc_markups", or "smc_chart_analyze"' });
   } else if (req.method === 'PUT') {
     const id = Number(req.query.id);
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
+    if (resource === 'sessions') {
+      const updated = await updateSession(sql, id, req.body, userId);
+      if (!updated) { res.status(404).json({ error: 'Session not found' }); return; }
+      res.status(200).json(updated);
+      return;
+    }
     if (resource === 'trades') {
       const updated = await updateTrade(sql, id, req.body, userId);
       if (!updated) { res.status(404).json({ error: 'Trade not found' }); return; }
       res.status(200).json(updated);
       return;
     }
-    res.status(400).json({ error: 'resource must be "trades"' });
+    res.status(400).json({ error: 'resource must be "sessions" or "trades"' });
   } else if (req.method === 'DELETE') {
     const id = Number(req.query.id);
     if (!id || isNaN(id)) { res.status(400).json({ error: 'id is required' }); return; }
+    if (resource === 'sessions') {
+      const deletedRows = await deleteSession(sql, id, userId);
+      if (deletedRows.length === 0) { res.status(404).json({ error: 'Session not found' }); return; }
+      res.status(200).json({ deleted: deletedRows.length });
+      return;
+    }
     if (resource === 'datasets') {
       // Deleting a dataset wipes the shared candle data (and cascades to
       // every user's practice trades/drawings on it) for everyone who
@@ -880,8 +1060,13 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       return;
     }
     if (resource === 'trades') {
-      const deletedRows = await sql.unsafe('DELETE FROM backtest_trades WHERE id = $1 AND user_id = $2 RETURNING id', [id, userId]);
+      const deletedRows = await sql.unsafe('DELETE FROM backtest_trades WHERE id = $1 AND user_id = $2 RETURNING id, session_id', [id, userId]);
       if (deletedRows.length === 0) { res.status(404).json({ error: 'Trade not found' }); return; }
+      // Removing a trade shifts every later trade's running balance in the
+      // chain, same as deleting a real Journal trade - recalc the rest of
+      // the session rather than leaving the deleted trade's old snapshot
+      // baked into everything after it.
+      if (deletedRows[0].session_id) await recalcSessionCapital(sql, deletedRows[0].session_id);
       res.status(200).json({ deleted: deletedRows.length });
       return;
     }
@@ -901,7 +1086,7 @@ export default withApi(async (req: VercelRequest, res: VercelResponse) => {
       res.status(200).json({ deleted: 1 });
       return;
     }
-    res.status(400).json({ error: 'resource must be "datasets", "trades", "drawings", "smc_markups", or "smc_chart_markups"' });
+    res.status(400).json({ error: 'resource must be "sessions", "datasets", "trades", "drawings", "smc_markups", or "smc_chart_markups"' });
   } else {
     res.status(405).json({ error: 'Method not allowed' });
   }
