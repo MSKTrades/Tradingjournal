@@ -26,6 +26,7 @@
 import type {
   Account, Trade, Strategy, Checklist, ChecklistItem, CustomColumn, Tag, TagGroup,
   TagGroupOption, LedgerEntry, Condition, StrategyResult, DailyRoutineNote, Timeframe, Instrument,
+  NoteBlock, MtfTrend, MtfTimeframe,
 } from '../pages/data/types';
 import { TAG_CONDITION_FIELD } from '../pages/data/types';
 import { showDemoCapToast } from './demoToast';
@@ -390,6 +391,68 @@ function buildSeed(): Store {
   }
   recalcCapital(rawTrades, startingBalance);
 
+  // Every seed trade above leaves time_closed/trade_duration null - fine
+  // for an open trade, but every one of these is actually closed same-day,
+  // so filling in a plausible close time here (a realistic intraday hold,
+  // never past midnight the same day) makes the Journal's Duration column
+  // show a real value on every row instead of a blank one.
+  for (const t of rawTrades) {
+    const [eh, em] = String(t.trade_executed_at).split(':').map(Number);
+    const holdMinutes = 5 + Math.floor(rand() * 240); // 5m to 4h - realistic for a session-scoped intraday trade
+    const closeTotalMinutes = Math.min(23 * 60 + 59, eh * 60 + em + holdMinutes);
+    const ch = Math.floor(closeTotalMinutes / 60);
+    const cm = closeTotalMinutes % 60;
+    t.time_closed = `${String(ch).padStart(2, '0')}:${String(cm).padStart(2, '0')}`;
+    t.trade_duration = calcDuration(t.trade_placed_at, t.trade_executed_at, t.date_closed, t.time_closed);
+  }
+
+  // Chart-screenshot sample data. Vision Board's per-card screenshot, the
+  // Performance page's MTF Bias tab, and the bias/TF pattern chips Vision
+  // Board's common-patterns pass looks for are ALL purely a read of
+  // notes_blocks (see getTradeMtfTrends in data/types.ts) - and every seed
+  // trade above leaves notes_blocks empty, so all three would otherwise sit
+  // in their empty state forever in the demo. Reuses the same 5 real chart
+  // screenshots (Weekly/Daily/4H/1H/15M - an actual multi-timeframe SMC read
+  // on GBPUSD, not a placeholder graphic) across however many trades get
+  // enriched below - exactly like a real trader who pastes the same
+  // "here's my top-down bias today" charts onto more than one trade's notes
+  // rather than re-screenshotting from scratch every time.
+  const MTF_SCREENSHOTS: { timeframe: MtfTimeframe; url: string; comment?: string }[] = [
+    { timeframe: 'Weekly', url: '/screenshots/mtf-weekly.png', comment: 'Weekly structure — premium/discount and the current range.' },
+    { timeframe: 'Daily', url: '/screenshots/mtf-daily.png', comment: 'Daily BOS/CHoCH, marked against premium and discount.' },
+    { timeframe: '4H', url: '/screenshots/mtf-4h.png' },
+    { timeframe: '1H', url: '/screenshots/mtf-1h.png' },
+    { timeframe: '15M', url: '/screenshots/mtf-15m.png', comment: 'Entry timeframe — waiting for the sweep and a confirmed shift before entering.' },
+  ];
+  function enrichWithScreenshots(t: any) {
+    const aligned: MtfTrend = t.direction === 'Long' ? 'bullish' : 'bearish';
+    const conflicting: MtfTrend = aligned === 'bullish' ? 'bearish' : 'bullish';
+    const won = t.profit_loss === 'Profit';
+    // Winners show a clean, aligned top-down read all the way to the entry
+    // timeframe. Losers show the same higher-timeframe read but with the
+    // entry timeframe (1H/15M) tagged AGAINST it - a realistic "traded into
+    // a level without confirmation" story for why that one lost, which is
+    // exactly the kind of thing Vision Board's pattern panel is built to
+    // surface (e.g. "losses: 15M Bearish" showing up as a common pattern).
+    t.notes_blocks = MTF_SCREENSHOTS.map(({ timeframe, url, comment }): NoteBlock => {
+      const trend: MtfTrend = won || (timeframe !== '1H' && timeframe !== '15M') ? aligned : conflicting;
+      return { type: 'image', url, timeframe, trend, comment };
+    });
+  }
+  // Vision Board reads the LATEST 10 winning and LATEST 10 losing trades
+  // independently (see VisionBoard.tsx) - walking rawTrades from the end
+  // (already in chronological order) and enriching the first 10 of each
+  // outcome found guarantees both of those columns get real screenshots,
+  // which a flat "just the last 10 rows" wouldn't (a streak of one outcome
+  // near the end could otherwise leave the other column empty).
+  let winsLeft = 10;
+  let lossesLeft = 10;
+  for (let i = rawTrades.length - 1; i >= 0 && (winsLeft > 0 || lossesLeft > 0); i--) {
+    const t = rawTrades[i];
+    if (t.profit_loss === 'Profit' && winsLeft > 0) { enrichWithScreenshots(t); winsLeft--; }
+    else if (t.profit_loss === 'Loss' && lossesLeft > 0) { enrichWithScreenshots(t); lossesLeft--; }
+  }
+
   // A few Prop Firm Ledger entries (Summary's PropPnlLedger.tsx widget) -
   // a challenge fee near the start of the trading history, then two payouts
   // as it progressed, so "Ready to try the ledger in the demo" (the
@@ -450,6 +513,31 @@ let store = buildSeed();
 // one's start_capital = the previous one's end_capital, gain_loss derived
 // from position_size (% risk) x RR Achieved, sign/magnitude per
 // profit_loss. Mutates the array's objects in place.
+// Mirrors api/trades/index.ts's calcDuration exactly (see that file - kept
+// deliberately duplicated rather than imported, same reasoning as every
+// other calculation in this module) - needed here because the seed trades
+// below used to leave time_closed/trade_duration both null, which made the
+// Journal's Duration column look broken (blank on every single row) rather
+// than just "this demo trade doesn't have one", the same complaint a real
+// user would have about their own un-timed trades.
+function calcDuration(
+  placedDate: string | null, execTime: string | null,
+  closedDate: string | null, closeTime: string | null
+): string | null {
+  if (!placedDate || !closedDate) return null;
+  try {
+    const diffMs = new Date(`${closedDate}T${closeTime ?? '00:00'}`).getTime()
+                 - new Date(`${placedDate}T${execTime ?? '00:00'}`).getTime();
+    if (isNaN(diffMs) || diffMs < 0) return null;
+    const d = Math.floor(diffMs / 86400000);
+    const h = Math.floor((diffMs % 86400000) / 3600000);
+    const m = Math.floor((diffMs % 3600000) / 60000);
+    if (d > 0) return `${d}d ${h}h ${m}m`;
+    if (h > 0) return `${h}h ${m}m`;
+    return m > 0 ? `${m}m` : '< 1m';
+  } catch { return null; }
+}
+
 function recalcCapital(trades: any[], startingBalance: number) {
   const sorted = [...trades].sort((a, b) => {
     const an = a.trade_number ?? 999999, bn = b.trade_number ?? 999999;

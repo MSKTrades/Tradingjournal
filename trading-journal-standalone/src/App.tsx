@@ -117,16 +117,18 @@ function AuthedShell({ children }: { children: React.ReactNode }) {
 }
 
 /** The public, no-signup "full demo" at /demo/app/* - the exact same
- * Summary/Journal/Performance/Strategies/Checklists page components as the
- * real, logged-in app, unmodified, wired to an in-memory fake backend
- * instead of the real API (see src/lib/demoMode.ts + demoBackend.ts, and
- * api.ts's request() for the one interception point that makes this work).
- * AccountProvider is the real one - its GET /accounts call gets routed to
- * the fake backend automatically, same as every other call any of these
- * pages make - so there's no separate "demo account context" to keep in
- * sync with the real one. Layout's demoMode prop swaps in the sandbox nav
- * (no Backtest/Challenge Simulator - the fake backend doesn't cover those)
- * and the "you're in a demo" banner + Exit Demo button in place of Log out.
+ * Summary/Journal/Performance/Strategies/Checklists/Vision Board/Challenge
+ * Simulator page components as the real, logged-in app, unmodified, wired
+ * to an in-memory fake backend instead of the real API (see
+ * src/lib/demoMode.ts + demoBackend.ts, and api.ts's request() for the one
+ * interception point that makes this work). AccountProvider is the real
+ * one - its GET /accounts call gets routed to the fake backend
+ * automatically, same as every other call any of these pages make - so
+ * there's no separate "demo account context" to keep in sync with the real
+ * one. Layout's demoMode prop swaps in the sandbox nav (no Backtest/Billing
+ * - see Layout.tsx's DEMO_HIDDEN comment for why those two specifically
+ * stay out) and the "you're in a demo" banner + Exit Demo button in place
+ * of Log out.
  * Deliberately NOT wrapped in Protected - like Landing/Pricing/Blog, this
  * needs no login at all. */
 function DemoShell({ children }: { children: React.ReactNode }) {
@@ -213,10 +215,17 @@ export default function App() {
                 inside DemoShell instead of AuthedShell+Protected. */}
             <Route path="/demo/app" element={<DemoShell><Summary /></DemoShell>} />
             <Route path="/demo/app/journal" element={<DemoShell><Journal /></DemoShell>} />
+            <Route path="/demo/app/vision-board" element={<DemoShell><VisionBoard /></DemoShell>} />
             <Route path="/demo/app/performance" element={<DemoShell><Performance /></DemoShell>} />
             <Route path="/demo/app/strategies" element={<DemoShell><Strategies /></DemoShell>} />
             <Route path="/demo/app/strategies/:id" element={<DemoShell><StrategyDetail /></DemoShell>} />
             <Route path="/demo/app/checklists" element={<DemoShell><Checklists /></DemoShell>} />
+            {/* Challenge Simulator only ever reads /trades and /summary
+                (see Layout.tsx's DEMO_HIDDEN comment) and runs its rules
+                simulation entirely client-side against whatever trade
+                history it's handed - no real backend feature the fake demo
+                store doesn't already cover, unlike Backtest below. */}
+            <Route path="/demo/app/challenge-simulator" element={<DemoShell><ChallengeSimulator /></DemoShell>} />
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<BlogPost />} />
             {/* Public, unauthenticated read-only view of an account's

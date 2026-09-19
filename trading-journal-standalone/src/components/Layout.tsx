@@ -56,15 +56,18 @@ const ADMIN_NAV_ITEM = { to: 'admin', label: 'Admin', icon: ShieldCheck, disable
 // back this up route-side regardless of what the sidebar shows.
 const PLAYBOOKS_NAV_ITEM = { to: 'playbooks', label: 'Playbooks', icon: Megaphone, disabled: false };
 
-// Nav items that need a real backend feature the demo sandbox doesn't mock
-// (real historical candles for Backtest; ledger/rules simulation state for
-// Challenge Simulator) - hidden from the demo sidebar rather than shown and
-// left to error. Vision Board is hidden here too, not because the demo
-// backend can't support it (it easily could - it just reads the same
-// /trades data every other demo page already uses), but because the seed
-// trades don't carry screenshots, so the page would only ever show empty
-// placeholders - not a useful preview of what it actually does.
-const DEMO_HIDDEN = new Set(['backtest', 'challenge-simulator', 'vision-board', 'billing']);
+// Vision Board and Challenge Simulator both turned out to be fully
+// demoable - Challenge Simulator only ever reads /trades and /summary (the
+// same generic demo endpoints every other page already uses) and runs its
+// rules simulation entirely client-side, and Vision Board is purely a read
+// of the same /trades data plus notes_blocks screenshots (see demoBackend's
+// seed-trade enrichment for where those come from). Only Backtest and
+// Billing stay hidden: Backtest needs a real Dukascopy-fetched candle
+// dataset (real per-request cost, not something safe to expose to
+// anonymous visitors), and Billing has no real Stripe customer behind a
+// demo session to bill. See App.tsx's demo route list for the matching
+// /demo/app/* routes.
+const DEMO_HIDDEN = new Set(['backtest', 'billing']);
 
 function navHref(base: string, to: string): string {
   if (to === '') return base || '/';

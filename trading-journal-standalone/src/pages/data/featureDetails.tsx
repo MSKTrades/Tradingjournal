@@ -94,7 +94,8 @@ export const FEATURE_DETAILS: Record<string, FeatureDetailContent> = {
       { title: 'Free gets 6 months, Pro gets unlimited', desc: 'Chart Replay & Backtesting itself is free for every account — the history window is the only thing the Pro plan extends.' },
     ],
     slides: [
-      { kind: 'component', render: () => <BacktestVisual />, caption: 'Step through real historical candles bar-by-bar — sign in to try it with real Dukascopy data.' },
+      { kind: 'image', src: '/screenshots/backtest-real.png', alt: 'PipEcho Chart Replay & Backtesting page mid-replay on GBPUSD, showing real candlesticks, an EMA overlay, and the replay controls', caption: 'Real candles, real drawing tools, step or play through them bar-by-bar.' },
+      { kind: 'component', render: () => <BacktestVisual />, caption: 'Log a practice trade at any point and it auto-resolves the instant a later candle touches your stop or target.' },
     ],
     ctaHref: '/signup',
     ctaLabel: 'Sign up free to try it',
