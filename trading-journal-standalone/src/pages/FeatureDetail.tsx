@@ -8,6 +8,7 @@ import { featureSlug } from '../lib/featureSlug';
 import { useDocumentMeta } from '../lib/useDocumentMeta';
 import ProBadge from '../components/ProBadge';
 import ComingSoonBadge from '../components/ComingSoonBadge';
+import { FeatureCarousel } from './ui/FeatureCarousel';
 
 /** One detail page per entry in FEATURES, reached from the Landing page's
  * feature grid and the header's Features mega-menu (both link to
@@ -47,7 +48,6 @@ export default function FeatureDetail() {
   const Icon = feature.icon;
   const prev = FEATURES[(index - 1 + FEATURES.length) % FEATURES.length];
   const next = FEATURES[(index + 1) % FEATURES.length];
-  const Visual = detail.visual;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -76,24 +76,46 @@ export default function FeatureDetail() {
 
       <section className="px-6 py-10">
         <div className="max-w-4xl mx-auto">
-          {detail.screenshot ? (
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <img
-                src={detail.screenshot.src}
-                alt={detail.screenshot.alt}
-                className="w-full h-auto"
-                loading="lazy"
-              />
-            </div>
-          ) : Visual ? (
-            <Visual />
-          ) : null}
+          <FeatureCarousel slides={detail.slides} />
         </div>
       </section>
 
       <section className="px-6 py-10">
-        <div className="max-w-4xl mx-auto">
-          <p className="text-[15px] leading-relaxed text-foreground/90 max-w-2xl">{detail.intro}</p>
+        <div className="max-w-2xl mx-auto flex flex-col gap-4">
+          <p className="text-[15px] leading-relaxed text-foreground/90">{detail.intro}</p>
+          {detail.body.map((p, i) => (
+            <p key={i} className="text-[15px] leading-relaxed text-foreground/80">{p}</p>
+          ))}
+        </div>
+      </section>
+
+      {detail.howItWorks.length > 0 && (
+        <section className="px-6 py-10 bg-card/30 border-y border-border">
+          <div className="max-w-2xl mx-auto">
+            <h2 className="text-lg font-semibold tracking-tight mb-6">How it works</h2>
+            <ol className="flex flex-col gap-5">
+              {detail.howItWorks.map((step, i) => (
+                <li key={step.title} className="flex gap-4">
+                  <span className="w-7 h-7 rounded-full bg-primary/10 text-primary text-sm font-bold flex items-center justify-center shrink-0 mt-0.5">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">{step.title}</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed mt-0.5">{step.desc}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+      )}
+
+      <section className="px-6 py-10">
+        <div className="max-w-2xl mx-auto">
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-6">
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary mb-2">{detail.example.title}</p>
+            <p className="text-sm leading-relaxed text-foreground/90">{detail.example.text}</p>
+          </div>
         </div>
       </section>
 
