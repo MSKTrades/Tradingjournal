@@ -315,13 +315,25 @@ export default function Backtest() {
                 disabled={datasets.length === 0}
               >
                 {datasets.length === 0 && <option value="">No datasets uploaded yet</option>}
-                {datasets.map(d => (
-                  <option key={d.id} value={d.id}>{d.pair} · {d.timeframe} ({d.candle_count.toLocaleString()} candles)</option>
-                ))}
+                {datasets.map(d => {
+                  // The chart can already display any coarser timeframe from
+                  // a single fetched base (see resample.ts/tvDatafeed.ts) -
+                  // so in the common case there's exactly one dataset per
+                  // pair and the timeframe/candle-count is internal plumbing
+                  // nobody picking a pair needs to see. Only fall back to the
+                  // fuller "pair · tf" label when more than one dataset
+                  // exists for the same pair (e.g. leftover rows fetched
+                  // before that resampling existed) - that's the one case
+                  // where the timeframe is actually needed to tell them apart.
+                  const samePair = datasets.filter(o => o.pair === d.pair);
+                  const label = samePair.length > 1 ? `${d.pair} · ${d.timeframe}` : d.pair;
+                  return <option key={d.id} value={d.id}>{label}</option>;
+                })}
               </Select>
             </div>
             {selectedDataset && (
               <p className="text-xs text-muted-foreground">
+                {selectedDataset.timeframe} base &middot; {selectedDataset.candle_count.toLocaleString()} candles &middot;{' '}
                 {selectedDataset.start_time && new Date(selectedDataset.start_time).toLocaleDateString()} &rarr; {selectedDataset.end_time && new Date(selectedDataset.end_time).toLocaleDateString()}
               </p>
             )}
